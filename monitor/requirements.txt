@@ -1,0 +1,7 @@
+PyQt6==6.7.0
+colorlog
+opencv-python
+psutil
+pyzmq
+nidaqmx
+pyqtgraph
