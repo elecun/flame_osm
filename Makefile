@@ -99,6 +99,11 @@ uvc_camera_grabber.comp:	$(BUILDDIR)uvc.camera.grabber.o
 $(BUILDDIR)uvc.camera.grabber.o:	$(CURRENT_DIR)/components/uvc.camera.grabber/uvc.camera.grabber.cc
 									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
 
+kvaser_can_controller.comp:	$(BUILDDIR)kvaser.can.controller.o
+							$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lcanlib
+$(BUILDDIR)kvaser.can.controller.o:	$(CURRENT_DIR)/components/kvaser.can.controller/kvaser.can.controller.cc
+									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
+
 
 all : flame
 

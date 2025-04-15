@@ -1,0 +1,32 @@
+{
+    "rt_cycle_ns" : 1000000000,
+    "verbose" : 1,
+
+    "parameters":{
+        "use_image_stream_monitoring":true,
+        "use_image_stream":true,
+        "cameras":[
+            {"id":0, "name":"", "device":"dev/video0"}
+        ]
+    },
+
+    "dataport":{
+        "status" : {
+            "transport" : "tcp",
+            "host" : "*",
+            "port" : 5101,
+            "socket_type" : "pub",
+            "queue_size" : 1000
+        },
+        "can_ch1_in" : {
+            "transport" : "inproc",
+            "socket_type" : "pull",
+            "queue_size" : 1000
+        },
+        "can_ch2_in" : {
+            "transport" : "inproc",
+            "socket_type" : "pull",
+            "queue_size" : 1000
+        }
+    }
+}

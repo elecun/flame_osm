@@ -13,6 +13,7 @@
 #define FLAME_KVASER_CAN_CONTROLLER_HPP_INCLUDED
 
 #include <flame/component/object.hpp>
+#include <canlib.h>
 
 class kvaser_can_controller : public flame::component::object {
 public:
@@ -25,8 +26,9 @@ kvaser_can_controller() = default;
     void on_close() override;
     void on_message() override;
 
-
 private:
+    canHandle _handle { canINVALID_HANDLE };
+    canStatus _status { canOK };
 
 }; /* class */
 

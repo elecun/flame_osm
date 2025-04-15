@@ -5,6 +5,8 @@
         "string_view": "cpp",
         "ranges": "cpp",
         "span": "cpp",
-        "atomic": "cpp"
+        "atomic": "cpp",
+        "new": "cpp",
+        "iostream": "cpp"
     }
 }
