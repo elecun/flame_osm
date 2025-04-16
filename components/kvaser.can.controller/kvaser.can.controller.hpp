@@ -28,7 +28,7 @@ kvaser_can_controller() = default;
 
 private:
     canHandle _handle { canINVALID_HANDLE };
-    canStatus _status { canOK };
+    int _can_channels = {0};
 
 }; /* class */
 

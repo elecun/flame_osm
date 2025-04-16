@@ -1,13 +1,10 @@
 {
-    "rt_cycle_ns" : 1000000000,
+    "rt_cycle_ns" : 2000000000,
     "verbose" : 1,
 
     "parameters":{
-        "use_image_stream_monitoring":true,
-        "use_image_stream":true,
-        "cameras":[
-            {"id":0, "name":"", "device":"dev/video0"}
-        ]
+        "use_channel":0,
+        "can_bitrate": 500000
     },
 
     "dataport":{

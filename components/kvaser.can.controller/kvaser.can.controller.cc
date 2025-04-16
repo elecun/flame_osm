@@ -23,82 +23,85 @@ bool kvaser_can_controller::on_init(){
         /* read profile */
         json parameters = get_profile()->parameters();
 
+        /* CAN device initialization */
         canInitializeLibrary();
         
         /* find channels */
-        int n_channels = 0;
-        _status = canGetNumberOfChannels(&n_channels);
-
-        std::cout << "Found " << n_channels << " Kvaser CAN channel(s):" << std::endl;
-    std::cout << "------------------------------------------------------------------" << std::endl;
-    std::cout << std::left << std::setw(5) << "Ch"
-              << std::setw(25) << "Device Name"
-              << std::setw(15) << "Serial No."
-              << std::setw(15) << "EAN/UPC"
-              << std::setw(10) << "Ch On Card"
-              << std::endl;
-    std::cout << "------------------------------------------------------------------" << std::endl;
-
-    // 3. 각 채널 정보 가져오기 및 출력
-    for (int i = 0; i < n_channels; ++i) {
-        char deviceName[128] = {0};
-        char eanUpcStr[20] = {0}; // EAN/UPC는 문자열로도 가져올 수 있음
-        long serialNumber = 0;
-        long long eanUpcNum = 0;
-        int channelOnCard = 0;
-        unsigned int devFlags = 0;
-
-        // 채널 이름 가져오기
-        _status = canGetChannelData(i, canCHANNELDATA_DEVDESCR_ASCII, deviceName, sizeof(deviceName));
-        if (_status != canOK) {
-           // 이름 가져오기 실패 시 대체 이름 사용 또는 에러 처리
-           snprintf(deviceName, sizeof(deviceName), "Unknown/Error");
-           // printCanlibError(_status); // 각 항목 실패 시 에러 출력 원하면 주석 해제
+        canStatus _status { canOK };
+        _status = canGetNumberOfChannels(&_can_channels);
+        if(_status != canOK){
+            logger::error("[{}] Cannot find CAN channel. Error code : {}", get_name(), (int)_status);
+            return false;
         }
+        logger::info("[{}] Found {} CAN channel(s) ", get_name(), _can_channels);
 
-        // 시리얼 번호 가져오기 (정수형)
-        _status = canGetChannelData(i, canCHANNELDATA_CARD_SERIAL_NO, &serialNumber, sizeof(serialNumber));
-         if (_status != canOK) {
-            serialNumber = 0; // 실패 시 0으로 설정
-            // printCanlibError(_status);
+        /* show channel info. */
+        logger::info("---------------------------------------------------------------------");
+        for(int i=0; i<_can_channels; i++){
+            char device_name[128] = {0};
+            int ch_on_card = 0;
+
+            // read channel name
+            _status = canGetChannelData(i, canCHANNELDATA_DEVDESCR_ASCII, device_name, sizeof(device_name));
+            if (_status != canOK) {
+                logger::warn("Channel {} name retrieval failed. Error code : {}", i, (int)_status);
+            }
+            string str_device_name(device_name);
+
+            // read can channel
+            _status = canGetChannelData(i, canCHANNELDATA_CHAN_NO_ON_CARD, &ch_on_card, sizeof(ch_on_card));
+            if (_status != canOK) {
+                ch_on_card = -1;
+                logger::warn("Channel {} on card retrieval failed. Error code : {}", i, (int)_status);
+            }
+        
+            logger::info("CAN Channel {}: Device Name: {}\tDevice Channel: {}", i, device_name, ch_on_card);
+   
         }
+        logger::info("---------------------------------------------------------------------");
 
-        // EAN/UPC 번호 가져오기 (long long)
-        // 주의: EAN/UPC는 하드웨어에 따라 없을 수도 있음
-        _status = canGetChannelData(i, canCHANNELDATA_CARD_UPC_NO, &eanUpcNum, sizeof(eanUpcNum));
-        if (_status != canOK) {
-            eanUpcNum = 0; // 실패 시 0으로 설정
-            // printCanlibError(_status);
-            snprintf(eanUpcStr, sizeof(eanUpcStr), "N/A");
-        } else {
-            snprintf(eanUpcStr, sizeof(eanUpcStr), "%lld", eanUpcNum);
+        /* use channel */
+        if(parameters.contains("use_channel")){
+            int ch = parameters.value("use_channel", 0);
+            _handle = canOpenChannel(ch, canOPEN_ACCEPT_VIRTUAL);
+            if(_handle<0){
+                logger::error("[{}] Cannot open channel {}. Error code : {}", get_name(), ch, (int)_handle);
+
+                char err_buf[100];
+                canGetErrorText((canStatus)_handle, err_buf, sizeof(err_buf));
+                logger::error("[{}] Error : {}", get_name(), err_buf);
+
+                return false;
+            }
+            else{
+                unsigned long bitrate = parameters.value("can_bitrate", 1000000);
+                switch(bitrate){
+                    case 1000000: canSetBusParams(_handle, canBITRATE_1M, 0, 0, 0, 0, 0); break;
+                    case 500000: canSetBusParams(_handle, canBITRATE_500K, 0, 0, 0, 0, 0); break;
+                    case 250000: canSetBusParams(_handle, canBITRATE_250K, 0, 0, 0, 0, 0); break;
+                    case 125000: canSetBusParams(_handle, canBITRATE_125K, 0, 0, 0, 0, 0); break;
+                    case 100000: canSetBusParams(_handle, canBITRATE_100K, 0, 0, 0, 0, 0); break;
+                    case 62000: canSetBusParams(_handle, canBITRATE_62K, 0, 0, 0, 0, 0); break;
+                    case 50000: canSetBusParams(_handle, canBITRATE_50K, 0, 0, 0, 0, 0); break;
+                    case 83000: canSetBusParams(_handle, canBITRATE_83K, 0, 0, 0, 0, 0); break;
+                    case 10000: canSetBusParams(_handle, canBITRATE_10K, 0, 0, 0, 0, 0); break;
+                    default:
+                        canSetBusParams(_handle, canBITRATE_1M, 0, 0, 0, 0, 0);
+                }
+                _status = canBusOn(_handle);
+                if(_status<0){
+                    logger::error("[{}] Cannot set channel {} to bus on. Error code : {}", get_name(), ch, (int)_status);
+                    return false;
+                }
+                else{
+                    logger::info("[{}] CAN channel {} set to bus on", get_name(), ch);
+                }
+
+                logger::info("[{}] CAN channel {} opened & set BUS bitrate {} bps", get_name(), ch, bitrate);
+                
+            }
         }
-
-        // 카드 상의 채널 번호 가져오기 (멀티 채널 장치용)
-        _status = canGetChannelData(i, canCHANNELDATA_CHAN_NO_ON_CARD, &channelOnCard, sizeof(channelOnCard));
-        if (_status != canOK) {
-            channelOnCard = -1; // 실패 시 -1로 설정
-            // printCanlibError(_status);
-        }
-
-        // 장치 플래그 가져오기 (가상 장치 여부 등 확인 가능)
-        // _status = canGetChannelData(i, canCHANNELDATA_DEVICE_FLAGS, &devFlags, sizeof(devFlags));
-        // if (_status == canOK && (devFlags & canDEVICE_FLAG_VIRTUAL)) {
-        //     // 가상 장치임을 표시할 수 있음
-        // }
-
-
-        // 정보 출력
-        std::cout << std::left << std::setw(5) << i
-                  << std::setw(25) << deviceName
-                  << std::setw(15) << serialNumber
-                  << std::setw(15) << eanUpcStr
-                  << std::setw(10) << channelOnCard
-                  << std::endl;
-    }
-
-    std::cout << "------------------------------------------------------------------" << std::endl;
-
+        
         
     }
     catch(json::exception& e){
@@ -111,13 +114,46 @@ bool kvaser_can_controller::on_init(){
 
 void kvaser_can_controller::on_loop(){
 
-    
+  
+        unsigned int id = 0x123;                   // Example CAN ID (Standard)
+        unsigned char data[8] = {0};             // Data payload (8 bytes)
+        unsigned int dlc = 8;                    // Data Length Code (number of bytes to send)
+        unsigned int flags = canMSG_STD;         // Message flags (Standard ID)
+        // Use canMSG_EXT for Extended ID
+
+        // Prepare some changing data
+        data[0] = 0xAA;
+        data[1] = 0xBB;
+        data[2] = 0x00; // Send loop counter in the 3rd byte
+        data[3] = 0xCC;
+        data[4] = 0xDD;
+        data[5] = 0xEE;
+        data[6] = 0xFF;
+        data[7] = 0x11;
+
+        logger::info("[{}] Sending CAN message, ID=0x{}, DLC={}", get_name(), id, dlc);
+
+        // Send the message
+        // canWrite() returns immediately after queuing the message.
+        // canWriteWait() waits until the message is sent or a timeout occurs.
+        // Using canWrite() for this example.
+        canStatus stat = canWrite(_handle, id, data, dlc, flags);
+        if (stat != canOK) {
+            char err_buf[100];
+            canGetErrorText(stat, err_buf, sizeof(err_buf));
+            string str_err(err_buf, sizeof(err_buf));
+            logger::error("[{}] Error sending CAN message: {}", get_name(), str_err);
+        } else {
+            logger::info("[{}] CAN message sent successfully", get_name());
+        }
+ 
 }
 
 
 void kvaser_can_controller::on_close(){
     
     /* close CAN */
+    canBusOff(_handle);
     canClose(_handle);
     canUnloadLibrary();
 
