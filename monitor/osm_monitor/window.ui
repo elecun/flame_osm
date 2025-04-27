@@ -7,7 +7,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>970</width>
+    <width>1928</width>
     <height>1011</height>
    </rect>
   </property>
@@ -49,7 +49,7 @@
      <enum>QTabWidget::Rounded</enum>
     </property>
     <property name="currentIndex">
-     <number>0</number>
+     <number>2</number>
     </property>
     <property name="tabBarAutoHide">
      <bool>false</bool>
@@ -66,7 +66,7 @@
     </widget>
     <widget class="QWidget" name="tab_1">
      <attribute name="title">
-      <string>Settings</string>
+      <string>Model &amp;&amp; Settings</string>
      </attribute>
     </widget>
    </widget>
@@ -75,7 +75,7 @@
      <rect>
       <x>0</x>
       <y>0</y>
-      <width>966</width>
+      <width>1926</width>
       <height>581</height>
      </rect>
     </property>
@@ -167,8 +167,8 @@ border: 1px solid white;</string>
      <widget class="QLabel" name="window_camera_3">
       <property name="geometry">
        <rect>
-        <x>0</x>
-        <y>270</y>
+        <x>960</x>
+        <y>0</y>
         <width>480</width>
         <height>270</height>
        </rect>
@@ -189,8 +189,8 @@ border: 1px solid white;</string>
      <widget class="QLabel" name="window_camera_4">
       <property name="geometry">
        <rect>
-        <x>480</x>
-        <y>270</y>
+        <x>1440</x>
+        <y>0</y>
         <width>480</width>
         <height>270</height>
        </rect>
@@ -216,7 +216,7 @@ border: 1px solid white;</string>
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>970</width>
+     <width>1928</width>
      <height>43</height>
     </rect>
    </property>
