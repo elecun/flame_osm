@@ -3,6 +3,7 @@
     "verbose" : 1,
 
     "parameters":{
+        "find_available":true,
         "use_image_stream":true,
         "use_image_stream_monitoring":true,
         "cameras":[
@@ -64,6 +65,13 @@
                 "width" : 320,
                 "height" : 240
             }
+        },
+        "control":{
+            "transport":"tcp",
+            "host":"127.0.0.1",
+            "port":5106,
+            "socket_type" : "sub",
+            "queue_size" : 5000
         },
         "image_stream_1" : {
             "transport" : "inproc",

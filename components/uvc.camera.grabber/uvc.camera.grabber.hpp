@@ -14,6 +14,8 @@
 
 #include <flame/component/object.hpp>
 #include <opencv2/opencv.hpp>
+#include <vector>
+#include <unordered_map>
 
 using namespace std;
 
@@ -33,10 +35,12 @@ class uvc_camera_grabber : public flame::component::object {
         void _grab_task(int id, string device);
 
         /* private function */
+        vector<string> find_available_camera(int n_max, const string prefix);
 
     private:
         /* grabbing worker */
         unordered_map<int, thread> _grab_worker;
+        thread _image_stream_monitoring_worker; 
 
         /* flag */
         atomic<bool> _worker_stop { false };

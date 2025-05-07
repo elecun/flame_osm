@@ -94,9 +94,12 @@ $(BUILDDIR)config.o: $(INCLUDES)/flame/config.cc
 
 # components
 
-uvc_camera_grabber.comp:	$(BUILDDIR)uvc.camera.grabber.o
+uvc_camera_grabber.comp:	$(BUILDDIR)uvc.camera.grabber.o \
+							$(BUILDDIR)support.o
 							$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) 
 $(BUILDDIR)uvc.camera.grabber.o:	$(CURRENT_DIR)/components/uvc.camera.grabber/uvc.camera.grabber.cc
+									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
+$(BUILDDIR)support.o:	$(CURRENT_DIR)/components/uvc.camera.grabber/support.cc
 									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
 
 fpdlink_camera_grabber.comp:	$(BUILDDIR)fpdlink.camera.grabber.o

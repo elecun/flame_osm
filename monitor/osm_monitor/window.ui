@@ -7,12 +7,12 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1928</width>
-    <height>1011</height>
+    <width>1270</width>
+    <height>640</height>
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Monitor</string>
+   <string>Occupant Status Monitoring (Remote)</string>
   </property>
   <property name="windowIcon">
    <iconset theme="document-save-as">
@@ -25,58 +25,13 @@
    <string notr="true"/>
   </property>
   <widget class="QWidget" name="centralwidget">
-   <widget class="QTabWidget" name="tabWidget">
-    <property name="geometry">
-     <rect>
-      <x>0</x>
-      <y>595</y>
-      <width>966</width>
-      <height>346</height>
-     </rect>
-    </property>
-    <property name="font">
-     <font>
-      <family>Arial</family>
-     </font>
-    </property>
-    <property name="styleSheet">
-     <string notr="true"/>
-    </property>
-    <property name="tabPosition">
-     <enum>QTabWidget::West</enum>
-    </property>
-    <property name="tabShape">
-     <enum>QTabWidget::Rounded</enum>
-    </property>
-    <property name="currentIndex">
-     <number>2</number>
-    </property>
-    <property name="tabBarAutoHide">
-     <bool>false</bool>
-    </property>
-    <widget class="QWidget" name="tab_2">
-     <attribute name="title">
-      <string>Monitoring</string>
-     </attribute>
-    </widget>
-    <widget class="QWidget" name="tab">
-     <attribute name="title">
-      <string>Control</string>
-     </attribute>
-    </widget>
-    <widget class="QWidget" name="tab_1">
-     <attribute name="title">
-      <string>Model &amp;&amp; Settings</string>
-     </attribute>
-    </widget>
-   </widget>
    <widget class="QTabWidget" name="tab_monitor">
     <property name="geometry">
      <rect>
       <x>0</x>
       <y>0</y>
-      <width>1926</width>
-      <height>581</height>
+      <width>1270</width>
+      <height>580</height>
      </rect>
     </property>
     <property name="font">
@@ -94,7 +49,7 @@
     </property>
     <widget class="QWidget" name="tab_3">
      <attribute name="title">
-      <string>Human Factors</string>
+      <string>Configurations</string>
      </attribute>
      <widget class="QFrame" name="frame_defect_grid_frame">
       <property name="geometry">
@@ -118,7 +73,7 @@
     </widget>
     <widget class="QWidget" name="tab_4">
      <attribute name="title">
-      <string>Camera View</string>
+      <string>In-cabin Camera View</string>
      </attribute>
      <widget class="QLabel" name="window_camera_2">
       <property name="geometry">
@@ -167,8 +122,8 @@ border: 1px solid white;</string>
      <widget class="QLabel" name="window_camera_3">
       <property name="geometry">
        <rect>
-        <x>960</x>
-        <y>0</y>
+        <x>0</x>
+        <y>270</y>
         <width>480</width>
         <height>270</height>
        </rect>
@@ -189,8 +144,8 @@ border: 1px solid white;</string>
      <widget class="QLabel" name="window_camera_4">
       <property name="geometry">
        <rect>
-        <x>1440</x>
-        <y>0</y>
+        <x>480</x>
+        <y>270</y>
         <width>480</width>
         <height>270</height>
        </rect>
@@ -208,6 +163,71 @@ border: 1px solid white;</string>
        <set>Qt::AlignCenter</set>
       </property>
      </widget>
+     <widget class="QGroupBox" name="groupBox">
+      <property name="geometry">
+       <rect>
+        <x>965</x>
+        <y>5</y>
+        <width>291</width>
+        <height>206</height>
+       </rect>
+      </property>
+      <property name="title">
+       <string>Options</string>
+      </property>
+      <widget class="QCheckBox" name="chk_option_show_frame_info">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>105</y>
+         <width>271</width>
+         <height>20</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Show Frame Information</string>
+       </property>
+      </widget>
+      <widget class="QCheckBox" name="chk_option_disable_camera_monitoring_stream">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>30</y>
+         <width>271</width>
+         <height>20</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Disable Camera Monitoring Stream</string>
+       </property>
+      </widget>
+      <widget class="Line" name="line">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>85</y>
+         <width>271</width>
+         <height>16</height>
+        </rect>
+       </property>
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+      </widget>
+      <widget class="QCheckBox" name="chk_options_show_body_keypoints">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>135</y>
+         <width>271</width>
+         <height>20</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Show Body Key-points</string>
+       </property>
+      </widget>
+     </widget>
     </widget>
    </widget>
   </widget>
@@ -216,8 +236,8 @@ border: 1px solid white;</string>
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>1928</width>
-     <height>43</height>
+     <width>1270</width>
+     <height>24</height>
     </rect>
    </property>
    <widget class="QMenu" name="menuControl">

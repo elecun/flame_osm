@@ -25,6 +25,9 @@ class hpe_model_inference : public flame::component::object {
         void on_close() override;
         void on_message() override;
 
+    private:
+        
+
 }; /* class */
 
 EXPORT_COMPONENT_API

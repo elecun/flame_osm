@@ -23,6 +23,9 @@ bool uvc_camera_grabber::on_init(){
         /* read profile */
         json parameters = get_profile()->parameters();
 
+        /* find available cameras */
+        find_available_camera();
+
         /* set video capture instance */
         if(parameters.contains("cameras")){
             for(auto& dev:parameters["cameras"]){
@@ -35,15 +38,15 @@ bool uvc_camera_grabber::on_init(){
         }
 
         /* realtime monitoring configure */
-        if(parameters.contains("use_image_stream_monitoring")){
-            _use_image_stream_monitoring.store(parameters.value("use_image_stream_monitoring", false));
-            logger::info("[{}] Use image stream monitoring : {}", get_name(), _use_image_stream_monitoring.load());
-        }
+        _use_image_stream_monitoring.store(parameters.value("use_image_stream_monitoring", false));
+        _use_image_stream.store(parameters.value("use_image_stream", false));
 
-        /* image stream */
-        if(parameters.contains("use_image_stream")){
-            _use_image_stream.store(parameters.value("use_image_stream", false));
-            logger::info("[{}] Use image stream : {}", get_name(), _use_image_stream.load());
+        logger::info("[{}] Use image stream monitoring : {}", get_name(), _use_image_stream_monitoring.load());
+        logger::info("[{}] Use image stream : {}", get_name(), _use_image_stream.load());
+
+        /* run tasks */
+        if(_use_image_stream_monitoring.load()){
+            _image_stream_monitoring_worker = thread(&uvc_camera_grabber::_image_stream_monitoring_task, this);
         }
     }
     catch(json::exception& e){
@@ -182,4 +185,51 @@ void uvc_camera_grabber::_grab_task(int camera_id, string device){
         logger::error("[{}] Data Parse Error : {}", get_name(), e.what());
     }
 
+}
+
+void uvc_camera_grabber::_image_stream_monitoring_task(){
+    try{
+        while(!_worker_stop.load()){
+            try{
+                /* wait for hmd_signal subscription */
+                zmq::multipart_t msg_multipart;
+                bool success = msg_multipart.recv(*get_port("ni_daq_controller/line_signal"));
+
+                if(success){
+                    string topic = msg_multipart.popstr();
+                    string data = msg_multipart.popstr();
+                    auto json_data = json::parse(data);
+
+                    logger::info("{}", data);
+
+                    if(json_data.contains("hmd_signal_1_on") && json_data.contains("hmd_signal_2_on") && json_data.contains("online_signal_on")){
+                        bool hmd_signal_1_on = json_data["hmd_signal_1_on"].get<bool>();
+                        bool hmd_signal_2_on = json_data["hmd_signal_2_on"].get<bool>();
+                        bool online_signal_on = json_data["online_signal_on"].get<bool>();
+
+                        if(hmd_signal_1_on && online_signal_on){
+                            logger::info("[{}] Now Image streaming is enabled...", get_name());
+                            _image_stream_enable.store(true);
+                        }
+                        else if(!hmd_signal_2_on && online_signal_on){
+                            _image_stream_enable.store(false);
+                            logger::info("[{}] Image streaming is disabled...", get_name());
+                        }
+                    }
+                }
+            }
+            catch(const zmq::error_t& e){
+                break;
+            }
+        }
+    }
+    catch(const zmq::error_t& e){
+        logger::error("[{}] Pipeline error : {}", get_name(), e.what());
+    }
+    catch(const std::runtime_error& e){
+        logger::error("[{}] Runtime error occurred!", get_name());
+    }
+    catch(const json::parse_error& e){
+        logger::error("[{}] message cannot be parsed. {}", get_name(), e.what());
+    }
 }
