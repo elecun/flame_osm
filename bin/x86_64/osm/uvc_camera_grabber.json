@@ -3,10 +3,13 @@
     "verbose" : 1,
 
     "parameters":{
-        "use_image_stream_monitoring":true,
         "use_image_stream":true,
+        "use_image_stream_monitoring":true,
         "cameras":[
-            {"id":0, "name":"", "device":"dev/video0"}
+            {"id":1, "name":"Left Top A Pillar", "device":"/dev/video0"},
+            {"id":2, "name":"Center Overhead", "device":"/dev/video2"},
+            {"id":3, "name":"Right Middle A Pillar", "device":"/dev/video4"},
+            {"id":4, "name":"Right Top A Pillar", "device":"/dev/video6"}
         ]
     },
 
@@ -18,7 +21,7 @@
             "socket_type" : "pub",
             "queue_size" : 1000
         },
-        "image_stream_monitor_0":{
+        "image_stream_monitor_1":{
             "transport":"tcp",
             "host":"127.0.0.1",
             "port":5102,
@@ -29,7 +32,7 @@
                 "height" : 240
             }
         },
-        "image_stream_monitor_1":{
+        "image_stream_monitor_2":{
             "transport":"tcp",
             "host":"127.0.0.1",
             "port":5103,
@@ -40,7 +43,7 @@
                 "height" : 240
             }
         },
-        "image_stream_monitor_2":{
+        "image_stream_monitor_3":{
             "transport":"tcp",
             "host":"127.0.0.1",
             "port":5104,
@@ -51,7 +54,7 @@
                 "height" : 240
             }
         },
-        "image_stream_monitor_3":{
+        "image_stream_monitor_4":{
             "transport":"tcp",
             "host":"127.0.0.1",
             "port":5105,
@@ -62,25 +65,25 @@
                 "height" : 240
             }
         },
-        "image_stream_0" : {
-            "transport" : "inproc",
-            "socket_type" : "push",
-            "queue_size" : 10000
-        },
         "image_stream_1" : {
             "transport" : "inproc",
             "socket_type" : "push",
-            "queue_size" : 10000
+            "queue_size" : 5000
         },
         "image_stream_2" : {
             "transport" : "inproc",
             "socket_type" : "push",
-            "queue_size" : 10000
+            "queue_size" : 5000
         },
         "image_stream_3" : {
             "transport" : "inproc",
             "socket_type" : "push",
-            "queue_size" : 10000
+            "queue_size" : 5000
+        },
+        "image_stream_4" : {
+            "transport" : "inproc",
+            "socket_type" : "push",
+            "queue_size" : 5000
         }
     }
 }

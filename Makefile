@@ -46,7 +46,7 @@ else
 	OUTDIR		= $(CURRENT_DIR)/bin/x86_64/
 	BUILDDIR	= $(CURRENT_DIR)/bin/x86_64/
 	INCLUDE_DIR = -I./ -I$(CURRENT_DIR) -I$(FLAME_PATH)/include -I$(FLAME_PATH)/include/dep -I/usr/include -I/usr/local/include -I/usr/include/opencv4
-	LIBDIR = -L/usr/local/lib -L$(FLAME_PATH)/lib/x86_64/
+	LIBDIR = -L/usr/local/lib -L$(FLAME_PATH)/lib/x86_64/ -L/usr/lib/x86-64-linux-gnu
 export LD_LIBRARY_PATH := $(LIBDIR):$(LD_LIBRARY_PATH)
 endif
 
@@ -99,6 +99,11 @@ uvc_camera_grabber.comp:	$(BUILDDIR)uvc.camera.grabber.o
 $(BUILDDIR)uvc.camera.grabber.o:	$(CURRENT_DIR)/components/uvc.camera.grabber/uvc.camera.grabber.cc
 									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
 
+fpdlink_camera_grabber.comp:	$(BUILDDIR)fpdlink.camera.grabber.o
+							$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) 
+$(BUILDDIR)fpdlink.camera.grabber.o:	$(CURRENT_DIR)/components/fpdlink.camera.grabber/fpdlink.camera.grabber.cc
+									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
+
 kvaser_can_controller.comp:	$(BUILDDIR)kvaser.can.controller.o
 							$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lcanlib
 $(BUILDDIR)kvaser.can.controller.o:	$(CURRENT_DIR)/components/kvaser.can.controller/kvaser.can.controller.cc
@@ -107,7 +112,7 @@ $(BUILDDIR)kvaser.can.controller.o:	$(CURRENT_DIR)/components/kvaser.can.control
 
 all : flame
 
-osm : flame uvc_camera_grabber.comp
+osm : flame uvc_camera_grabber.comp fpdlink_camera_grabber.comp
 
 deploy : FORCE
 	cp $(BUILDDIR)/*.comp $(BUILDDIR)/flame $(BINDIR)

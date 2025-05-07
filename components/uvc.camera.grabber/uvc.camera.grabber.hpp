@@ -30,7 +30,7 @@ class uvc_camera_grabber : public flame::component::object {
 
     private:
         /* grabber tasks */
-        void _grab_task(int camera_id);
+        void _grab_task(int id, string device);
 
         /* private function */
 

@@ -26,10 +26,11 @@ bool uvc_camera_grabber::on_init(){
         /* set video capture instance */
         if(parameters.contains("cameras")){
             for(auto& dev:parameters["cameras"]){
+                string device = dev["device"].get<string>();
                 int id = dev["id"].get<int>();
 
                 /* assign grabber worker */
-                _grab_worker[id] = thread(&uvc_camera_grabber::_grab_task, this, id);
+                _grab_worker[id] = thread(&uvc_camera_grabber::_grab_task, this, id, device);
             }
         }
 
@@ -83,18 +84,19 @@ void uvc_camera_grabber::on_message(){
     
 }
 
-void uvc_camera_grabber::_grab_task(int camera_id){
+void uvc_camera_grabber::_grab_task(int camera_id, string device){
     try{
 
-        cv::VideoCapture _cap(camera_id, CAP_V4L2);
+        cv::VideoCapture _cap(device, CAP_V4L2);
         if(!_cap.isOpened()){
-            logger::error("[{}] Camera #{} cannot be opened. please check the device.", get_name(), camera_id);
+            logger::error("[{}] Camera #{}({}) cannot be opened. please check the device.", get_name(), camera_id, device);
             return;
         }
 
         /* read port configurations */
         string monitoring_portname = fmt::format("image_stream_monitor_{}", camera_id);
         string stream_portname = fmt::format("image_stream_{}", camera_id);
+
         json dataport_config = get_profile()->dataport();
         string id_str = fmt::format("{}", camera_id);
 
@@ -111,15 +113,15 @@ void uvc_camera_grabber::_grab_task(int camera_id){
             }
         }
         catch(const json::exception& e){
-            logger::error("[{}] Camera #{} monitoring image resolution error : {}", get_name(), camera_id, e.what());
+            logger::error("[{}] Camera #{}({}) monitoring image resolution error : {}", get_name(), camera_id, device, e.what());
         }
 
         /* grab */
         while(!_worker_stop.load()){
-            cv::Mat raw_frame;
+            Mat raw_frame;
             _cap >> raw_frame;
             if(raw_frame.empty()){
-                logger::warn("[{}] Camera #{} frame is empty", get_name(), camera_id);
+                logger::warn("[{}] Camera #{}({}) frame is empty", get_name(), camera_id, device);
                 continue;
             }
 
@@ -158,6 +160,8 @@ void uvc_camera_grabber::_grab_task(int camera_id){
 
                 // publish message
                 msg_multipart.send(*get_port(monitoring_portname), ZMQ_DONTWAIT);
+
+                logger::info("[{}] Camera #{} was grabbed", get_name(), camera_id);
             }
 
 
@@ -165,7 +169,7 @@ void uvc_camera_grabber::_grab_task(int camera_id){
 
         /* realse */
         _cap.release();
-        logger::info("[{}] Camera #{} is released", get_name(), camera_id);
+        logger::info("[{}] Camera #{}({}) is released", get_name(), camera_id, device);
         
     }
     catch(const cv::Exception::exception& e){
