@@ -214,7 +214,7 @@ border: 1px solid white;</string>
         <enum>Qt::Horizontal</enum>
        </property>
       </widget>
-      <widget class="QCheckBox" name="chk_options_show_body_keypoints">
+      <widget class="QCheckBox" name="chk_option_show_body_keypoints">
        <property name="geometry">
         <rect>
          <x>10</x>
