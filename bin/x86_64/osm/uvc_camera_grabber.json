@@ -29,8 +29,8 @@
             "socket_type" : "pub",
             "queue_size" : 5000,
             "resolution" : {
-                "width" : 320,
-                "height" : 240
+                "width" : 480,
+                "height" : 270
             }
         },
         "image_stream_monitor_2":{
@@ -40,8 +40,8 @@
             "socket_type" : "pub",
             "queue_size" : 5000,
             "resolution" : {
-                "width" : 320,
-                "height" : 240
+                "width" : 480,
+                "height" : 270
             }
         },
         "image_stream_monitor_3":{
@@ -51,8 +51,8 @@
             "socket_type" : "pub",
             "queue_size" : 5000,
             "resolution" : {
-                "width" : 320,
-                "height" : 240
+                "width" : 480,
+                "height" : 270
             }
         },
         "image_stream_monitor_4":{
@@ -62,8 +62,8 @@
             "socket_type" : "pub",
             "queue_size" : 5000,
             "resolution" : {
-                "width" : 320,
-                "height" : 240
+                "width" : 480,
+                "height" : 270
             }
         },
         "control":{

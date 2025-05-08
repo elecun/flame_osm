@@ -35,12 +35,11 @@ class uvc_camera_grabber : public flame::component::object {
         void _grab_task(int id, string device);
 
         /* private function */
-        vector<string> find_available_camera(int n_max, const string prefix);
+        vector<string> find_available_camera(int n_max=10, const string prefix="/dev/video");
 
     private:
         /* grabbing worker */
         unordered_map<int, thread> _grab_worker;
-        thread _image_stream_monitoring_worker; 
 
         /* flag */
         atomic<bool> _worker_stop { false };

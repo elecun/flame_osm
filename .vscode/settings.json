@@ -7,7 +7,8 @@
         "span": "cpp",
         "atomic": "cpp",
         "new": "cpp",
-        "iostream": "cpp"
+        "iostream": "cpp",
+        "thread": "cpp"
     },
     "MicroPython.executeButton": [
         {

@@ -3,7 +3,7 @@
 #include <utility>
 #include <flame/log.hpp>
 
-vector<string> uvc_camera_grabber::find_available_camera(int n_max = 10, const string prefix = "/dev/video"){
+vector<string> uvc_camera_grabber::find_available_camera(int n_max, const string prefix){
 
     std::vector<std::string> available_cameras;
 

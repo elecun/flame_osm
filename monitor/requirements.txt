@@ -3,5 +3,4 @@ colorlog
 opencv-python
 psutil
 pyzmq
-nidaqmx
 pyqtgraph

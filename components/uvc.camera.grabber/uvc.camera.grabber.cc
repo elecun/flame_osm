@@ -23,9 +23,6 @@ bool uvc_camera_grabber::on_init(){
         /* read profile */
         json parameters = get_profile()->parameters();
 
-        /* find available cameras */
-        find_available_camera();
-
         /* set video capture instance */
         if(parameters.contains("cameras")){
             for(auto& dev:parameters["cameras"]){
@@ -43,11 +40,6 @@ bool uvc_camera_grabber::on_init(){
 
         logger::info("[{}] Use image stream monitoring : {}", get_name(), _use_image_stream_monitoring.load());
         logger::info("[{}] Use image stream : {}", get_name(), _use_image_stream.load());
-
-        /* run tasks */
-        if(_use_image_stream_monitoring.load()){
-            _image_stream_monitoring_worker = thread(&uvc_camera_grabber::_image_stream_monitoring_task, this);
-        }
     }
     catch(json::exception& e){
         logger::error("Profile Error : {}", e.what());
@@ -91,6 +83,7 @@ void uvc_camera_grabber::_grab_task(int camera_id, string device){
     try{
 
         cv::VideoCapture _cap(device, CAP_V4L2);
+        _cap.set(cv::CAP_PROP_BUFFERSIZE, 1); //minial buffer size
         if(!_cap.isOpened()){
             logger::error("[{}] Camera #{}({}) cannot be opened. please check the device.", get_name(), camera_id, device);
             return;
@@ -120,13 +113,26 @@ void uvc_camera_grabber::_grab_task(int camera_id, string device){
         }
 
         /* grab */
+        json tag;
+        auto last_time = chrono::high_resolution_clock::now();
         while(!_worker_stop.load()){
+
             Mat raw_frame;
             _cap >> raw_frame;
             if(raw_frame.empty()){
                 logger::warn("[{}] Camera #{}({}) frame is empty", get_name(), camera_id, device);
                 continue;
             }
+
+            /* generate captrued image tags */
+            auto now = chrono::high_resolution_clock::now();
+            chrono::duration<double> elapsed = now - last_time;
+            last_time = now;
+            tag["fps"] = 1.0/elapsed.count();
+            tag["camera_id"] = camera_id;
+            tag["height"] = raw_frame.rows;
+            tag["width"] = raw_frame.cols;
+            tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
 
             /* send image to pipeline */
             if(_use_image_stream.load()){
@@ -140,7 +146,7 @@ void uvc_camera_grabber::_grab_task(int camera_id, string device){
 
                 // push message
                 zmq::multipart_t msg_multipart;
-                msg_multipart.addstr(id_str);
+                msg_multipart.addstr(tag.dump());
                 msg_multipart.addmem(msg_image.data(), msg_image.size());
                 msg_multipart.send(*get_port(stream_portname), ZMQ_DONTWAIT);
             }
@@ -158,13 +164,11 @@ void uvc_camera_grabber::_grab_task(int camera_id, string device){
                 // generate multipart message
                 zmq::multipart_t msg_multipart;
                 msg_multipart.addstr(monitoring_topic);
-                msg_multipart.addstr(id_str);
+                msg_multipart.addstr(tag.dump());
                 msg_multipart.addmem(msg_monitor_image.data(), msg_monitor_image.size());
 
                 // publish message
                 msg_multipart.send(*get_port(monitoring_portname), ZMQ_DONTWAIT);
-
-                logger::info("[{}] Camera #{} was grabbed", get_name(), camera_id);
             }
 
 
@@ -185,51 +189,4 @@ void uvc_camera_grabber::_grab_task(int camera_id, string device){
         logger::error("[{}] Data Parse Error : {}", get_name(), e.what());
     }
 
-}
-
-void uvc_camera_grabber::_image_stream_monitoring_task(){
-    try{
-        while(!_worker_stop.load()){
-            try{
-                /* wait for hmd_signal subscription */
-                zmq::multipart_t msg_multipart;
-                bool success = msg_multipart.recv(*get_port("ni_daq_controller/line_signal"));
-
-                if(success){
-                    string topic = msg_multipart.popstr();
-                    string data = msg_multipart.popstr();
-                    auto json_data = json::parse(data);
-
-                    logger::info("{}", data);
-
-                    if(json_data.contains("hmd_signal_1_on") && json_data.contains("hmd_signal_2_on") && json_data.contains("online_signal_on")){
-                        bool hmd_signal_1_on = json_data["hmd_signal_1_on"].get<bool>();
-                        bool hmd_signal_2_on = json_data["hmd_signal_2_on"].get<bool>();
-                        bool online_signal_on = json_data["online_signal_on"].get<bool>();
-
-                        if(hmd_signal_1_on && online_signal_on){
-                            logger::info("[{}] Now Image streaming is enabled...", get_name());
-                            _image_stream_enable.store(true);
-                        }
-                        else if(!hmd_signal_2_on && online_signal_on){
-                            _image_stream_enable.store(false);
-                            logger::info("[{}] Image streaming is disabled...", get_name());
-                        }
-                    }
-                }
-            }
-            catch(const zmq::error_t& e){
-                break;
-            }
-        }
-    }
-    catch(const zmq::error_t& e){
-        logger::error("[{}] Pipeline error : {}", get_name(), e.what());
-    }
-    catch(const std::runtime_error& e){
-        logger::error("[{}] Runtime error occurred!", get_name());
-    }
-    catch(const json::parse_error& e){
-        logger::error("[{}] message cannot be parsed. {}", get_name(), e.what());
-    }
 }
