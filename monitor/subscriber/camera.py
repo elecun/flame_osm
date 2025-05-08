@@ -91,10 +91,10 @@ class CameraMonitorSubscriber(QThread):
                         nparr = np.frombuffer(image_data, np.uint8)
                         decoded_image = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
                         if decoded_image is not None:
-                            color_image = cv2.cvtColor(decoded_image, cv2.COLOR_BGR2RGB)
-                            h, w = color_image.shape[:2]  # height와 width
-                            ch = color_image.shape[2] if len(color_image.shape) > 2 else 1
-                            self.frame_update_signal.emit(color_image, dict_tags)
+                            # color_image = decoded_image #cv2.cvtColor(decoded_image, cv2.COLOR_BGR2RGB) # color conversion if needed
+                            h, w = decoded_image.shape[:2]  # height와 width
+                            ch = decoded_image.shape[2] if len(decoded_image.shape) > 2 else 1
+                            self.frame_update_signal.emit(decoded_image, dict_tags)
 
             except json.JSONDecodeError as e:
                 self.__console.critical(f"<Camera Monitor> {e}")
