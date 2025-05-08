@@ -188,7 +188,7 @@ border: 1px solid white;</string>
         <string>Show Frame Information</string>
        </property>
        <property name="checked">
-        <bool>true</bool>
+        <bool>false</bool>
        </property>
       </widget>
       <widget class="QCheckBox" name="chk_option_disable_camera_monitoring_stream">
