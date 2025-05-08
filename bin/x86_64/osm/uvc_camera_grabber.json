@@ -57,7 +57,7 @@
         },
         "image_stream_monitor_4":{
             "transport":"tcp",
-            "host":"127.0.0.1",
+            "host":"127.0.0.2",
             "port":5105,
             "socket_type" : "pub",
             "queue_size" : 5000,
