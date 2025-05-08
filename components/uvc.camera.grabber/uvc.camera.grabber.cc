@@ -82,7 +82,7 @@ void uvc_camera_grabber::on_message(){
 void uvc_camera_grabber::_grab_task(int camera_id, string device){
     try{
 
-        cv::VideoCapture _cap(device, CAP_V4L2);
+        cv::VideoCapture _cap(device, CAP_V4L2); //for linux
         _cap.set(cv::CAP_PROP_BUFFERSIZE, 1); //minial buffer size
         if(!_cap.isOpened()){
             logger::error("[{}] Camera #{}({}) cannot be opened. please check the device.", get_name(), camera_id, device);
