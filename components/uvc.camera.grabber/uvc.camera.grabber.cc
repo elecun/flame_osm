@@ -24,29 +24,30 @@ bool uvc_camera_grabber::on_init(){
         json parameters = get_profile()->parameters();
 
         /* set video capture instance */
-        if(parameters.contains("cameras")){
-            for(auto& dev:parameters["cameras"]){
-                string device = dev["device"].get<string>();
+        if(parameters.contains("camera")){
+            for(auto& dev:parameters["camera"]){
                 int id = dev["id"].get<int>();
 
                 /* assign grabber worker */
-                _grab_worker[id] = thread(&uvc_camera_grabber::_grab_task, this, id, device);
+                _grab_worker[id] = thread(&uvc_camera_grabber::_grab_task, this, dev);
+                
             }
         }
+        else {
+            logger::warn("[{}] Cannot found camera(s) available", get_name());
+            return false;
+        }
 
-        /* realtime monitoring configure */
+        /* configure data pipeline  */
         _use_image_stream_monitoring.store(parameters.value("use_image_stream_monitoring", false));
         _use_image_stream.store(parameters.value("use_image_stream", false));
-
-        logger::info("[{}] Use image stream monitoring : {}", get_name(), _use_image_stream_monitoring.load());
-        logger::info("[{}] Use image stream : {}", get_name(), _use_image_stream.load());
     }
     catch(json::exception& e){
-        logger::error("Profile Error : {}", e.what());
+        logger::error("[{}] Component Profile Error : {}", get_name(), e.what());
         return false;
     }
     catch(cv::Exception::exception& e){
-        logger::error("Device Error : {}", e.what());
+        logger::error("[{}] Device Error : {}", get_name(), e.what());
         return false;
     }
 
@@ -79,14 +80,18 @@ void uvc_camera_grabber::on_message(){
     
 }
 
-void uvc_camera_grabber::_grab_task(int camera_id, string device){
+void uvc_camera_grabber::_grab_task(json camera_param){
+
+    string device = camera_param.value("device", "/dev/video0");
+    int camera_id = camera_param.value("id", 0);
+
     try{
 
         cv::VideoCapture _cap(device, CAP_V4L2); //for linux
         _cap.set(cv::CAP_PROP_BUFFERSIZE, 1); //minial buffer size
         if(!_cap.isOpened()){
             logger::error("[{}] Camera #{}({}) cannot be opened. please check the device.", get_name(), camera_id, device);
-            return;
+            CV_Error(cv::Error::StsError, fmt::format("Camera #{} cannot be opened.", camera_id));
         }
 
         /* read port configurations */
@@ -94,29 +99,16 @@ void uvc_camera_grabber::_grab_task(int camera_id, string device){
         string stream_portname = fmt::format("image_stream_{}", camera_id);
 
         json dataport_config = get_profile()->dataport();
-        string id_str = fmt::format("{}", camera_id);
+        int monitoring_width = dataport_config.at(monitoring_portname).at("resolution").value("width", 480);
+        int monitoring_height = dataport_config.at(monitoring_portname).at("resolution").value("height", 270);
+        string monitoring_topic = fmt::format("{}/{}", get_name(), monitoring_portname);
+        logger::info("[{}] Camera #{} monitoring image resolution : {}x{}", get_name(), camera_id, monitoring_width, monitoring_height);
 
-        int monitoring_width = 0;
-        int monitoring_height = 0;
-        string monitoring_topic {""};
-        try{
-            if(dataport_config.contains(monitoring_portname)){
-
-                monitoring_width = dataport_config.at(monitoring_portname).at("resolution").value("width", 640);
-                monitoring_height = dataport_config.at(monitoring_portname).at("resolution").value("height", 480);
-                monitoring_topic = fmt::format("{}/{}", get_name(), monitoring_portname);
-                logger::info("[{}] Camera #{} monitoring image resolution : {}x{}", get_name(), camera_id, monitoring_width, monitoring_height);
-            }
-        }
-        catch(const json::exception& e){
-            logger::error("[{}] Camera #{}({}) monitoring image resolution error : {}", get_name(), camera_id, device, e.what());
-        }
-
-        /* grab */
         json tag;
         auto last_time = chrono::high_resolution_clock::now();
         while(!_worker_stop.load()){
 
+            /* capture from camera */
             Mat raw_frame;
             _cap >> raw_frame;
             if(raw_frame.empty()){
@@ -124,7 +116,7 @@ void uvc_camera_grabber::_grab_task(int camera_id, string device){
                 continue;
             }
 
-            /* generate captrued image tags */
+            /* generate tag */
             auto now = chrono::high_resolution_clock::now();
             chrono::duration<double> elapsed = now - last_time;
             last_time = now;
@@ -134,52 +126,52 @@ void uvc_camera_grabber::_grab_task(int camera_id, string device){
             tag["width"] = raw_frame.cols;
             tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
 
-            /* send image to pipeline */
+            /* transfer original image to processs */
             if(_use_image_stream.load()){
+                /* image encoding */
+                std::vector<unsigned char> serialized_image;
+                cv::imencode(".jpg", raw_frame, serialized_image);
 
-                /* encode to jpg */
-                std::vector<unsigned char> encoded_image;
-                cv::imencode(".jpg", raw_frame, encoded_image);
-
-                // data message
-                pipe_data msg_image(encoded_image.data(), encoded_image.size());
-
-                // push message
-                zmq::multipart_t msg_multipart;
-                msg_multipart.addstr(tag.dump());
-                msg_multipart.addmem(msg_image.data(), msg_image.size());
-                msg_multipart.send(*get_port(stream_portname), ZMQ_DONTWAIT);
+                if(get_port(stream_portname)->handle()!=nullptr){
+                    zmq::multipart_t msg_multipart_image;
+                    msg_multipart_image.addstr(tag.dump());
+                    msg_multipart_image.addmem(serialized_image.data(), serialized_image.size());
+                    msg_multipart_image.send(*get_port(stream_portname), ZMQ_DONTWAIT);
+                    msg_multipart_image.clear();
+                }
+                else{
+                    logger::warn("[{}] {} socket handle is not valid ", get_name(), camera_id);
+                }
+                serialized_image.clear();
             }
 
-            /* send monitoring image to pipeline */
+            /* transfer small image for monitoring */
             if(_use_image_stream_monitoring.load()){
-
-                // generate data message
+                 
                 cv::Mat monitor_image;
                 cv::resize(raw_frame, monitor_image, cv::Size(monitoring_width, monitoring_height));
-                std::vector<unsigned char> encoded_monitor_image;;
-                cv::imencode(".jpg", monitor_image, encoded_monitor_image);
-                pipe_data msg_monitor_image(encoded_monitor_image.data(), encoded_monitor_image.size());
+                std::vector<unsigned char> serialized_monitor_image;
+                cv::imencode(".jpg", monitor_image, serialized_monitor_image);
 
-                // generate multipart message
-                zmq::multipart_t msg_multipart;
-                msg_multipart.addstr(monitoring_topic);
-                msg_multipart.addstr(tag.dump());
-                msg_multipart.addmem(msg_monitor_image.data(), msg_monitor_image.size());
-
-                // publish message
-                msg_multipart.send(*get_port(monitoring_portname), ZMQ_DONTWAIT);
+                if(get_port(monitoring_portname)->handle()!=nullptr){
+                    zmq::multipart_t msg_multipart;
+                    msg_multipart.addstr(fmt::format("{}/image_stream_monitor_{}",get_name(), camera_id));
+                    msg_multipart.addstr(tag.dump());
+                    msg_multipart.addmem(serialized_monitor_image.data(), serialized_monitor_image.size());
+                    msg_multipart.send(*get_port(monitoring_portname), ZMQ_DONTWAIT);
+                    msg_multipart.clear();
+                }
+                serialized_monitor_image.clear();
             }
 
-
-        }
+        } /* end while */
 
         /* realse */
         _cap.release();
         logger::info("[{}] Camera #{}({}) is released", get_name(), camera_id, device);
         
     }
-    catch(const cv::Exception::exception& e){
+    catch(const cv::Exception& e){
         logger::error("[{}] Camera #{} grabber has an error while grabbing", get_name(), camera_id);
     }
     catch(const zmq::error_t& e){
@@ -187,6 +179,9 @@ void uvc_camera_grabber::_grab_task(int camera_id, string device){
     }
     catch(const json::exception& e){
         logger::error("[{}] Data Parse Error : {}", get_name(), e.what());
+    }
+    catch(const std::out_of_range& e){
+        logger::error("[{}] Invalid parameter access", get_name());
     }
 
 }

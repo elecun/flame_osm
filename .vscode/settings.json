@@ -1,5 +1,6 @@
 {
     "files.associations": {
+        "*.py": "python",
         "array": "cpp",
         "string": "cpp",
         "string_view": "cpp",
@@ -8,7 +9,8 @@
         "atomic": "cpp",
         "new": "cpp",
         "iostream": "cpp",
-        "thread": "cpp"
+        "thread": "cpp",
+        "chrono": "cpp"
     },
     "MicroPython.executeButton": [
         {

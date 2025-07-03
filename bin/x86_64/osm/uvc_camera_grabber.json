@@ -3,10 +3,9 @@
     "verbose" : 1,
 
     "parameters":{
-        "find_available":true,
         "use_image_stream":true,
-        "use_image_stream_monitoring":true,
-        "cameras":[
+        "use_image_stream_monitoring":false,
+        "camera":[
             {"id":1, "name":"Left Top A Pillar", "device":"/dev/video0"},
             {"id":2, "name":"Center Overhead", "device":"/dev/video2"},
             {"id":3, "name":"Right Middle A Pillar", "device":"/dev/video4"},
