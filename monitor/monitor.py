@@ -23,7 +23,7 @@ APP_NAME = pathlib.Path(__file__).stem
 sys.path.append(ROOT_PATH.as_posix())
 
 import argparse
-from osm_monitor.window import AppWindow
+from monitor.window import AppWindow
 from util.logger.console import ConsoleLogger
 
 
