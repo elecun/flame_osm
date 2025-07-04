@@ -84,7 +84,6 @@ class AppWindow(QMainWindow):
                                                                                      topic=f"{config['image_stream_monitor_topic_prefix']}{id}")
                     self.__camera_image_subscriber_map[id].frame_update_signal.connect(self.on_update_camera_image)
                     self.__camera_image_subscriber_map[id].start()
-                    self.__console.info("** Start Camera #{id} Monitoring Subscriber...")
 
         except Exception as e:
             self.__console.error(f"{e}")
@@ -100,6 +99,8 @@ class AppWindow(QMainWindow):
 
         camera_id = tags["camera_id"]
         fps = round(tags["fps"], 1)
+
+        print(tags)
 
         color_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         if self.__show_frame_info:

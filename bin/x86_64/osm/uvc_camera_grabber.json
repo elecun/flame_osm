@@ -3,8 +3,8 @@
     "verbose" : 1,
 
     "parameters":{
-        "use_image_stream":true,
-        "use_image_stream_monitoring":false,
+        "use_image_stream":false,
+        "use_image_stream_monitoring":true,
         "camera":[
             {"id":1, "name":"Left Top A Pillar", "device":"/dev/video0"},
             {"id":2, "name":"Center Overhead", "device":"/dev/video2"},
