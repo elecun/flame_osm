@@ -3,7 +3,7 @@
     "verbose" : 1,
 
     "parameters":{
-        "use_image_stream":false,
+        "use":false,
         "use_image_stream_monitoring":true,
         "camera":[
             {"id":1, "name":"Left Top A Pillar", "device":"/dev/video0"},
