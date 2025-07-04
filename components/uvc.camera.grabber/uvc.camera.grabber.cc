@@ -82,15 +82,21 @@ void uvc_camera_grabber::on_message(){
 
 void uvc_camera_grabber::_grab_task(json camera_param){
 
-    string device = camera_param.value("device", "/dev/video0");
-    int camera_id = camera_param.value("id", 0);
+    string device = camera_param.value("device", "");
+    int camera_id = camera_param.value("id", -1);
 
+    if(camera_id<0 || device.empty()){
+        logger::warn("[{}] Undefined or Invalid Camera Configuration in the Component Profile.", get_name());
+        return;
+    }
+
+    cv::VideoCapture _cap; // specific camera capture
     try{
 
-        cv::VideoCapture _cap(device, CAP_V4L2); //for linux
-        _cap.set(cv::CAP_PROP_BUFFERSIZE, 1); //minial buffer size
+        /* camera open */
+        _cap.open(device, CAP_V4L2); /* for linux only */
+        _cap.set(cv::CAP_PROP_BUFFERSIZE, 1);
         if(!_cap.isOpened()){
-            logger::error("[{}] Camera #{}({}) cannot be opened. please check the device.", get_name(), camera_id, device);
             CV_Error(cv::Error::StsError, fmt::format("Camera #{} cannot be opened.", camera_id));
         }
 
@@ -101,8 +107,6 @@ void uvc_camera_grabber::_grab_task(json camera_param){
         json dataport_config = get_profile()->dataport();
         int monitoring_width = dataport_config.at(monitoring_portname).at("resolution").value("width", 480);
         int monitoring_height = dataport_config.at(monitoring_portname).at("resolution").value("height", 270);
-        string monitoring_topic = fmt::format("{}/{}", get_name(), monitoring_portname);
-        logger::info("[{}] Camera #{} monitoring image resolution : {}x{}", get_name(), camera_id, monitoring_width, monitoring_height);
 
         json tag;
         auto last_time = chrono::high_resolution_clock::now();
@@ -147,7 +151,7 @@ void uvc_camera_grabber::_grab_task(json camera_param){
 
             /* transfer small image for monitoring */
             if(_use_image_stream_monitoring.load()){
-                 
+                
                 cv::Mat monitor_image;
                 cv::resize(raw_frame, monitor_image, cv::Size(monitoring_width, monitoring_height));
                 std::vector<unsigned char> serialized_monitor_image;
@@ -169,10 +173,14 @@ void uvc_camera_grabber::_grab_task(json camera_param){
         /* realse */
         _cap.release();
         logger::info("[{}] Camera #{}({}) is released", get_name(), camera_id, device);
-        
     }
     catch(const cv::Exception& e){
-        logger::error("[{}] Camera #{} grabber has an error while grabbing", get_name(), camera_id);
+        logger::error("[{}] Camera #{} CV Exception : {}", get_name(), camera_id, e.err);
+        logger::debug("[{}] {}", get_name(), e.what());
+        _cap.release();
+    }
+    catch(const std::out_of_range& e){
+        logger::error("[{}] Invalid parameter access", get_name());
     }
     catch(const zmq::error_t& e){
         logger::error("[{}] Piepeline Error : {}", get_name(), e.what());
@@ -180,8 +188,7 @@ void uvc_camera_grabber::_grab_task(json camera_param){
     catch(const json::exception& e){
         logger::error("[{}] Data Parse Error : {}", get_name(), e.what());
     }
-    catch(const std::out_of_range& e){
-        logger::error("[{}] Invalid parameter access", get_name());
-    }
+
+    
 
 }
