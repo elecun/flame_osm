@@ -91,7 +91,7 @@ class AppWindow(QMainWindow):
     def clear_all(self):
         """ clear graphic view """
         try:
-            self.__frame_defect_grid_plot.clear()
+            pass
         except Exception as e:
             self.__console.error(f"{e}")
 
