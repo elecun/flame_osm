@@ -53,7 +53,7 @@ endif
 # OS
 ifeq ($(OS),Linux) #for Linux
 	LDFLAGS = -Wl,--export-dynamic -Wl,-rpath=. $(LIBDIR) -L$(LIBDIR)
-	LDLIBS = -pthread -lrt -ldl -lm -lzmq -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio
+	LDLIBS = -pthread -lrt -ldl -lm -lzmq
 endif
 
 
@@ -96,14 +96,14 @@ $(BUILDDIR)config.o: $(INCLUDES)/flame/config.cc
 
 uvc_camera_grabber.comp:	$(BUILDDIR)uvc.camera.grabber.o \
 							$(BUILDDIR)support.o
-							$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) 
+							$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio
 $(BUILDDIR)uvc.camera.grabber.o:	$(CURRENT_DIR)/components/uvc.camera.grabber/uvc.camera.grabber.cc
 									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
 $(BUILDDIR)support.o:	$(CURRENT_DIR)/components/uvc.camera.grabber/support.cc
 									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
 
 fpdlink_camera_grabber.comp:	$(BUILDDIR)fpdlink.camera.grabber.o
-							$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) 
+							$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio
 $(BUILDDIR)fpdlink.camera.grabber.o:	$(CURRENT_DIR)/components/fpdlink.camera.grabber/fpdlink.camera.grabber.cc
 									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
 
