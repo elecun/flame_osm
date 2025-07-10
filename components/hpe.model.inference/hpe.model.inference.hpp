@@ -13,10 +13,14 @@
 #define FLAME_HPE_MODLE_INFERENCE_HPP_INCLUDED
 
 #include <flame/component/object.hpp>
+#include <atomic>
+#include <thread>
+#include <memory>
+#include <onnxruntime_cxx_api.h> //version 1.22.0
 
 class hpe_model_inference : public flame::component::object {
     public:
-    hpe_model_inference() = default;
+        hpe_model_inference();
         virtual ~hpe_model_inference() = default;
 
         /* default interface functions */
@@ -26,6 +30,17 @@ class hpe_model_inference : public flame::component::object {
         void on_message() override;
 
     private:
+        void _camera_stream_process(int stream_id);
+
+    private:
+    /* worker related */
+    atomic<bool> _worker_stop { false };
+    thread _camera_stream_process_worker;
+
+    /* ONNXRuntime Related */
+    Ort::Env _onnx_env;
+    Ort::SessionOptions _onnx_session_options;
+    unique_ptr<Ort::Session> _onnx_session;
         
 
 }; /* class */

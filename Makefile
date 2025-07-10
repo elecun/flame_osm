@@ -112,6 +112,11 @@ kvaser_can_interface.comp:	$(BUILDDIR)kvaser.can.interface.o
 $(BUILDDIR)kvaser.can.interface.o:	$(CURRENT_DIR)/components/kvaser.can.interface/kvaser.can.interface.cc
 									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
 
+hpe_model_inference.comp:	$(BUILDDIR)hpe.model.inference.o
+							$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lonnxruntime
+$(BUILDDIR)hpe.model.inference.o:	$(CURRENT_DIR)/components/hpe.model.inference/hpe.model.inference.cc
+									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
+
 
 all : flame
 

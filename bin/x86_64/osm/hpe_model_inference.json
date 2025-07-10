@@ -3,14 +3,8 @@
     "verbose" : 1,
 
     "parameters":{
-        "use":false,
-        "use_image_stream_monitoring":true,
-        "camera":[
-            {"id":1, "name":"Left Top A Pillar", "device":"/dev/video0"},
-            {"id":2, "name":"Center Overhead", "device":"/dev/video2"},
-            {"id":3, "name":"Right Middle A Pillar", "device":"/dev/video4"},
-            {"id":4, "name":"Right Top A Pillar", "device":"/dev/video6"}
-        ]
+        "onnx_model_path":"",
+        "image_stream_ids":[1]
     },
 
     "dataport":{
@@ -21,68 +15,9 @@
             "socket_type" : "pub",
             "queue_size" : 100
         },
-        "image_stream_monitor_1":{
-            "transport":"tcp",
-            "host":"*",
-            "port":9001,
-            "socket_type" : "pub",
-            "queue_size" : 10,
-            "resolution" : {
-                "width" : 480,
-                "height" : 270
-            }
-        },
-        "image_stream_monitor_2":{
-            "transport":"tcp",
-            "host":"*",
-            "port":9002,
-            "socket_type" : "pub",
-            "queue_size" : 10,
-            "resolution" : {
-                "width" : 480,
-                "height" : 270
-            }
-        },
-        "image_stream_monitor_3":{
-            "transport":"tcp",
-            "host":"*",
-            "port":9003,
-            "socket_type" : "pub",
-            "queue_size" : 10,
-            "resolution" : {
-                "width" : 480,
-                "height" : 270
-            }
-        },
-        "image_stream_monitor_4":{
-            "transport":"tcp",
-            "host":"*",
-            "port":9004,
-            "socket_type" : "pub",
-            "queue_size" : 10,
-            "resolution" : {
-                "width" : 480,
-                "height" : 270
-            }
-        },
         "image_stream_1" : {
             "transport" : "inproc",
-            "socket_type" : "push",
-            "queue_size" : 100
-        },
-        "image_stream_2" : {
-            "transport" : "inproc",
-            "socket_type" : "push",
-            "queue_size" : 100
-        },
-        "image_stream_3" : {
-            "transport" : "inproc",
-            "socket_type" : "push",
-            "queue_size" : 100
-        },
-        "image_stream_4" : {
-            "transport" : "inproc",
-            "socket_type" : "push",
+            "socket_type" : "pull",
             "queue_size" : 100
         }
     }

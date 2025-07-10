@@ -10,7 +10,12 @@
         "new": "cpp",
         "iostream": "cpp",
         "thread": "cpp",
-        "chrono": "cpp"
+        "chrono": "cpp",
+        "unordered_map": "cpp",
+        "memory": "cpp",
+        "future": "cpp",
+        "istream": "cpp",
+        "functional": "cpp"
     },
     "MicroPython.executeButton": [
         {
