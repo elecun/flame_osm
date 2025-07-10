@@ -13,7 +13,19 @@
 #define FLAME_KVASER_CAN_CONTROLLER_HPP_INCLUDED
 
 #include <flame/component/object.hpp>
-#include <canlib.h>
+#include <map>
+#include <unordered_map>
+#include <vector>
+#include <thread>
+#include <string>
+#include <atomic>
+#include <iostream>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+extern "C" {
+    #include <canlib.h>
+}
 
 class kvaser_can_controller : public flame::component::object {
 public:

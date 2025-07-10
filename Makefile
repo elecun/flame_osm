@@ -107,9 +107,9 @@ fpdlink_camera_grabber.comp:	$(BUILDDIR)fpdlink.camera.grabber.o
 $(BUILDDIR)fpdlink.camera.grabber.o:	$(CURRENT_DIR)/components/fpdlink.camera.grabber/fpdlink.camera.grabber.cc
 									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
 
-kvaser_can_controller.comp:	$(BUILDDIR)kvaser.can.controller.o
+kvaser_can_interface.comp:	$(BUILDDIR)kvaser.can.interface.o
 							$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lcanlib
-$(BUILDDIR)kvaser.can.controller.o:	$(CURRENT_DIR)/components/kvaser.can.controller/kvaser.can.controller.cc
+$(BUILDDIR)kvaser.can.interface.o:	$(CURRENT_DIR)/components/kvaser.can.interface/kvaser.can.interface.cc
 									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
 
 
