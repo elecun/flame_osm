@@ -1,7 +1,7 @@
 /**
- * @file fpdlink.camera.grabber.hpp
+ * @file solectrix.camera.grabber.hpp
  * @author Byunghun Hwang <bh.hwang@iae.re.kr>
- * @brief TI FPD Link III camera grabber (with TI954 Deserializer)
+ * @brief Frame Grabber with Solectrix proFRAME 3.0 + TI954 Adapter
  * @version 0.1
  * @date 2025-05-07
  * 
@@ -9,17 +9,17 @@
  * 
  */
 
-#ifndef FLAME_FPDLINK_CAMERA_GRABBER_HPP_INCLUDED
-#define FLAME_FPDLINK_CAMERA_GRABBER_HPP_INCLUDED
+#ifndef FLAME_SOLECTRIX_CAMERA_GRABBER_HPP_INCLUDED
+#define FLAME_SOLECTRIX_CAMERA_GRABBER_HPP_INCLUDED
 
 #include <flame/component/object.hpp>
 
 using namespace std;
 
-class fpdlink_camera_grabber : public flame::component::object {
+class solectrix_camera_grabber : public flame::component::object {
     public:
-        fpdlink_camera_grabber() = default;
-        virtual ~fpdlink_camera_grabber() = default;
+        solectrix_camera_grabber() = default;
+        virtual ~solectrix_camera_grabber() = default;
 
         /* default interface functions */
         bool on_init() override;
