@@ -6,12 +6,21 @@
         "use_image_stream":false,
         "use_image_stream_monitoring":true,
         "camera":[
+            {"id":1, "name":"Left Top A Pillar", "device":"/dev/video0"}
+            ],
+        "camera_bak":[
             {"id":1, "name":"Left Top A Pillar", "device":"/dev/video0"},
             {"id":2, "name":"Center Overhead", "device":"/dev/video2"},
             {"id":3, "name":"Right Middle A Pillar", "device":"/dev/video4"},
             {"id":4, "name":"Right Top A Pillar", "device":"/dev/video6"}
-        ]
+        ],
+        "calibration":{
+            "focal_length":[1061.013861, 1167.335993],
+            "principal_point":[477.171894, 944.795309],
+            "distortion":[-0.446958, 0.281446, 0.004579, -0.055549]
+        }
     },
+
 
     "dataport":{
         "status" : {

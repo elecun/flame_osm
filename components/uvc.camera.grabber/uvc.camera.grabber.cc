@@ -19,18 +19,18 @@ void release(){ if(_instance){ delete _instance; _instance = nullptr; }}
 bool uvc_camera_grabber::on_init(){
 
     try{
-
         /* read profile */
         json parameters = get_profile()->parameters();
 
         /* set video capture instance */
+        int auto_id = 1;
         if(parameters.contains("camera")){
             for(auto& dev:parameters["camera"]){
-                int id = dev["id"].get<int>();
+                int id = dev.value("id", auto_id++);
+                dev["id"] = id; /* update camera id */
 
                 /* assign grabber worker */
-                _grab_worker[id] = thread(&uvc_camera_grabber::_grab_task, this, dev);
-                
+                _grab_worker[id] = thread(&uvc_camera_grabber::_grab_task, this, id, dev);        
             }
         }
         else {
@@ -38,16 +38,16 @@ bool uvc_camera_grabber::on_init(){
             return false;
         }
 
-        /* configure data pipeline  */
+        /* configure data for data pipelining  */
         _use_image_stream_monitoring.store(parameters.value("use_image_stream_monitoring", false));
         _use_image_stream.store(parameters.value("use_image_stream", false));
     }
     catch(json::exception& e){
-        logger::error("[{}] Component Profile Error : {}", get_name(), e.what());
+        logger::error("[{}] Component profile read exception : {}", get_name(), e.what());
         return false;
     }
     catch(cv::Exception::exception& e){
-        logger::error("[{}] Device Error : {}", get_name(), e.what());
+        logger::error("[{}] Device open exception : {}", get_name(), e.what());
         return false;
     }
 
@@ -69,7 +69,7 @@ void uvc_camera_grabber::on_close(){
     for_each(_grab_worker.begin(), _grab_worker.end(), [](auto& t) {
         if(t.second.joinable()){
             t.second.join();
-            logger::info("Camera #{} is stopped", t.first);
+            logger::debug("Camera #{} grabber is successfully stopped", t.first);
         }
     });
     _grab_worker.clear();
@@ -80,17 +80,16 @@ void uvc_camera_grabber::on_message(){
     
 }
 
-void uvc_camera_grabber::_grab_task(json camera_param){
+void uvc_camera_grabber::_grab_task(int camera_id, json camera_param){
 
     string device = camera_param.value("device", "");
-    int camera_id = camera_param.value("id", -1);
 
     if(camera_id<0 || device.empty()){
         logger::warn("[{}] Undefined or Invalid Camera Configuration in the Component Profile.", get_name());
         return;
     }
 
-    cv::VideoCapture _cap; // specific camera capture
+    cv::VideoCapture _cap; /* camera capture */
     try{
 
         /* camera open */
@@ -110,6 +109,7 @@ void uvc_camera_grabber::_grab_task(json camera_param){
 
         json tag;
         auto last_time = chrono::high_resolution_clock::now();
+        logger::debug("[{}] Camera #{} grabbing is now working...", get_name(), camera_id);
         while(!_worker_stop.load()){
 
             /* capture from camera */
