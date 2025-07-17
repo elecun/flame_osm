@@ -5,6 +5,7 @@
     "parameters":{
         "use_image_stream":false,
         "use_image_stream_monitoring":true,
+        "rotation_cw":90.0,
         "camera":[
             {"id":1, "name":"Left Top A Pillar", "device":"/dev/video0"}
             ],

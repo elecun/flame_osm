@@ -1,0 +1,48 @@
+{
+    "rt_cycle_ns" : 1000000000,
+    "verbose" : 1,
+
+    "parameters":{
+        "use_image_stream":false,
+        "use_image_stream_monitoring":true,
+        "rotation_cw":90.0,
+        "calibration":{
+            "focal_length":[1061.013861, 1167.335993],
+            "principal_point":[477.171894, 944.795309],
+            "distortion":[-0.446958, 0.281446, 0.004579, -0.055549]
+        }
+    },
+
+
+    "dataport":{
+        "status" : {
+            "transport" : "tcp",
+            "host" : "*",
+            "port" : 5101,
+            "socket_type" : "pub",
+            "queue_size" : 10
+        },
+         "action_invoke" : {
+            "transport" : "tcp",
+            "port": 5102,
+            "socket_type" : "pull",
+            "queue_size" : 10
+        },
+        "image_stream_monitor":{
+            "transport":"tcp",
+            "host":"*",
+            "port":9001,
+            "socket_type" : "pub",
+            "queue_size" : 10,
+            "resolution" : {
+                "width" : 960,
+                "height" : 540
+            }
+        },
+        "image_stream" : {
+            "transport" : "inproc",
+            "socket_type" : "push",
+            "queue_size" : 10
+        }
+    }
+}

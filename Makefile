@@ -117,6 +117,11 @@ hpe_model_inference.comp:	$(BUILDDIR)hpe.model.inference.o
 $(BUILDDIR)hpe.model.inference.o:	$(CURRENT_DIR)/components/hpe.model.inference/hpe.model.inference.cc
 									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
 
+video_file_grabber.comp:	$(BUILDDIR)video.file.grabber.o
+							$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio
+$(BUILDDIR)video.file.grabber.o:	$(CURRENT_DIR)/components/video.file.grabber/video.file.grabber.cc
+									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
+
 
 all : flame
 
