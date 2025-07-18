@@ -51,6 +51,7 @@ if __name__ == "__main__":
                 console.info(f"+ Verbose Level : {configure['verbose']}")
 
             app = QApplication(sys.argv)
+            app.setStyle("Windows")
             app_window = AppWindow(config=configure)
             
             if "app_window_title" in configure:

@@ -37,6 +37,7 @@ except ImportError:
     
 from util.logger.console import ConsoleLogger
 from subscriber.camera import CameraMonitorSubscriber
+from subscriber.video import VideoImageStreamSubscriber
 
 class AppWindow(QMainWindow):
     def __init__(self, config:dict):
@@ -84,6 +85,12 @@ class AppWindow(QMainWindow):
                                                                                      topic=f"{config['image_stream_monitor_topic_prefix']}{id}")
                     self.__camera_image_subscriber_map[id].frame_update_signal.connect(self.on_update_camera_image)
                     self.__camera_image_subscriber_map[id].start()
+
+                # video image stream subscriber
+                self.__video_image_subscriber = VideoImageStreamSubscriber(self.__pipeline_context, connection=config["video_stream_source"], 
+                                                                           topic=config["video_stream_source_topic"])
+                self.__video_image_subscriber.frame_update_signal.connect(self._on_update_video_image)
+                self.__video_image_subscriber.start()
 
         except Exception as e:
             self.__console.error(f"{e}")

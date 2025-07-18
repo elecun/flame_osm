@@ -4,7 +4,6 @@
 
     "parameters":{
         "use_image_stream":false,
-        "use_image_stream_monitoring":true,
         "rotation_cw":90.0,
         "calibration":{
             "focal_length":[1061.013861, 1167.335993],
@@ -24,24 +23,17 @@
         },
          "action_invoke" : {
             "transport" : "tcp",
+            "host" : "*",
             "port": 5102,
             "socket_type" : "pull",
-            "queue_size" : 10
+            "queue_size" : 10,
+            "timeout_ms":300
         },
-        "image_stream_monitor":{
+        "image_stream":{
             "transport":"tcp",
             "host":"*",
-            "port":9001,
+            "port":5103,
             "socket_type" : "pub",
-            "queue_size" : 10,
-            "resolution" : {
-                "width" : 960,
-                "height" : 540
-            }
-        },
-        "image_stream" : {
-            "transport" : "inproc",
-            "socket_type" : "push",
             "queue_size" : 10
         }
     }

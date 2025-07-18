@@ -10,8 +10,8 @@
  */
 
 
-#ifndef FLAMEVIDEO_FILE_GRABBER_HPP_INCLUDED
-#define FLAMEVIDEO_FILE_GRABBER_HPP_INCLUDED
+#ifndef FLAME_VIDEO_FILE_GRABBER_HPP_INCLUDED
+#define FLAME_VIDEO_FILE_GRABBER_HPP_INCLUDED
 
 #include <flame/component/object.hpp>
 #include <opencv2/opencv.hpp>
@@ -22,6 +22,7 @@
 #include <unordered_map>
 
 using namespace std;
+using namespace cv;
 
 class video_file_grabber : public flame::component::object {
     public:
@@ -37,9 +38,17 @@ class video_file_grabber : public flame::component::object {
     private:
         /* task processing by action invoker */
         void _action_invoke_listener_proc(json parameters);
+        void _action_proc(json args);
 
     private:
-        void api_load_video(const json& args);
+        /* rpc-like api functions */
+        void api_start_grab(const json& args);  /* start frame grab */
+        void api_stop_grab(const json& args);   /* stop frame grab */
+
+    private:
+        /* action thread */
+        atomic<bool> _action_working { false }; /* action thread termination control */
+        thread _invoked_action_thread;
 
     private:
         /* action_apis */
@@ -51,7 +60,6 @@ class video_file_grabber : public flame::component::object {
         /* flag */
         thread _action_invoke_listener;
         atomic<bool> _worker_stop { false };
-        atomic<bool> _use_image_stream_monitoring { false };
         atomic<bool> _use_image_stream { false };
         
 
