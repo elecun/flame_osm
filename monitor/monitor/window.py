@@ -93,7 +93,7 @@ class AppWindow(QMainWindow):
                 # video image stream subscriber
                 self.__video_image_subscriber = VideoImageStreamSubscriber(self.__pipeline_context, connection=config["video_stream_source"], 
                                                                            topic=config["video_stream_source_topic"])
-                self.__video_image_subscriber.frame_update_signal.connect(self._on_update_video_image)
+                self.__video_image_subscriber.frame_update_signal.connect(self.on_update_video_image)
                 self.__video_image_subscriber.start()
 
         except Exception as e:
@@ -138,6 +138,10 @@ class AppWindow(QMainWindow):
             self.__frame_window_map[camera_id].show()
         except Exception as e:
             self.__console.error(e)
+    
+    def on_update_video_image(self, image:np.ndarray, tags:dict):
+        """ video image stream subscribe """
+        print(tags)
     
                 
     def closeEvent(self, event:QCloseEvent) -> None: 
