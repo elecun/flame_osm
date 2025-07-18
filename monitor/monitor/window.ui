@@ -7,8 +7,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1900</width>
-    <height>981</height>
+    <width>1481</width>
+    <height>1029</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -30,8 +30,8 @@
      <rect>
       <x>0</x>
       <y>0</y>
-      <width>1900</width>
-      <height>951</height>
+      <width>1476</width>
+      <height>996</height>
      </rect>
     </property>
     <property name="font">
@@ -45,7 +45,7 @@
      <enum>QTabWidget::South</enum>
     </property>
     <property name="currentIndex">
-     <number>0</number>
+     <number>1</number>
     </property>
     <widget class="QWidget" name="tab_4">
      <attribute name="title">
@@ -56,8 +56,8 @@
        <rect>
         <x>0</x>
         <y>0</y>
-        <width>960</width>
-        <height>540</height>
+        <width>540</width>
+        <height>960</height>
        </rect>
       </property>
       <property name="styleSheet">
@@ -76,10 +76,10 @@ border: 1px solid white;</string>
      <widget class="QGroupBox" name="groupBox">
       <property name="geometry">
        <rect>
-        <x>5</x>
-        <y>545</y>
-        <width>956</width>
-        <height>371</height>
+        <x>545</x>
+        <y>670</y>
+        <width>921</width>
+        <height>286</height>
        </rect>
       </property>
       <property name="title">
@@ -147,10 +147,10 @@ border: 1px solid white;</string>
      <widget class="QGroupBox" name="groupBox_3">
       <property name="geometry">
        <rect>
-        <x>970</x>
-        <y>0</y>
+        <x>545</x>
+        <y>5</y>
         <width>921</width>
-        <height>916</height>
+        <height>661</height>
        </rect>
       </property>
       <property name="sizePolicy">
@@ -171,10 +171,10 @@ border: 1px solid white;</string>
       <widget class="QFrame" name="frame">
        <property name="geometry">
         <rect>
-         <x>10</x>
+         <x>5</x>
          <y>25</y>
-         <width>906</width>
-         <height>481</height>
+         <width>911</width>
+         <height>626</height>
         </rect>
        </property>
        <property name="autoFillBackground">
@@ -199,10 +199,10 @@ border: 1px solid white;</string>
      <widget class="QGroupBox" name="groupBox_2">
       <property name="geometry">
        <rect>
-        <x>1255</x>
-        <y>15</y>
-        <width>621</width>
-        <height>371</height>
+        <x>545</x>
+        <y>670</y>
+        <width>926</width>
+        <height>286</height>
        </rect>
       </property>
       <property name="title">
@@ -224,42 +224,52 @@ border: 1px solid white;</string>
         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
        </property>
       </widget>
-      <widget class="QLabel" name="label_exp_video_filepath">
+      <widget class="QLabel" name="label_video_filepath">
        <property name="geometry">
         <rect>
          <x>105</x>
          <y>30</y>
-         <width>426</width>
+         <width>711</width>
          <height>26</height>
         </rect>
+       </property>
+       <property name="font">
+        <font>
+         <family>Arial</family>
+        </font>
        </property>
        <property name="styleSheet">
         <string notr="true">background-color:#fff;</string>
        </property>
        <property name="text">
-        <string>-</string>
+        <string/>
        </property>
       </widget>
-      <widget class="QPushButton" name="btn_exp_video_open">
+      <widget class="QPushButton" name="btn_video_open">
        <property name="geometry">
         <rect>
-         <x>540</x>
+         <x>830</x>
          <y>30</y>
          <width>71</width>
          <height>26</height>
         </rect>
        </property>
+       <property name="font">
+        <font>
+         <family>Arial</family>
+        </font>
+       </property>
        <property name="text">
         <string>Open</string>
        </property>
       </widget>
-      <widget class="QPushButton" name="btn_exp_start_analysis">
+      <widget class="QPushButton" name="btn_video_start_analysis">
        <property name="geometry">
         <rect>
-         <x>315</x>
-         <y>70</y>
+         <x>620</x>
+         <y>240</y>
          <width>141</width>
-         <height>26</height>
+         <height>36</height>
         </rect>
        </property>
        <property name="styleSheet">
@@ -269,13 +279,13 @@ border: 1px solid white;</string>
         <string>Start Analysis</string>
        </property>
       </widget>
-      <widget class="QPushButton" name="btn_exp_stop_analysis">
+      <widget class="QPushButton" name="btn_video_stop_analysis">
        <property name="geometry">
         <rect>
-         <x>470</x>
-         <y>70</y>
+         <x>770</x>
+         <y>240</y>
          <width>141</width>
-         <height>26</height>
+         <height>36</height>
         </rect>
        </property>
        <property name="styleSheet">
@@ -283,6 +293,75 @@ border: 1px solid white;</string>
        </property>
        <property name="text">
         <string>Stop Analysis</string>
+       </property>
+      </widget>
+     </widget>
+     <widget class="QLabel" name="window_video_1">
+      <property name="geometry">
+       <rect>
+        <x>0</x>
+        <y>0</y>
+        <width>540</width>
+        <height>960</height>
+       </rect>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">background-color: rgb(0, 0, 0);
+color:rgb(255,255,255);
+border-color: rgb(255, 255, 255);
+border: 1px solid white;</string>
+      </property>
+      <property name="text">
+       <string>Video #1</string>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignCenter</set>
+      </property>
+     </widget>
+     <widget class="QGroupBox" name="groupBox_4">
+      <property name="geometry">
+       <rect>
+        <x>545</x>
+        <y>0</y>
+        <width>921</width>
+        <height>661</height>
+       </rect>
+      </property>
+      <property name="sizePolicy">
+       <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+        <horstretch>0</horstretch>
+        <verstretch>0</verstretch>
+       </sizepolicy>
+      </property>
+      <property name="baseSize">
+       <size>
+        <width>0</width>
+        <height>0</height>
+       </size>
+      </property>
+      <property name="title">
+       <string>Occupant Status Analysis</string>
+      </property>
+      <widget class="QFrame" name="frame_2">
+       <property name="geometry">
+        <rect>
+         <x>5</x>
+         <y>25</y>
+         <width>911</width>
+         <height>626</height>
+        </rect>
+       </property>
+       <property name="autoFillBackground">
+        <bool>false</bool>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">background-color: rgb(255, 255, 255);</string>
+       </property>
+       <property name="frameShape">
+        <enum>QFrame::StyledPanel</enum>
+       </property>
+       <property name="frameShadow">
+        <enum>QFrame::Raised</enum>
        </property>
       </widget>
      </widget>
