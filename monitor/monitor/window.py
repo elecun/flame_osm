@@ -55,6 +55,9 @@ class AppWindow(QMainWindow):
         # device/service control interfaces
         self.__camera_image_subscriber_map = {}
 
+        # module instance
+        self.__video_image_subscriber = None
+
         try:            
             if "gui" in config:
 
@@ -69,6 +72,7 @@ class AppWindow(QMainWindow):
                 self.chk_option_disable_camera_monitoring_stream.stateChanged.connect(self.on_check_option_disable_camera_monitor_stream)
                 self.chk_option_show_frame_info.stateChanged.connect(self.on_check_option_show_frame_info)
                 self.chk_option_show_body_keypoints.stateChanged.connect(self.on_check_show_body_keypoints)
+                self.btn_video_open.clicked.connect(self.on_btn_video_open)
 
                 # set options
                 if self.__config.get("option_show_frame_info", False):
@@ -102,6 +106,16 @@ class AppWindow(QMainWindow):
         except Exception as e:
             self.__console.error(f"{e}")
 
+    ## component event callbacks
+    def on_btn_video_open(self):
+        video_file, _ = QFileDialog.getOpenFileName(self, "Video File", "", "AVI Files (*.avi);;All Files (*)")
+        if video_file:
+            widget = self.findChild(QLabel, name=f"label_video_filepath")
+            if widget:
+                widget.setText(f"{video_file}")
+        else:
+            self.__console.warning("No Markers file selected.")
+
     def on_update_camera_image(self, image:np.ndarray, tags:dict):
 
         camera_id = tags["camera_id"]
@@ -133,6 +147,10 @@ class AppWindow(QMainWindow):
         if len(self.__camera_image_subscriber_map.keys())>0:
             with ThreadPoolExecutor(max_workers=10) as executor:
                 executor.map(lambda subscriber: subscriber.close(), self.__camera_image_subscriber_map.values())
+
+        # close video stream subscriber
+        if self.__video_image_subscriber:
+            self.__video_image_subscriber.close()
 
         # context termination with linger=0
         self.__pipeline_context.destroy(0)
