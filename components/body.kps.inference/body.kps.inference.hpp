@@ -1,22 +1,24 @@
 /**
- * @file hpe.model.inference.hpp
+ * @file body.kps.inference.hpp
  * @author Byunghun Hwang <bh.hwang@iae.re.kr>
- * @brief Human Pose Estimation Model Inference Component
+ * @brief Body Keypoint Detection Model Inference Component
  * @version 0.1
- * @date 2025-04-03
+ * @date 2025-07-21
  * 
  * @copyright Copyright (c) 2025
  * 
  */
 
-#ifndef FLAME_HPE_MODLE_INFERENCE_HPP_INCLUDED
-#define FLAME_HPE_MODLE_INFERENCE_HPP_INCLUDED
+#ifndef FLAME_BODY_KPS_INFERENCE_HPP_INCLUDED
+#define FLAME_BODY_KPS_INFERENCE_HPP_INCLUDED
 
 #include <flame/component/object.hpp>
 #include <atomic>
 #include <thread>
 #include <memory>
-#include <onnxruntime_cxx_api.h> //version 1.22.0
+#include <NvInfer.h>
+#include <NvOnnxParser.h>
+#include <cuda_runtime_api.h>
 
 class hpe_model_inference : public flame::component::object {
     public:

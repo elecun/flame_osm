@@ -35,3 +35,8 @@
 venv/
 *.avi
 *.pyc
+*.pt
+*.onnx
+*.engine
+
+*.avi

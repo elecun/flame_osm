@@ -1,0 +1,1 @@
+Full Body Pose Estimation (Keypoints Estimation) Model Component using YOLO11-Pose

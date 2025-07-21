@@ -1,1 +1,0 @@
-Full Body Pose Estimation Model (Inference)
