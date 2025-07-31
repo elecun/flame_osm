@@ -1,5 +1,5 @@
 /**
- * @file grabber.hpp
+ * @file sxpf_grabber.hpp
  * @author Byunghun hwnag <bh.hwang@iae.re.kr>
  * @brief Solectrix Frame Grabber Device
  * @version 0.1
@@ -13,7 +13,12 @@
 #define FLAME_SOLECTRIX_CAMERA_GRABBER_DEVICE_HPP_INCLUDED
 
 #include "include/sxpf.h"
+#include <map>
+#include <vector>
 
+using namespace std;
+
+/* channel */
 typedef struct input_channel_s
 {
     sxpf_hdl        fg = 0;
@@ -26,14 +31,17 @@ typedef struct input_channel_s
 
 class sxpf_grabber {
     public:
-        sxpf_grabber() = default;
-        ~sxpf_grabber() = default;
+        sxpf_grabber(vector<int> channels);
+        ~sxpf_grabber();
 
         bool open();
-        bool close();
+        void close();
+
+        void grab();
 
     private:
-        input_channel_t
+        map<int, input_channel_t> _channels;
+        sxpf_card_props_t props;
 
 };
 

@@ -19,6 +19,18 @@ bool solectrix_camera_grabber::on_init(){
         /* read profile */
         json parameters = get_profile()->parameters();
 
+        /* create device instance */
+        vector<int> channels;
+        if(parameters.contains("use_channel"))
+            channels = parameters["use_channel"].get<vector<int>>();
+        else{
+            logger::warn("[{}] Cannot found 'use_channel' parameter. It must be defined.", get_name());
+            return false;
+        }
+        
+        /* start grab task on thread */
+        _grab_worker = thread(&solectrix_camera_grabber::_grab_task, this, parameters);
+
         
     }
     catch(json::exception& e){
@@ -37,11 +49,19 @@ void solectrix_camera_grabber::on_loop(){
 
 void solectrix_camera_grabber::on_close(){
 
-    
+    /* stop worker */
+    _worker_stop.store(true);
 
 }
 
 void solectrix_camera_grabber::on_message(){
     
+}
+
+void solectrix_camera_grabber::_grab_task(json parameters){
+
+    vector<int> channels = parameters["use_channel"].get<vector<int>>();
+    _grabber = make_unique<sxpf_grabber>(channels);
+
 }
 

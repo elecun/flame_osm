@@ -10,6 +10,7 @@ CURRENT_DIR_NAME := $(notdir $(patsubst %/,%,$(dir $(CURRENT_DIR))))
 
 # path
 FLAME_PATH = $(CURRENT_DIR)/flame
+DEP_PATH = $(CURRENT_DIR)/dep
 INCLUDES = $(FLAME_PATH)/include
 SOURCE_FILES = .
 
@@ -36,7 +37,7 @@ else ifeq ($(ARCH), aarch64) # for Mac Apple Silicon
 #	LD_LIBRARY_PATH += -L./lib/aarch64-linux-gnu
 	OUTDIR		= $(CURRENT_DIR)/bin/aarch64/
 	BUILDDIR	= $(CURRENT_DIR)/bin/aarch64/
-	INCLUDE_DIR = -I./ -I$(CURRENT_DIR) -I$(FLAME_PATH)/include -I$(FLAME_PATH)/include/dep -I/usr/include -I/usr/local/include -I/usr/include/opencv4
+	INCLUDE_DIR = -I./ -I$(CURRENT_DIR) -I$(FLAME_PATH)/include -I$(CURRENT_DIR)/include/dep -I/usr/include -I/usr/local/include -I/usr/include/opencv4
 	LIBDIR = -L/usr/local/lib -L$(CURRENT_DIR)/lib/aarch64-linux-gnu/
 export LD_LIBRARY_PATH := $(LIBDIR):$(LD_LIBRARY_PATH)
 else
@@ -102,9 +103,12 @@ $(BUILDDIR)uvc.camera.grabber.o:	$(CURRENT_DIR)/components/uvc.camera.grabber/uv
 $(BUILDDIR)support.o:	$(CURRENT_DIR)/components/uvc.camera.grabber/support.cc
 									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
 
-fpdlink_camera_grabber.comp:	$(BUILDDIR)fpdlink.camera.grabber.o
+solectrix_camera_grabber.comp:	$(BUILDDIR)solectrix.camera.grabber.o \
+								$(BUILDDIR)sxpf_grabber.o
 							$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio
-$(BUILDDIR)fpdlink.camera.grabber.o:	$(CURRENT_DIR)/components/fpdlink.camera.grabber/fpdlink.camera.grabber.cc
+$(BUILDDIR)solectrix.camera.grabber.o:	$(CURRENT_DIR)/components/solectrix.camera.grabber/solectrix.camera.grabber.cc
+									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
+$(BUILDDIR)sxpf_grabber.o:	$(CURRENT_DIR)/components/solectrix.camera.grabber/sxpf_grabber.cc
 									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
 
 kvaser_can_interface.comp:	$(BUILDDIR)kvaser.can.interface.o
@@ -125,7 +129,7 @@ $(BUILDDIR)video.file.grabber.o:	$(CURRENT_DIR)/components/video.file.grabber/vi
 
 all : flame
 
-osm : flame uvc_camera_grabber.comp fpdlink_camera_grabber.comp
+osm : flame uvc_camera_grabber.comp solectrix_camera_grabber.comp
 
 deploy : FORCE
 	cp $(BUILDDIR)/*.comp $(BUILDDIR)/flame $(BINDIR)

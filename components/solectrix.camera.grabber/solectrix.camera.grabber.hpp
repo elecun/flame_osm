@@ -13,7 +13,11 @@
 #define FLAME_SOLECTRIX_CAMERA_GRABBER_HPP_INCLUDED
 
 #include <flame/component/object.hpp>
-#include "device.hpp"
+#include "sxpf_grabber.hpp"
+#include <vector>
+#include <unordered_map>
+#include <thread>
+#include <chrono>
 
 using namespace std;
 
@@ -30,10 +34,19 @@ class solectrix_camera_grabber : public flame::component::object {
 
 
     private:
-        /* parameters */
+        /* grabber tasks */
+        void _grab_task(json parameters);
 
         /* proframe device */
-        input_channel_t
+        unique_ptr<sxpf_grabber> _grabber;
+
+    private:
+        /* grabbing worker */
+        thread _grab_worker;
+
+        /* flags */
+        atomic<bool> _worker_stop { false };
+
 
 }; /* class */
 
