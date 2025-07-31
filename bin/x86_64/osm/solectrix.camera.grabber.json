@@ -1,0 +1,32 @@
+{
+    "rt_cycle_ns" : 1000000000,
+    "verbose" : 1,
+    "info":{
+        "frame_grabber":"solectrix proframe 3.0",
+        "interface":"fpdlink iii",
+        "serializer":"ti_953",
+        "deserializer":"ti_954",
+        "cmos":"OV2778"
+    },
+
+    "parameters":{
+        "use_channel":[4],
+        "csi2_datatype":"0x1e",
+        "left_shift":8
+    },
+
+    "dataport":{
+        "status" : {
+            "transport" : "tcp",
+            "host" : "*",
+            "port" : 5101,
+            "socket_type" : "pub",
+            "queue_size" : 100
+        },
+        "image_stream_1" : {
+            "transport" : "inproc",
+            "socket_type" : "pull",
+            "queue_size" : 100
+        }
+    }
+}

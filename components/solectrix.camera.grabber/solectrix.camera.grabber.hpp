@@ -13,6 +13,7 @@
 #define FLAME_SOLECTRIX_CAMERA_GRABBER_HPP_INCLUDED
 
 #include <flame/component/object.hpp>
+#include "device.hpp"
 
 using namespace std;
 
@@ -26,6 +27,13 @@ class solectrix_camera_grabber : public flame::component::object {
         void on_loop() override;
         void on_close() override;
         void on_message() override;
+
+
+    private:
+        /* parameters */
+
+        /* proframe device */
+        input_channel_t
 
 }; /* class */
 
