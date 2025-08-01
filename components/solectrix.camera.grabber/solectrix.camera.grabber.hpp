@@ -37,15 +37,14 @@ class solectrix_camera_grabber : public flame::component::object {
         /* grabber tasks */
         void _grab_task(json parameters);
 
-        /* proframe device */
-        unique_ptr<sxpf_grabber> _grabber;
-
     private:
         /* grabbing worker */
         thread _grab_worker;
 
         /* flags */
         atomic<bool> _worker_stop { false };
+        atomic<bool> _use_image_stream { false };
+        atomic<bool> _use_image_stream_monitoring { false };
 
 
 }; /* class */

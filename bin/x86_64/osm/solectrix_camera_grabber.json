@@ -10,9 +10,15 @@
     },
 
     "parameters":{
-        "use_channel":[4],
+        "camera":[
+            {"card":0, "name":"Left Top A Pillar", "channel":4},
+            {"card":0, "name":"Center Overhead", "channel":6}
+        ],
         "csi2_datatype":"0x1e",
-        "left_shift":8
+        "left_shift":8,
+        "use_image_stream":false,
+        "use_image_stream_monitoring":true,
+        "rotation_cw":90.0
     },
 
     "dataport":{
@@ -27,6 +33,17 @@
             "transport" : "inproc",
             "socket_type" : "pull",
             "queue_size" : 100
+        },
+        "image_stream_monitor_1":{
+            "transport":"tcp",
+            "host":"*",
+            "port":9001,
+            "socket_type" : "pub",
+            "queue_size" : 10,
+            "resolution" : {
+                "width" : 480,
+                "height" : 270
+            }
         }
     }
 }

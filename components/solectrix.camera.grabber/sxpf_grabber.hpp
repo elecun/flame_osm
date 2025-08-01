@@ -40,6 +40,9 @@ class sxpf_grabber {
         void grab();
 
     private:
+        double _get_elapsed_time();
+
+    private:
         map<int, input_channel_t> _channels;
         sxpf_card_props_t props;
 

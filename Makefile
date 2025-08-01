@@ -105,7 +105,7 @@ $(BUILDDIR)support.o:	$(CURRENT_DIR)/components/uvc.camera.grabber/support.cc
 
 solectrix_camera_grabber.comp:	$(BUILDDIR)solectrix.camera.grabber.o \
 								$(BUILDDIR)sxpf_grabber.o
-							$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio
+							$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio -lsxpf_ll
 $(BUILDDIR)solectrix.camera.grabber.o:	$(CURRENT_DIR)/components/solectrix.camera.grabber/solectrix.camera.grabber.cc
 									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
 $(BUILDDIR)sxpf_grabber.o:	$(CURRENT_DIR)/components/solectrix.camera.grabber/sxpf_grabber.cc
