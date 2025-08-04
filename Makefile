@@ -66,7 +66,7 @@ MIN_COUNT = 0 #$(shell git tag | wc -l)
 
 #if release(-O3), debug(-O0)
 # if release mode compile, remove -DNDEBUG
-CXXFLAGS = -O3 -fPIC -Wall -std=c++20 -D__cplusplus=202002L
+CXXFLAGS = -O3 -fPIC -Wall -std=c++20 -D__cplusplus=202002L -Wno-deprecated-enum-enum-conversion
 
 #custom definitions
 CXXFLAGS += -D__MAJOR__=0 -D__MINOR__=$(MIN_COUNT) -D__REV__=$(REV_COUNT)

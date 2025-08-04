@@ -36,15 +36,20 @@ class sxpf_grabber {
 
         bool open();
         void close();
-
         void grab();
 
-    private:
-        double _get_elapsed_time();
+    // private:
+    //     double _get_elapsed_time();
 
     private:
-        map<int, input_channel_t> _channels;
+        vector<int> _channels;
         sxpf_card_props_t props;
+
+        sxpf_hdl _card_handle;          /*card handle */
+        sxpf_card_info_t _card_info;    /* card info */
+        HWAITSXPF _devfd;               /* device file desc. */
+        long long _last_time {0};
+        
 
 };
 

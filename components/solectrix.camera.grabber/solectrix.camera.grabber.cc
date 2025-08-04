@@ -81,32 +81,32 @@ void solectrix_camera_grabber::_grab_task(json parameters){
     // string monitoring_portname = fmt::format("image_stream_monitor_{}", camera_id);
     // string stream_portname = fmt::format("image_stream_{}", camera_id);
 
-    try{
+    /* create grabber instance */
+    unique_ptr<sxpf_grabber> _grabber = make_unique<sxpf_grabber>(channels);
+    _grabber->open();
+    while(!_worker_stop.load()){
 
-        /* create grabber instance */
-        unique_ptr<sxpf_grabber> _grabber = make_unique<sxpf_grabber>(channels);
-        _grabber->open();
+        /* do grab */
+        try{
+            _grabber->grab();
+        }
+        catch(const cv::Exception& e){
+            logger::debug("[{}] CV Exception {}", get_name(), e.what());
+        }
+        catch(const zmq::error_t& e){
+            logger::error("[{}] Piepeline Error : {}", get_name(), e.what());
+        }
+        catch(const json::exception& e){
+            logger::error("[{}] Data Parse Error : {}", get_name(), e.what());
+        }
+        catch(const std::exception& e){
+            logger::error("[{}] Standard Exception : {}", get_name(), e.what());
+        }
+    
+    }
 
-        _grabber->close();
-
-        /* grab image from channel */
-        // while(!_worker_stop.load()){
-            
-        // }
-
-    }
-    catch(const cv::Exception& e){
-        logger::debug("[{}] CV Exception {}", get_name(), e.what());
-    }
-    catch(const std::out_of_range& e){
-        logger::error("[{}] Invalid parameter access", get_name());
-    }
-    catch(const zmq::error_t& e){
-        logger::error("[{}] Piepeline Error : {}", get_name(), e.what());
-    }
-    catch(const json::exception& e){
-        logger::error("[{}] Data Parse Error : {}", get_name(), e.what());
-    }
+    /* close grabber instance */
+    _grabber->close();
 
 }
 
