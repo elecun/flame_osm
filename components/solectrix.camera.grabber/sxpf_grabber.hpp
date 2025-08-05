@@ -15,8 +15,10 @@
 #include "include/sxpf.h"
 #include <map>
 #include <vector>
+#include <opencv2/opencv.hpp>
 
 using namespace std;
+using namespace cv;
 
 /* channel */
 typedef struct input_channel_s

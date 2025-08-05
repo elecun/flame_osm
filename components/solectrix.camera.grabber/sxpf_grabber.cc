@@ -2,6 +2,7 @@
 #include "sxpf_grabber.hpp"
 #include <flame/log.hpp>
 #include <chrono>
+#include <opencv2/opencv.hpp>
 
 #define NELEMENTS(ar)   (sizeof(ar) / sizeof((ar)[0]))
 
@@ -14,6 +15,8 @@ sxpf_grabber::~sxpf_grabber(){
 }
 
 bool sxpf_grabber::open(){
+
+    cv::namedWindow("Captured Image", cv::WINDOW_AUTOSIZE);
 
     /* find frame grabber card */
     int n_fg = sxpf_get_num_cards();
@@ -34,11 +37,19 @@ bool sxpf_grabber::open(){
         sxpf_close(_card_handle);
         return false;
     }
+
+    /* frame grabber parameter */
+    int csi2_datatype = strtol("0x1e", NULL, 16);
+    logger::info("CSI2 Data Type : {}", csi2_datatype);
+    int left_shift = 8;
+    logger::info("Left Shift : {}", left_shift);
         
     return true;
 }
 
 void sxpf_grabber::close(){
+
+    cv::destroyAllWindows();
 
     /* close sxpf channels */
     sxpf_close(_card_handle);
@@ -49,14 +60,21 @@ void sxpf_grabber::grab(){
     sxpf_event_t            events[20];
     int                     len;
 
-    sxpf_image_header_t* img_hdr;
-    uint8_t* img_ptr;
+    // sxpf_image_header_t* img_hdr;
+    // uint8_t* img_ptr;
+    uint32_t align;
+    uint32_t max_rows;
     sxpf_meta_header_t* i2c_hdr;
     uint8_t* i2c_ptr;
-    int frame_slot;
+    // int frame_slot;
     long long int rx_time = 0;
     // long long int           ts_start, ts_start_second;
     // long long int           latency;
+    uint64_t ots = 0;
+    uint64_t ts = 0;
+    double frame_rate = 0.0;
+    uint8_t vc_dt;
+    uint8_t dt;
 
     len = sxpf_wait_events(1, &this->_devfd, 1 /* ms */);
     if(len>0){
@@ -69,18 +87,39 @@ void sxpf_grabber::grab(){
         switch (events[n].type){
             case SXPF_EVENT_FRAME_RECEIVED:
             {
-                frame_slot = events[n].data / (1 << 24);
-                img_hdr = static_cast<sxpf_image_header_t*>(sxpf_get_frame_ptr(_card_handle, frame_slot));
-                img_ptr = (uint8_t*)img_hdr + img_hdr->payload_offset;
-
-                unsigned int channel = img_hdr->cam_id;
+                int frame_slot = events[n].data / (1 << 24);
+                sxpf_image_header_t* img_hdr = (sxpf_image_header_t*)(sxpf_get_frame_ptr(_card_handle, frame_slot));
+                
+                /* image header */
+                unsigned int frame_counter = img_hdr->frame_counter;
+                // unsigned int frame_size = img_hdr->frame_size;
+                uint32_t frame_size = events[n].data & 0xffffff; // different from img_hdr->frame_size
                 unsigned short col = img_hdr->columns;
                 unsigned short row = img_hdr->rows;
-                logger::info("SXPF_EVENT_FRAME_REVEIVED : {}({}x{})", channel, col, row);
+                unsigned short offset = img_hdr->payload_offset; //actual header size
+                unsigned char bpp = img_hdr->bpp;
+                uint32_t align = (img_hdr->bpp == 64) ? 7 : 3;
+                uint32_t filtered_offset = 0;
+                logger::info("Frame {}(framesize:{}, offset:{}, res:{}x{})", frame_counter, frame_size, offset, col, row);
+                
+
+                vector<uint8_t> image_raw;
+                vector<uint8_t> image_raw_payload;
+                image_raw.clear();
+                image_raw_payload.clear();
+
+                image_raw.assign((uint8_t*)img_hdr, ((uint8_t*)img_hdr) + frame_size);
+                image_raw_payload.assign(((uint8_t*)img_hdr) + img_hdr->payload_offset, ((uint8_t*)img_hdr) + img_hdr->payload_offset);
+
+                logger::info("frame size : {}", image_raw_payload.size());
+
+                cv::Mat img(938, 1080, CV_8UC2 , image_raw.data());
+                cv::imshow("Captured Image", img);
                 
 
                 //!!!! this must be done for each received buffer to ensure the hardware can continue to send images
                 sxpf_release_frame(_card_handle, frame_slot, 0);
+
             }
             break;
             case SXPF_EVENT_I2C_MSG_RECEIVED:
@@ -102,13 +141,3 @@ void sxpf_grabber::grab(){
     }
 }
 
-// double sxpf_grabber::_get_elapsed_time(){
-//     using clock = chrono::steady_clock;
-//     using seconds = chrono::duration<double>;
-
-//     static clock::time_point t0 = clock::now();
-//     clock::time_point now = clock::now();
-
-//     seconds elapsed = now - t0;
-//     return elapsed.count(); // second unit
-// }

@@ -89,6 +89,7 @@ void solectrix_camera_grabber::_grab_task(json parameters){
         /* do grab */
         try{
             _grabber->grab();
+
         }
         catch(const cv::Exception& e){
             logger::debug("[{}] CV Exception {}", get_name(), e.what());
