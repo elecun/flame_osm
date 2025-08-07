@@ -11,8 +11,7 @@
 
     "parameters":{
         "camera":[
-            {"card":0, "name":"Left Top A Pillar", "channel":4},
-            {"card":0, "name":"Center Overhead", "channel":6}
+            {"card":0, "name":"Left Top A Pillar", "channel":4}
         ],
         "csi2_datatype":"0x1e",
         "left_shift":8,

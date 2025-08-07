@@ -18,8 +18,10 @@
 #include <unordered_map>
 #include <thread>
 #include <chrono>
+#include <opencv2/opencv.hpp>
 
 using namespace std;
+using namespace cv;
 
 class solectrix_camera_grabber : public flame::component::object {
     public:

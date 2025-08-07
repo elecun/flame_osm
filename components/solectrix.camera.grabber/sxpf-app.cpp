@@ -1174,7 +1174,7 @@ int main(int argc, char **argv)
                             sdl_ctrl.new_frame_info = evt->data;
                             printf("------------stl ctrl new frame info : %d\n", evt->data); //이벤트가 수신되면 data에 값이 생기는데, 이게 무슨의미인지 모르겠네. 버퍼에 쌓이는 byte array 크기를 의미하나..
                         }
-                        else
+                        else 
                         {
                             frame_buf_timing[frame_slot].release_time =
                                 sxpf_get_system_time(SXPF_CLOCK_DEFAULT) -

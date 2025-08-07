@@ -1,7 +1,6 @@
 
 #include "solectrix.camera.grabber.hpp"
 #include <flame/log.hpp>
-#include <opencv2/opencv.hpp>
 
 using namespace flame;
 using namespace std;
@@ -82,14 +81,13 @@ void solectrix_camera_grabber::_grab_task(json parameters){
     // string stream_portname = fmt::format("image_stream_{}", camera_id);
 
     /* create grabber instance */
-    unique_ptr<sxpf_grabber> _grabber = make_unique<sxpf_grabber>(channels);
+    unique_ptr<sxpf_grabber> _grabber = make_unique<sxpf_grabber>(channels, 1920, 1080);
     _grabber->open();
     while(!_worker_stop.load()){
 
         /* do grab */
         try{
             _grabber->grab();
-
         }
         catch(const cv::Exception& e){
             logger::debug("[{}] CV Exception {}", get_name(), e.what());
@@ -108,6 +106,10 @@ void solectrix_camera_grabber::_grab_task(json parameters){
 
     /* close grabber instance */
     _grabber->close();
+
+    logger::debug("[{}] Stopped grab task..", get_name());
+
+    
 
 }
 

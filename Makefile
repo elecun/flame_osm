@@ -104,11 +104,14 @@ $(BUILDDIR)support.o:	$(CURRENT_DIR)/components/uvc.camera.grabber/support.cc
 									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
 
 solectrix_camera_grabber.comp:	$(BUILDDIR)solectrix.camera.grabber.o \
-								$(BUILDDIR)sxpf_grabber.o
+								$(BUILDDIR)sxpf_grabber.o \
+								$(BUILDDIR)img_decode.o
 							$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio -lsxpf_ll
 $(BUILDDIR)solectrix.camera.grabber.o:	$(CURRENT_DIR)/components/solectrix.camera.grabber/solectrix.camera.grabber.cc
 									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
 $(BUILDDIR)sxpf_grabber.o:	$(CURRENT_DIR)/components/solectrix.camera.grabber/sxpf_grabber.cc
+									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
+$(BUILDDIR)img_decode.o:	$(CURRENT_DIR)/components/solectrix.camera.grabber/img_decode.cc
 									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
 
 kvaser_can_interface.comp:	$(BUILDDIR)kvaser.can.interface.o

@@ -12,7 +12,8 @@
 #ifndef FLAME_SOLECTRIX_CAMERA_GRABBER_DEVICE_HPP_INCLUDED
 #define FLAME_SOLECTRIX_CAMERA_GRABBER_DEVICE_HPP_INCLUDED
 
-#include "include/sxpf.h"
+#include <sxpf/sxpf.h>
+#include <sxpf/csi-2.h>
 #include <map>
 #include <vector>
 #include <opencv2/opencv.hpp>
@@ -33,24 +34,39 @@ typedef struct input_channel_s
 
 class sxpf_grabber {
     public:
-        sxpf_grabber(vector<int> channels);
+        sxpf_grabber(vector<int> channels, int width, int height);
         ~sxpf_grabber();
 
-        bool open();
-        void close();
-        void grab();
-
-    // private:
-    //     double _get_elapsed_time();
+        /* support functions */
+        int get_num_cards();    /* get number of grabber cards */
+        bool open();            /* grabber card open */
+        void close();           /* grabber card close */
+        void grab();             /* grab and return opencv image */
 
     private:
-        vector<int> _channels;
-        sxpf_card_props_t props;
+        vector<int> _channels;          /* to use multi channel */
+        int _resolution_h { 1080 };     /* output image resolution (height) */
+        int _resolution_w { 1920 };     /* output image resolution (width) */
 
-        sxpf_hdl _card_handle;          /*card handle */
-        sxpf_card_info_t _card_info;    /* card info */
-        HWAITSXPF _devfd;               /* device file desc. */
+        HWAITSXPF _devfd;                   /* device file description */
+        sxpf_hdl _grabber_handle;           /* grabber card handle */
+        sxpf_card_info_t _grabber_info;     /* grabber card  info */
+        sxpf_card_props_t props;            /* grabber card properties */
+        sxpf_event_t _events[20];           /* frame grabber events */
+
+        
+        
+        int _csi2_datatype = 30;        /* CSI2 Data Type (YUV422=0x1e) */
+        int _left_shift = 8;            /* Left Shift*/
+        
+
+
         long long _last_time {0};
+
+    
+
+        uint16_t* tmp2 = nullptr;
+        uint16_t* pdst = nullptr;
         
 
 };
