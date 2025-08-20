@@ -60,6 +60,113 @@ void sxpf_grabber::close(){
     sxpf_close(_grabber_handle);
 }
 
+cv::Mat sxpf_grabber::capture(){
+    cv::Mat captured_image;
+    
+    /* wait & read grab event */
+    int len = sxpf_wait_events(1, &this->_devfd, 5 /* ms */);
+    if(len <= 0){
+        logger::debug("(sxpf_grabber) No events received");
+        return captured_image; // return empty Mat
+    }
+    
+    len = sxpf_read_event(_grabber_handle, _events, NELEMENTS(_events));
+    
+    /* process events to grab frame */
+    for(int n = 0; n < len; n++){
+        switch (_events[n].type){
+            case SXPF_EVENT_FRAME_RECEIVED: {
+                logger::debug("(sxpf_grabber) Event: SXPF_EVENT_FRAME_RECEIVED");
+                
+                int frame_slot = _events[n].data / (1 << 24);
+                sxpf_image_header_t* img_hdr = (sxpf_image_header_t*)(sxpf_get_frame_ptr(_grabber_handle, frame_slot));
+                
+                if(!img_hdr){
+                    logger::error("(sxpf_grabber) Failed to get frame pointer");
+                    sxpf_release_frame(_grabber_handle, frame_slot, 0);
+                    continue;
+                }
+                
+                /* get image info */
+                uint32_t x_size = img_hdr->columns;
+                uint32_t y_size = img_hdr->rows;
+                uint8_t bpp = img_hdr->bpp;
+                uint32_t frame_size = x_size * y_size * bpp / 8;
+                unsigned short payload_offset = img_hdr->payload_offset;
+                
+                logger::debug("(sxpf_grabber) Image: {}x{}, bpp:{}, frame_size:{}, payload_offset:{}", 
+                             x_size, y_size, bpp, frame_size, payload_offset);
+                
+                uint8_t* img_ptr = (uint8_t*)img_hdr + img_hdr->payload_offset;
+                
+                /* check if this is a new frame */
+                int new_frame_info = _events[n].data;
+                bool is_new_frame = (new_frame_info & 0x00ffffff) > 0;
+                
+                if(is_new_frame && img_ptr){
+                    try {
+                        /* Create cv::Mat from raw image data */
+                        if(_csi2_datatype == 0x1e){ // YUV422 format
+                            /* Create Mat for YUV422 data */
+                            cv::Mat yuv_image(y_size, x_size, CV_8UC2, img_ptr);
+                            
+                            /* Convert YUV422 to BGR */
+                            cv::cvtColor(yuv_image, captured_image, cv::COLOR_YUV2BGR_YUYV);
+                            
+                            logger::debug("(sxpf_grabber) Successfully converted YUV422 to BGR: {}x{}", 
+                                         captured_image.cols, captured_image.rows);
+                        }
+                        else {
+                            /* For other formats, create a grayscale or raw image */
+                            if(bpp == 8){
+                                captured_image = cv::Mat(y_size, x_size, CV_8UC1, img_ptr).clone();
+                            }
+                            else if(bpp == 16){
+                                captured_image = cv::Mat(y_size, x_size, CV_16UC1, img_ptr).clone();
+                            }
+                            else {
+                                logger::warn("(sxpf_grabber) Unsupported bpp: {}, creating raw 8-bit image", bpp);
+                                captured_image = cv::Mat(y_size, x_size, CV_8UC1, img_ptr).clone();
+                            }
+                        }
+                    }
+                    catch(const cv::Exception& e){
+                        logger::error("(sxpf_grabber) OpenCV Exception during conversion: {}", e.what());
+                        captured_image = cv::Mat(); // return empty Mat on error
+                    }
+                }
+                
+                /* Release frame buffer - this is critical for hardware to continue */
+                sxpf_release_frame(_grabber_handle, frame_slot, 0);
+                
+                /* Return immediately after processing first valid frame */
+                if(!captured_image.empty()){
+                    return captured_image;
+                }
+            }
+            break;
+            
+            case SXPF_EVENT_I2C_MSG_RECEIVED:
+                logger::debug("(sxpf_grabber) Event: SXPF_EVENT_I2C_MSG_RECEIVED");
+                break;
+                
+            case SXPF_EVENT_CAPTURE_ERROR:
+                logger::error("(sxpf_grabber) Event: SXPF_EVENT_CAPTURE_ERROR {}", _events[n].data);
+                break;
+                
+            case SXPF_EVENT_IO_STATE:
+                logger::debug("(sxpf_grabber) Event: SXPF_EVENT_IO_STATE");
+                break;
+                
+            default:
+                logger::debug("(sxpf_grabber) Unknown event type: {}", _events[n].type);
+                break;
+        }
+    }
+    
+    return captured_image; // return empty Mat if no valid frame was captured
+}
+
 void sxpf_grabber::grab(){
 
     /* grabbed image (RGB-color)*/

@@ -119,10 +119,12 @@ kvaser_can_interface.comp:	$(BUILDDIR)kvaser.can.interface.o
 $(BUILDDIR)kvaser.can.interface.o:	$(CURRENT_DIR)/components/kvaser.can.interface/kvaser.can.interface.cc
 									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
 
-hpe_model_inference.comp:	$(BUILDDIR)hpe.model.inference.o
-							$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lonnxruntime
-$(BUILDDIR)hpe.model.inference.o:	$(CURRENT_DIR)/components/hpe.model.inference/hpe.model.inference.cc
+body_kps_inference.comp:	$(BUILDDIR)body.kps.inference.o
+							$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lnvinfer -lnvonnxparser -lcudart -lcublas
+$(BUILDDIR)body.kps.inference.o:	$(CURRENT_DIR)/components/body.kps.inference/body.kps.inference.cc
 									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
+
+
 
 video_file_grabber.comp:	$(BUILDDIR)video.file.grabber.o
 							$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio
@@ -132,7 +134,7 @@ $(BUILDDIR)video.file.grabber.o:	$(CURRENT_DIR)/components/video.file.grabber/vi
 
 all : flame
 
-osm : flame uvc_camera_grabber.comp solectrix_camera_grabber.comp
+osm : flame uvc_camera_grabber.comp solectrix_camera_grabber.comp body_kps_inference.comp
 
 deploy : FORCE
 	cp $(BUILDDIR)/*.comp $(BUILDDIR)/flame $(BINDIR)

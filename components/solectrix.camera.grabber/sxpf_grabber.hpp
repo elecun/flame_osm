@@ -42,6 +42,7 @@ class sxpf_grabber {
         bool open();            /* grabber card open */
         void close();           /* grabber card close */
         void grab();             /* grab and return opencv image */
+        cv::Mat capture();       /* capture frame and return cv::Mat */
 
     private:
         vector<int> _channels;          /* to use multi channel */

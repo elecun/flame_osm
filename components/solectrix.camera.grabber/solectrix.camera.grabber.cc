@@ -44,7 +44,7 @@ bool solectrix_camera_grabber::on_init(){
 }
 
 void solectrix_camera_grabber::on_loop(){
-
+    /* nothing loop */
     
 }
 
@@ -63,7 +63,7 @@ void solectrix_camera_grabber::on_close(){
 }
 
 void solectrix_camera_grabber::on_message(){
-    
+    /* reserved function */
 }
 
 void solectrix_camera_grabber::_grab_task(json parameters){
@@ -83,11 +83,15 @@ void solectrix_camera_grabber::_grab_task(json parameters){
     /* create grabber instance */
     unique_ptr<sxpf_grabber> _grabber = make_unique<sxpf_grabber>(channels, 1920, 1080);
     _grabber->open();
+
+
+    int i = 0;
     while(!_worker_stop.load()){
 
         /* do grab */
         try{
-            _grabber->grab();
+            cv::Mat captured = _grabber->capture();
+            cv::imwrite(fmt::format("./grabbed_{}.png", i++), captured);
         }
         catch(const cv::Exception& e){
             logger::debug("[{}] CV Exception {}", get_name(), e.what());
