@@ -125,6 +125,12 @@ $(BUILDDIR)body.kps.inference.o:	$(CURRENT_DIR)/components/body.kps.inference/bo
 									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
 
 
+os_model_inference.comp:	$(BUILDDIR)os.model.inference.o
+							$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS)
+$(BUILDDIR)os.model.inference.o:	$(CURRENT_DIR)/components/os.model.inference/os.model.inference.cc
+									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
+
+
 
 video_file_grabber.comp:	$(BUILDDIR)video.file.grabber.o
 							$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio
@@ -134,7 +140,7 @@ $(BUILDDIR)video.file.grabber.o:	$(CURRENT_DIR)/components/video.file.grabber/vi
 
 all : flame
 
-osm : flame uvc_camera_grabber.comp solectrix_camera_grabber.comp body_kps_inference.comp
+osm : flame uvc_camera_grabber.comp solectrix_camera_grabber.comp body_kps_inference.comp os_model_inference.comp
 
 deploy : FORCE
 	cp $(BUILDDIR)/*.comp $(BUILDDIR)/flame $(BINDIR)
