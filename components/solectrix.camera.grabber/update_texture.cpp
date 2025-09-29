@@ -775,6 +775,7 @@ int SdlUpdateTexture(sdl_ctrl_t *sdl_ctrl,
     frame_rate = 40e6 / (ts - ots);
     if (abs(sdl_ctrl->sdl_opt.drop_show_count) >= 2)
     {
+        printf("--- frame rate\n");
         frame_rate_mean[frame_rate_mean_idx] = frame_rate;
         frame_rate_mean_idx =
             (frame_rate_mean_idx + 1) % (abs(sdl_ctrl->sdl_opt.drop_show_count) - 1);
@@ -893,8 +894,10 @@ int SdlUpdateTexture(sdl_ctrl_t *sdl_ctrl,
 
         packet_offset = 0;
         filtered_offset = 0;
+        printf("--111\n");
         if (isNewFrame)
         {
+            printf("--222\n");
             align = (bpp == 64) ? 7 : 3;
         }
         // set size and framesize to undefined values if datatype is not found
@@ -998,33 +1001,39 @@ int SdlUpdateTexture(sdl_ctrl_t *sdl_ctrl,
             {
                 //printf("---- ok\n"); // 여기 진입
                 uint8_t dt = vc_dt & 0x3f;
+                printf("vc_dt : %d=%d\n", vc_dt, dt);
 
                 // printf("----dt : %d\n", dt); // 0x1e (30)로 뜸
 
                 if (sdl_ctrl->sdl_opt.process_mode == process_mode_e::swap16)
                 {
-                    // printf("----1\n");
+                    printf("----1\n");
                    dt = 0x2e;
                 }
 
+                
                 if (csi2_decode_datatype(dt,
                                          &bits_per_pixel,
                                          &pixel_group_size))
                 {
-                    // printf("----2\n");
+                    printf("----2\n");
                     printf("unsupported image type\n");
                     return -1;
                 }
 
+                printf("1-bits per pixel : %d\n", bits_per_pixel);
+                printf("1-pixel_group_size : %d\n", pixel_group_size);
+
                 if (dt >= 0x18 && dt <= 0x1f) {
-                    // printf("----3\n");
+                     printf("----3\n");
                     sdl_ctrl->sdl_opt.bits_per_component = 0;
                     bits_per_pixel /= 2; // bits_per_pixel value for yuv is not correct here
+                    printf("2- bits per pixel : %d\n", bits_per_pixel);
                 }
 
                 if (dt == 0x24)
                 {
-                    // printf("----4\n");
+                     printf("----4\n");
                     sdl_ctrl->sdl_opt.components_per_pixel  = 3;
                     sdl_ctrl->sdl_opt.bits_per_component    = 8;
                     bpp                                     = 8;
@@ -1033,7 +1042,7 @@ int SdlUpdateTexture(sdl_ctrl_t *sdl_ctrl,
 
                 if (tmp2 == NULL)
                 {
-                    // printf("----5\n");
+                    printf("----5\n");
                     x_size = word_count * 8 / bits_per_pixel;
                     // alloc memory for all rows but only lines with matching
                     // datatype will be used
@@ -1047,13 +1056,13 @@ int SdlUpdateTexture(sdl_ctrl_t *sdl_ctrl,
                 if ((pdst - tmp2 + x_size) >
                          (x_size * sdl_ctrl->img_hdr->rows))
                 {
-                    // printf("----6\n");
+                    printf("----6\n");
                     fprintf(stderr, "\ndecoded data exceeds allocated memory\n");
                     break;
                 }
                 else
                 {
-                    // printf("----7\n"); // 여기에 진입
+                    printf("----7\n"); // 여기에 진입
                     if (dt == 0x24)
                     {
                         decoded_pix =

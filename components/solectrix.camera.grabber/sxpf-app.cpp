@@ -1150,13 +1150,8 @@ int main(int argc, char **argv)
                     }
                     else
                     {
-                        if((abs(sdl_ctrl.sdl_opt.drop_show_count) < 2 ) ||
-                           (sdl_ctrl.sdl_opt.drop_show_count >= 0 &&
-                             (frame_drop_cnt % abs(sdl_ctrl.sdl_opt.drop_show_count)
-                             ) != 0) ||
-                             (sdl_ctrl.sdl_opt.drop_show_count < 0 &&
-                              (frame_drop_cnt % abs(sdl_ctrl.sdl_opt.drop_show_count))
-                             == 0))
+                        if((abs(sdl_ctrl.sdl_opt.drop_show_count) < 2 ) || (sdl_ctrl.sdl_opt.drop_show_count >= 0 && (frame_drop_cnt % abs(sdl_ctrl.sdl_opt.drop_show_count)) != 0) ||
+                             (sdl_ctrl.sdl_opt.drop_show_count < 0 && (frame_drop_cnt % abs(sdl_ctrl.sdl_opt.drop_show_count))== 0))
                         {
                             if (sdl_ctrl.new_frame_info != -1)
                             {
@@ -1174,7 +1169,7 @@ int main(int argc, char **argv)
                             sdl_ctrl.new_frame_info = evt->data;
                             printf("------------stl ctrl new frame info : %d\n", evt->data); //이벤트가 수신되면 data에 값이 생기는데, 이게 무슨의미인지 모르겠네. 버퍼에 쌓이는 byte array 크기를 의미하나..
                         }
-                        else 
+                        else
                         {
                             frame_buf_timing[frame_slot].release_time =
                                 sxpf_get_system_time(SXPF_CLOCK_DEFAULT) -
@@ -1248,6 +1243,7 @@ int main(int argc, char **argv)
                 sdl_ctrl.img_hdr =
                     (sxpf_image_header_t*)sxpf_get_frame_ptr(ch->fg, frame_slot);
             }
+
 
             // printf("-----sdl ctrl save index : %d\n", sdl_ctrl.save_idx); // 대부분 0으로 뜨는데, 왜 필요한지 잘...
             sdl_ctrl.save_idx_old = sdl_ctrl.save_idx;
@@ -1332,7 +1328,7 @@ int main(int argc, char **argv)
                 }
             }
 
-
+            printf("--- col:%d, row:%d\n", sdl_ctrl.img_hdr->columns, sdl_ctrl.img_hdr->rows); //이미지 헤더에서 col과 row는 실제 이미지 해상도가 아님. (963x1080)
             printf("---- x:%ld, y:%ld, fps:%d\n", sdl_ctrl.frame_x_size, sdl_ctrl.frame_y_size, frame_rate); //여기에서 해상도가 이미 1920x1080으로 나옴, fps=23?
             SdlUpdateTexture(&sdl_ctrl, frame_rate); //결국 여기에서 window에 업데이트
             printf("---- x:%ld, y:%ld, fps:%d\n", sdl_ctrl.frame_x_size, sdl_ctrl.frame_y_size, frame_rate); //여기에서 해상도가 이미 1920x1080으로 나옴
@@ -1432,6 +1428,7 @@ int main(int argc, char **argv)
         }
 
         if (g_opts.timeout_after_sec > 0)
+        
         {
             time_t timeNow;
             time(&timeNow);
