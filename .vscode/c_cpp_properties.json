@@ -6,7 +6,7 @@
                 "${workspaceFolder}/**",
                 "/usr/include/opencv4",
                 "${workspaceFolder}/dep/onnxruntime",
-                "${workspaceFolder}/dep/sxpf"
+                "${workspaceFolder}/include"
             ],
             "defines": [
                 "__MAJOR__=0",

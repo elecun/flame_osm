@@ -17,9 +17,11 @@
 #include <map>
 #include <vector>
 #include <opencv2/opencv.hpp>
+#include <dep/json.hpp>
 
 using namespace std;
 using namespace cv;
+using json = nlohmann::json;
 
 /* channel */
 typedef struct input_channel_s
@@ -31,20 +33,44 @@ typedef struct input_channel_s
     uint32_t        frame_info = 0;
 } input_channel_t;
 
+/* camera setup */
+typedef struct camera_param {
+    string name;
+    int card_endpoint = 0;
+    int channel = 0;
+    double rotate_cw = 0.0;
+    camera_param(const json& param){
+        name = param.at("name").get<string>();
+        card_endpoint = param.at("card").get<int>();
+        channel = param.at("channel").get<int>();
+        rotate_cw = param.at("rotate").get<double>();
+    }
+} camera_param_t;
+
 
 class sxpf_grabber {
     public:
-        sxpf_grabber(vector<int> channels, int width, int height);
+        // sxpf_grabber(vector<int> channels, int width, int height);
+        sxpf_grabber(json parameters);
         ~sxpf_grabber();
 
         /* support functions */
         int get_num_cards();    /* get number of grabber cards */
         bool open();            /* grabber card open */
         void close();           /* grabber card close */
-        void grab();             /* grab and return opencv image */
+        void grab();            /* grab and return opencv image */
+        int wait_event();       /* wait for event */
+
         cv::Mat capture();       /* capture frame and return cv::Mat */
 
     private:
+        unsigned int _stream_channel_mask = 0;    /* stream channel SXPF_STREAM_VIDEOX*/
+        int _decode_csi2_datatype = 0x1e;
+        int _bits_per_component = 16;       //default is 16
+        int _left_shift = 8;                //default is 8
+
+
+        vector<camera_param_t> _parameter_container;
         vector<int> _channels;          /* to use multi channel */
         int _resolution_h { 1080 };     /* output image resolution (height) */
         int _resolution_w { 1920 };     /* output image resolution (width) */
@@ -58,7 +84,6 @@ class sxpf_grabber {
         
         
         int _csi2_datatype = 30;        /* CSI2 Data Type (YUV422=0x1e) */
-        int _left_shift = 8;            /* Left Shift*/
         
 
 

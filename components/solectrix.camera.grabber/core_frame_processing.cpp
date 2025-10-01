@@ -3,6 +3,7 @@
  * Focused on --card 0 --channel 4 -d0x1e -l8 parameters
  */
 
+#include "include/sxpf.h""
 #include "include/csi-2.h"
 #include "include/sxpftypes.h"
 #include <opencv2/opencv.hpp>
@@ -205,10 +206,7 @@ bool initialize_device(int endpoint_id, int channel_id, sxpf_hdl* fg, HWAITSXPF*
     }
     
     sxpf_get_device_fd(*fg, devfd);
-    
-#ifndef WIN32
-    fcntl(*devfd, F_SETFL, O_NONBLOCK);
-#endif
+
     
     printf("Device initialized: endpoint=%d, channel=%d\n", endpoint_id, channel_id);
     return true;

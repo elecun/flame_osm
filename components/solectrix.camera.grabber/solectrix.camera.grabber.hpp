@@ -18,8 +18,7 @@
 #include <thread>
 #include <chrono>
 #include <opencv2/opencv.hpp>
-#include <sxpf/sxpf.h>
-#include <sxpf/csi-2.h>
+#include "sxpf_grabber.hpp"
 
 using namespace std;
 using namespace cv;
@@ -34,7 +33,6 @@ class solectrix_camera_grabber : public flame::component::object {
         void on_loop() override;
         void on_close() override;
         void on_message() override;
-
 
         /* device control functions */
         bool open_device(int endpoint_id = 0, int channel_id = 4, uint32_t decode_csi2_datatype = 0x1e, int left_shift = 8);
@@ -58,6 +56,9 @@ class solectrix_camera_grabber : public flame::component::object {
         atomic<bool> _worker_stop { false };
         atomic<bool> _use_image_stream { false };
         atomic<bool> _use_image_stream_monitoring { false };
+
+        /* grabber device */
+        unique_ptr<sxpf_grabber> _grabber_handle;
         
         /* device state */
         sxpf_hdl _fg { 0 };

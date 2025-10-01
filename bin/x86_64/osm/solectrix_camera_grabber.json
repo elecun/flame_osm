@@ -11,13 +11,12 @@
 
     "parameters":{
         "camera":[
-            {"card":0, "name":"Left Top A Pillar", "channel":4}
+            {"name":"Left Top A Pillar", "card":0, "channel":4, "rotate":90.0}
         ],
         "csi2_datatype":"0x1e",
         "left_shift":8,
         "use_image_stream":false,
-        "use_image_stream_monitoring":true,
-        "rotation_cw":90.0
+        "use_image_stream_monitoring":true
     },
 
     "dataport":{

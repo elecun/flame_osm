@@ -33,10 +33,19 @@ bool solectrix_camera_grabber::on_init(){
         /* setup pipeline */
         _use_image_stream.store(parameters.value("use_image_stream", false));
         _use_image_stream_monitoring.store(parameters.value("use_image_stream_monitoring", false));
-        
-        /* start grab task on thread */
-        _grab_worker = thread(&solectrix_camera_grabber::_grab_task, this, parameters);
-        
+
+        /* device instance */
+        json camera_parameters = parameters["camera"];
+        _grabber_handle = make_unique<sxpf_grabber>(parameters);
+
+        /* device open */
+        if(_grabber_handle->open()){
+
+            /* start grab task on thread */
+            _grab_worker = thread(&solectrix_camera_grabber::_grab_task, this, camera_parameters);
+
+        }
+
     }
     catch(json::exception& e){
         logger::error("Profile Error : {}", e.what());
@@ -48,7 +57,6 @@ bool solectrix_camera_grabber::on_init(){
 
 void solectrix_camera_grabber::on_loop(){
     /* nothing loop */
-    
 }
 
 
@@ -63,6 +71,9 @@ void solectrix_camera_grabber::on_close(){
         logger::debug("[{}] grabber is now successfully stopped", get_name());
     }
 
+    /* device close */
+    _grabber_handle->close();
+
 }
 
 void solectrix_camera_grabber::on_message(){
@@ -71,31 +82,13 @@ void solectrix_camera_grabber::on_message(){
 
 void solectrix_camera_grabber::_grab_task(json parameters){
 
-    /* read channels for each camera */
-    vector<int> channels;
-    for(const auto& item: parameters["camera"]){
-        if(item.contains("channel")){
-            channels.push_back(item["channel"].get<int>());
-        }
-    }
-
-    /* read port configurations */
-    // string monitoring_portname = fmt::format("image_stream_monitor_{}", camera_id);
-    // string stream_portname = fmt::format("image_stream_{}", camera_id);
-
-    /* create grabber instance */
-    open_device(0, 4, 0x1e, 8);
-
     while(!_worker_stop.load()){
 
         /* do grab */
         try{
-            cv::Mat captured = grab();
+            cv::Mat captured = _grabber_handle->capture();
             if (!captured.empty()) {
-                logger::debug("[{}] Captured image: {}x{}, channels: {}", get_name(), 
-                            captured.cols, captured.rows, captured.channels());
-                cv::imshow("test", captured);
-                cv::waitKey(1);
+                logger::debug("[{}] Captured image: {}x{}, channels: {}", get_name(), captured.cols, captured.rows, captured.channels());
             }
         }
         catch(const cv::Exception& e){
@@ -113,12 +106,7 @@ void solectrix_camera_grabber::_grab_task(json parameters){
     
     }
 
-    /* close grabber instance */
-    close_device();
-
     logger::debug("[{}] Stopped grab task..", get_name());
-
-    
 
 }
 
