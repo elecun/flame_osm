@@ -61,7 +61,7 @@ endif
 
 $(shell mkdir -p $(OUTDIR))
 $(shell mkdir -p $(BUILDDIR))
-REV_COUNT = $(shell git rev-list --all --count)
+REV_COUNT = 0 #$(shell git rev-list --all --count)
 MIN_COUNT = 0 #$(shell git tag | wc -l)
 
 #if release(-O3), debug(-O0)
@@ -145,10 +145,15 @@ video_file_grabber.comp:	$(BUILDDIR)video.file.grabber.o
 $(BUILDDIR)video.file.grabber.o:	$(CURRENT_DIR)/components/video.file.grabber/video.file.grabber.cc
 									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
 
+test.comp:	$(BUILDDIR)test.o
+			$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS)
+$(BUILDDIR)test.o:	$(CURRENT_DIR)/components/test/test.cc
+					$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
+
 
 all : flame
 
-osm : flame uvc_camera_grabber.comp solectrix_camera_grabber.comp body_kps_inference.comp os_model_inference.comp headpose_model_inference.comp
+osm : flame uvc_camera_grabber.comp solectrix_camera_grabber.comp body_kps_inference.comp os_model_inference.comp headpose_model_inference.comp test.comp
 
 deploy : FORCE
 	cp $(BUILDDIR)/*.comp $(BUILDDIR)/flame $(BINDIR)
