@@ -150,36 +150,71 @@ cv::Mat sxpf_grabber::capture(){
                         unsigned int packet_size;
                         unsigned int bits_per_pixel;
                         unsigned int pixel_group_size;
+                        unsigned short* tmp2 = nullptr;
+                        unsigned short* pdst = nullptr;
+                        unsigned int decoded_pix;
+                        const int components_per_pixel = 2; // default contant value
 
                         unsigned char* img_ptr = (uint8_t*)img_hdr + img_hdr->payload_offset;
 
+                        /* packet parsing for each line(1080) */
                         for (uint32_t pkt_count = 0; pkt_count < img_hdr->rows; pkt_count++){
+
                             pixels = csi2_parse_dphy_ph(img_ptr + packet_offset, &vc_dt, &word_count);
+                            logger::debug("(sxpf_grabber) packet offset : {}, vc_dt : {}, word count : {}", packet_offset, vc_dt, word_count);
 
                             if(!pixels){
                                 logger::error("(sxpf_grabber) Invalied frame data");
                                 return captured_image;
                             }
 
-                            frame_datatypes.insert(vc_dt);
+                            frame_datatypes.insert(vc_dt); //0x1e(30)
 
-                            if((vc_dt & 0x3f) <= 0x0f){
+                            if((vc_dt & 0x3f) <= 0x0f){ //0x1e&0x3f = 0x1e
                                 packet_size = (8 + align) & ~align;
                             }
-                            else {
-                                packet_size = (8 + word_count + 2 + align) & ~align;
+                            else{
+                                packet_size = (8 + word_count + 2 + align) & ~align; // enter (packet size = 3852)
                             }
 
                             if(vc_dt == _decode_csi2_datatype){
                                 uint8_t dt = vc_dt & 0x3f;
                                 csi2_decode_datatype(dt,&bits_per_pixel, &pixel_group_size);
+                                logger::debug("(sxpf_grabber) bits_per_pixel : {}, pixel_group_size : {}", bits_per_pixel, pixel_group_size);
 
                                 if(dt >= 0x18 && dt <= 0x1f){
                                     _bits_per_component = 0;
                                     bits_per_pixel /= 2;
                                 }
+
+                                if(tmp2 == nullptr){
+                                    x_size = word_count * 8 / bits_per_pixel; //result = 3840
+                                    tmp2 = (unsigned short*)malloc(sizeof(unsigned short)*x_size*img_hdr->rows); // memory alloc. 3840*1080*2 bytes
+                                    pdst = tmp2;
+                                }
+
+                                if ((pdst - tmp2 + x_size) > (x_size * img_hdr->rows)){
+                                    logger::warn("(sxpf_grabber) decoded data exceeded allocated memory");
+                                    break;
+                                }
+                                else
+                                {
+                                    if(dt != 0x24)
+                                    {
+                                        decoded_pix = csi2_decode_raw16(pdst, word_count * 8 / bits_per_pixel, pixels, bits_per_pixel);
+                                        pdst += decoded_pix;
+                                    }
+
+                                    y_size += 1;
+                                }
                             }
+
+                            packet_offset += packet_size;
                         }
+
+                        img_ptr = (unsigned char*)tmp2;
+                        frame_size = x_size * y_size * sizeof(unsigned short);
+                        x_size /= components_per_pixel;
 
                     }
                     
