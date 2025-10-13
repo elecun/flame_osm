@@ -86,7 +86,7 @@ void solectrix_camera_grabber::_grab_task(json parameters){
 
         /* do grab */
         try{
-            cv::Mat captured = _grabber_handle->capture();
+            cv::Mat captured = _grabber_handle->capture2();
             if (!captured.empty()) {
                 logger::debug("[{}] Captured image: {}x{}, channels: {}", get_name(), captured.cols, captured.rows, captured.channels());
             }

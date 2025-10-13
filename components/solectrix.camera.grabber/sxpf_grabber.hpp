@@ -62,6 +62,8 @@ class sxpf_grabber {
         int wait_event();       /* wait for event */
 
         cv::Mat capture();       /* capture frame and return cv::Mat */
+        cv::Mat capture2(); 
+        cv::Mat process_yuv422_frame(sxpf_image_header_t* img_hdr, uint32_t left_shift);
 
     private:
         unsigned int _stream_channel_mask = 0;    /* stream channel SXPF_STREAM_VIDEOX*/
