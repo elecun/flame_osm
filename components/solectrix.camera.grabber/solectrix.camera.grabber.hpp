@@ -45,8 +45,6 @@ class solectrix_camera_grabber : public flame::component::object {
         /* grabber tasks */
         void _grab_task(json parameters);
         
-        /* frame processing helper */
-        cv::Mat _process_frame_data(sxpf_image_header_t* img_hdr);
 
     private:
         /* grabbing worker */

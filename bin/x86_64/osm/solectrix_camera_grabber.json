@@ -26,22 +26,6 @@
             "port" : 5101,
             "socket_type" : "pub",
             "queue_size" : 100
-        },
-        "image_stream_1" : {
-            "transport" : "inproc",
-            "socket_type" : "pull",
-            "queue_size" : 100
-        },
-        "image_stream_monitor_1":{
-            "transport":"tcp",
-            "host":"*",
-            "port":9001,
-            "socket_type" : "pub",
-            "queue_size" : 10,
-            "resolution" : {
-                "width" : 480,
-                "height" : 270
-            }
         }
     }
 }

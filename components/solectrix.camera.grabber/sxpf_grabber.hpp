@@ -58,12 +58,10 @@ class sxpf_grabber {
         int get_num_cards();    /* get number of grabber cards */
         bool open();            /* grabber card open */
         void close();           /* grabber card close */
-        void grab();            /* grab and return opencv image */
         int wait_event();       /* wait for event */
 
-        cv::Mat capture();       /* capture frame and return cv::Mat */
-        cv::Mat capture2(); 
-        cv::Mat process_yuv422_frame(sxpf_image_header_t* img_hdr, uint32_t left_shift);
+        Mat capture();          /* capture frame and return cv::Mat*/
+        Mat _process_yuv422_frame(sxpf_image_header_t* img_hdr, uint32_t left_shift);
 
     private:
         unsigned int _stream_channel_mask = 0;    /* stream channel SXPF_STREAM_VIDEOX*/
@@ -80,22 +78,8 @@ class sxpf_grabber {
         HWAITSXPF _devfd;                   /* device file description */
         sxpf_hdl _grabber_handle;           /* grabber card handle */
         sxpf_card_info_t _grabber_info;     /* grabber card  info */
-        sxpf_card_props_t props;            /* grabber card properties */
         sxpf_event_t _events[20];           /* frame grabber events */
-
-        
-        
-        int _csi2_datatype = 30;        /* CSI2 Data Type (YUV422=0x1e) */
-        
-
-
-        long long _last_time {0};
-
-    
-
-        uint16_t* tmp2 = nullptr;
-        uint16_t* pdst = nullptr;
-        
+       
 
 };
 
