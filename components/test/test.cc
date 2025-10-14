@@ -36,6 +36,6 @@ void test::on_close(){
     
 }
 
-void test::on_message(){
-    
+void test::on_message(const message_t& msg){
+    // Note: The 'msg' parameter is currently unused.
 }

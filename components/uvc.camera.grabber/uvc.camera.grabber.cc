@@ -76,8 +76,8 @@ void uvc_camera_grabber::on_close(){
 
 }
 
-void uvc_camera_grabber::on_message(){
-    
+void uvc_camera_grabber::on_message(const message_t& msg){
+    // Note: The 'msg' parameter is currently unused.
 }
 
 void uvc_camera_grabber::_grab_task(int camera_id, json camera_param){

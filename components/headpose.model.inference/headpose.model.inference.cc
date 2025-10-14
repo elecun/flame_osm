@@ -102,8 +102,8 @@ void headpose_model_inference::on_close(){
     }
 }
 
-void headpose_model_inference::on_message(){
-
+void headpose_model_inference::on_message(const message_t& msg){
+    // Note: The 'msg' parameter is currently unused.
 }
 
 void headpose_model_inference::init_mediapipe(){
@@ -262,4 +262,3 @@ void headpose_model_inference::print_landmarks_and_pose(const std::vector<cv::Po
     std::cout << "Roll: " << pose[2] << " degrees" << std::endl;
     std::cout << "========================" << std::endl << std::endl;
 }
-

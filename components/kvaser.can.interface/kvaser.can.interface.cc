@@ -154,8 +154,8 @@ void kvaser_can_interface::on_close(){
 
 }
 
-void kvaser_can_interface::on_message(){
-    
+void kvaser_can_interface::on_message(const message_t& msg){
+    // Note: The 'msg' parameter is currently unused.
 }
 
 

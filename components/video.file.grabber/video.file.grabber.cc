@@ -67,8 +67,8 @@ void video_file_grabber::on_close(){
     }
 }
 
-void video_file_grabber::on_message(){
-    
+void video_file_grabber::on_message(const message_t& msg){
+    // Note: The 'msg' parameter is currently unused.
 }
 
 void video_file_grabber::_action_proc(json args){

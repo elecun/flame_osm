@@ -76,7 +76,7 @@ void solectrix_camera_grabber::on_close(){
 
 }
 
-void solectrix_camera_grabber::on_message(){
+void solectrix_camera_grabber::on_message(const message_t& msg){
     /* reserved function */
 }
 
@@ -168,4 +168,3 @@ cv::Mat solectrix_camera_grabber::grab() {
     
     return result;
 }
-

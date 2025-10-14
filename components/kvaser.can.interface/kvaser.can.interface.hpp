@@ -36,7 +36,7 @@ kvaser_can_interface() = default;
     bool on_init() override;
     void on_loop() override;
     void on_close() override;
-    void on_message() override;
+    void on_message(const message_t& msg) override;
 
 private: /* private functions */
     void _can_ch0_rcv_task();

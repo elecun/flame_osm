@@ -32,7 +32,7 @@ class solectrix_camera_grabber : public flame::component::object {
         bool on_init() override;
         void on_loop() override;
         void on_close() override;
-        void on_message() override;
+        void on_message(const message_t& msg) override;
 
         /* device control functions */
         bool open_device(int endpoint_id = 0, int channel_id = 4, uint32_t decode_csi2_datatype = 0x1e, int left_shift = 8);
