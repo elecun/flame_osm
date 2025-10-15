@@ -1,6 +1,6 @@
 #include "body.kps.inference.hpp"
 #include <flame/log.hpp>
-#include <flame/config_def.hpp>
+#include <flame/def.hpp>
 #include <chrono>
 #include <fstream>
 #include <filesystem>

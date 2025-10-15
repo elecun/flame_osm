@@ -1,7 +1,7 @@
 
 #include "os.model.inference.hpp"
 #include <flame/log.hpp>
-#include <flame/config_def.hpp>
+#include <flame/def.hpp>
 #include <chrono>
 #include <algorithm>
 #include <thread>

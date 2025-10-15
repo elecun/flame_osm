@@ -22,6 +22,7 @@
 
 using namespace std;
 using namespace cv;
+using namespace flame::component;
 
 class solectrix_camera_grabber : public flame::component::object {
     public:

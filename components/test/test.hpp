@@ -15,6 +15,7 @@
 #include <flame/component/object.hpp>
 
 using namespace std;
+using namespace flame::component;
 
 class test : public flame::component::object {
     public:
