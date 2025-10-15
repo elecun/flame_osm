@@ -82,6 +82,8 @@ void solectrix_camera_grabber::on_message(const message_t& msg){
 
 void solectrix_camera_grabber::_grab_task(json parameters){
 
+    auto last_time = chrono::high_resolution_clock::now();
+
     while(!_worker_stop.load()){
 
         /* do grab */
@@ -89,6 +91,51 @@ void solectrix_camera_grabber::_grab_task(json parameters){
             cv::Mat captured = _grabber_handle->capture();
             if (!captured.empty()) {
                 logger::debug("[{}] Captured image: {}x{}, channels: {}", get_name(), captured.cols, captured.rows, captured.channels());
+
+                /* publish image */
+            if(_use_image_stream.load()){
+
+                /* image rotate (0=cw_90, 1=180, 2=ccw_90)*/
+                int rotate_flag = parameters.value("rotate_flag", -1);
+                if(rotate_flag != -1){
+                    cv::rotate(captured, captured, rotate_flag);
+                }
+
+                /* image encoding */
+                std::vector<unsigned char> serialized_image;
+                cv::imencode(".jpg", captured, serialized_image);
+
+                json tag;
+                auto now = chrono::high_resolution_clock::now();
+                chrono::duration<double> elapsed = now - last_time;
+                last_time = now;
+
+                tag["fps"] = 1.0/elapsed.count();
+                tag["height"] = raw_frame.rows;
+                tag["width"] = raw_frame.cols;
+                tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
+
+                if(get_port("image_stream_1")->handle()!=nullptr){
+                    message_t tag;
+                    zmq::multipart_t msg_multipart_image;
+                    msg_multipart_image.addstr(tag.dump());
+                    msg_multipart_image.addmem(serialized_image.data(), serialized_image.size());
+                    msg_multipart_image.send(*get_port(image_stream_port), ZMQ_DONTWAIT);
+                    msg_multipart_image.clear();
+                }
+                else{
+                    logger::warn("[{}] socket handle is not valid ", get_name());
+                }
+                serialized_image.clear();
+
+            }
+
+                if(_use_image_stream.load()){
+                    message_t msg;
+                    msg["type"] = "image";
+                    msg["data"] = captured;
+                    get_port("image_stream")->send(msg);
+                }
             }
         }
         catch(const cv::Exception& e){

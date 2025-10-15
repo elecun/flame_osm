@@ -32,7 +32,7 @@ void test::on_loop(){
 
 
 void test::on_close(){
-
+    logger::info("test::on_close()");
     
 }
 
