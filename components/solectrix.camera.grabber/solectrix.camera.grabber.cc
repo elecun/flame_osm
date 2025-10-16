@@ -101,6 +101,9 @@ void solectrix_camera_grabber::_grab_task(json parameters){
                     cv::rotate(captured, captured, rotate_flag);
                 }
 
+                /* resize */
+                
+
                 /* image encoding */
                 std::vector<unsigned char> serialized_image;
                 cv::imencode(".jpg", captured, serialized_image);
