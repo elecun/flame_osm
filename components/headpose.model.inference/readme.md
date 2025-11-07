@@ -9,4 +9,5 @@ $ cd mediapipe
 bazel-bin/mediapipe/examples/desktop/face_mesh/face_mesh_gpu --calculator_graph_config_file=mediapipe/graphs/face_mesh/face_mesh_desktop_live_gpu.pbtxt
 ```
 
-2. 
+2. https://github.com/yinguobing/head-pose-estimation
+3. 

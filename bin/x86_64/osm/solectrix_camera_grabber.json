@@ -11,7 +11,7 @@
 
     "parameters":{
         "camera":[
-            {"name":"Left Top A Pillar", "card":0, "channel":4, "rotate_flag":0}
+            {"name":"Left A Pillar", "card":0, "channel":4, "rotate_flag":0}
         ],
         "csi2_datatype":"0x1e",
         "left_shift":8,
@@ -28,11 +28,9 @@
             "queue_size" : 10
         },
         "image_stream_1":{
-            "transport":"tcp",
-            "host":"*",
-            "port":5102,
-            "socket_type" : "pub",
-            "queue_size" : 10
+            "transport":"inproc",
+            "socket_type" : "push",
+            "queue_size" : 100
         },
         "image_stream_monitor_1":{
             "transport":"tcp",
@@ -44,6 +42,6 @@
                 "width" : 540,
                 "height" : 960
             }
-        },
+        }
     }
 }

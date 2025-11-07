@@ -1,1 +1,0 @@
-Head Pose Estimation Model (Inference)

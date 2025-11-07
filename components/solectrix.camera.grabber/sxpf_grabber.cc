@@ -33,6 +33,7 @@ sxpf_grabber::sxpf_grabber(json parameters){
     }
 
     _decode_csi2_datatype = strtol(parameters.at("csi2_datatype").get<string>().c_str(), NULL, 16);
+    _rotate_flag = parameters.value("rotate_flag", -1);
 
     /* show the applied camera parameters */
     logger::info("(sxpf_grabber) {} camera device will be attached", _parameter_container.size());
