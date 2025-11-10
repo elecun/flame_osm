@@ -16,20 +16,26 @@
 #include <atomic>
 #include <thread>
 #include <memory>
+#include <vector>
 #include <opencv2/opencv.hpp>
 #include <NvInfer.h>
-#include <cuda_runtime_api.h>
 
-struct KeyPoint {
-    float x, y;
-    float confidence;
-};
+namespace body_kps {
+    struct KeyPoint {
+        float x, y;
+        float confidence;
+    };
 
-struct PoseResult {
-    std::vector<KeyPoint> keypoints;
-    float bbox_confidence;
-    cv::Rect bbox;
-};
+    struct PoseResult {
+        std::vector<KeyPoint> keypoints;
+        float bbox_confidence;
+        cv::Rect bbox;
+    };
+}
+
+using namespace std;
+using namespace cv;
+using namespace flame::component;
 
 class Logger : public nvinfer1::ILogger {
 public:
@@ -45,7 +51,7 @@ class body_kps_inference : public flame::component::object {
         bool on_init() override;
         void on_loop() override;
         void on_close() override;
-        void on_message() override;
+        void on_message(const message_t& msg) override;
 
     private:
         std::atomic<bool> _worker_stop { false };
@@ -64,7 +70,7 @@ class body_kps_inference : public flame::component::object {
         float* _cpu_output_buffer = nullptr;
 
         /* Model parameters */
-        std::string _engine_path;
+        std::string _model_path;
         int _input_width = 640;
         int _input_height = 640;
         int _num_keypoints = 17;
@@ -77,8 +83,7 @@ class body_kps_inference : public flame::component::object {
         void _allocate_buffers();
         void _free_buffers();
         cv::Mat _preprocess_image(const cv::Mat& image);
-        std::vector<PoseResult> _postprocess_output(float* output, int batch_size);
-        void _draw_keypoints(cv::Mat& image, const std::vector<PoseResult>& results);
+        std::vector<body_kps::PoseResult> _postprocess_output(float* output, int batch_size);
 };
 
 EXPORT_COMPONENT_API

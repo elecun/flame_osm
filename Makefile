@@ -46,8 +46,9 @@ else
 #	LD_LIBRARY_PATH += -L./lib/x86_64
 	OUTDIR		= $(CURRENT_DIR)/bin/x86_64/
 	BUILDDIR	= $(CURRENT_DIR)/bin/x86_64/
-	INCLUDE_DIR = -I./ -I$(CURRENT_DIR) -I$(FLAME_PATH)/include -I$(FLAME_PATH)/include/dep -I/usr/include -I/usr/local/include -I/usr/include/opencv4
-	LIBDIR = -L/usr/local/lib -L$(FLAME_PATH)/lib/x86_64/ -L/usr/lib/x86-64-linux-gnu
+	INCLUDE_DIR = -I./ -I$(CURRENT_DIR) -I$(FLAME_PATH)/include -I$(FLAME_PATH)/include/dep -I/usr/include -I/usr/local/include -I/usr/include/opencv4 -I/usr/local/cuda/include
+	LIBDIR = -L/usr/local/lib -L$(FLAME_PATH)/lib/x86_64/ -L/usr/lib/x86-64-linux-gnu -L/usr/local/cuda/lib64
+
 export LD_LIBRARY_PATH := $(LIBDIR):$(LD_LIBRARY_PATH)
 endif
 

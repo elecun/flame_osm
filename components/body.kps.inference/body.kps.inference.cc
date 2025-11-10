@@ -41,19 +41,28 @@ bool body_kps_inference::on_init(){
         /* read profile */
         json parameters = get_profile()->parameters();
 
-        _engine_path = parameters.value("engine_path", "");
-        if(_engine_path.empty()){
+        _model_path = parameters.value("model_path", "");
+        if(_model_path.empty()){
             logger::error("[{}] TensorRT engine path is not defined", get_name());
             return false;
         }
 
-        if(!fs::exists(_engine_path)){
-            logger::error("[{}] TensorRT engine file not found: {}", get_name(), _engine_path);
+        if(!fs::exists(_model_path)){
+            logger::error("[{}] TensorRT engine file not found: {}", get_name(), _model_path);
             return false;
         }
 
+        /* Read model parameters */
+        _input_width = parameters.value("input_width", 640);
+        _input_height = parameters.value("input_height", 640);
+        _num_keypoints = parameters.value("num_keypoints", 17);
+
+        /* Recalculate buffer sizes based on parameters */
+        _input_size = 3 * _input_width * _input_height * sizeof(float);
+        _output_size = (4 + _num_keypoints * 3) * 8400 * sizeof(float);
+
         /* Load TensorRT engine */
-        if(!_load_engine(_engine_path)){
+        if(!_load_engine(_model_path)){
             logger::error("[{}] Failed to load TensorRT engine", get_name());
             return false;
         }
@@ -64,7 +73,7 @@ bool body_kps_inference::on_init(){
         /* Start inference thread */
         _inference_worker = thread(&body_kps_inference::_inference_process, this);
         logger::info("[{}] Body keypoint inference component initialized successfully", get_name());
-        
+
     }
     catch(json::exception& e){
         logger::error("[{}] Profile Error : {}", get_name(), e.what());
@@ -101,7 +110,7 @@ void body_kps_inference::on_close(){
     logger::info("[{}] Component successfully closed", get_name());
 }
 
-void body_kps_inference::on_message(){
+void body_kps_inference::on_message(const message_t& msg){
     /* Handle incoming messages if needed */
 }
 
@@ -202,8 +211,8 @@ cv::Mat body_kps_inference::_preprocess_image(const cv::Mat& image){
     return processed;
 }
 
-std::vector<PoseResult> body_kps_inference::_postprocess_output(float* output, int batch_size){
-    std::vector<PoseResult> results;
+std::vector<body_kps::PoseResult> body_kps_inference::_postprocess_output(float* output, int batch_size){
+    std::vector<body_kps::PoseResult> results;
     
     /* YOLO11 pose output format: [batch, 4+kpts*3, 8400] */
     const int num_boxes = 8400;
@@ -227,7 +236,7 @@ std::vector<PoseResult> body_kps_inference::_postprocess_output(float* output, i
         }
         
         if(max_kpt_conf > conf_threshold){
-            PoseResult result;
+            body_kps::PoseResult result;
             result.bbox_confidence = max_kpt_conf;
             result.bbox = cv::Rect(
                 (x_center - width/2) * 1920 / _input_width,
@@ -235,16 +244,16 @@ std::vector<PoseResult> body_kps_inference::_postprocess_output(float* output, i
                 width * 1920 / _input_width,
                 height * 1080 / _input_height
             );
-            
+
             /* Extract keypoints */
             for(int k = 0; k < _num_keypoints; k++){
-                KeyPoint kpt;
+                body_kps::KeyPoint kpt;
                 kpt.x = box_data[4 + k * 3] * 1920 / _input_width;
                 kpt.y = box_data[4 + k * 3 + 1] * 1080 / _input_height;
                 kpt.confidence = box_data[4 + k * 3 + 2];
                 result.keypoints.push_back(kpt);
             }
-            
+
             results.push_back(result);
         }
     }
@@ -252,118 +261,147 @@ std::vector<PoseResult> body_kps_inference::_postprocess_output(float* output, i
     return results;
 }
 
-void body_kps_inference::_draw_keypoints(cv::Mat& image, const std::vector<PoseResult>& results){
-    /* COCO keypoint connections for skeleton */
-    const std::vector<std::pair<int, int>> skeleton = {
-        {0, 1}, {0, 2}, {1, 3}, {2, 4}, {5, 6}, {5, 7}, {7, 9},
-        {6, 8}, {8, 10}, {5, 11}, {6, 12}, {11, 12}, {11, 13},
-        {13, 15}, {12, 14}, {14, 16}
-    };
-    
-    for(const auto& result : results){
-        /* Draw bounding box */
-        cv::rectangle(image, result.bbox, cv::Scalar(0, 255, 0), 2);
-        
-        /* Draw keypoints */
-        for(size_t i = 0; i < result.keypoints.size(); i++){
-            const auto& kpt = result.keypoints[i];
-            if(kpt.confidence > 0.5f){
-                cv::circle(image, cv::Point(kpt.x, kpt.y), 3, cv::Scalar(0, 0, 255), -1);
-            }
-        }
-        
-        /* Draw skeleton */
-        for(const auto& connection : skeleton){
-            if(connection.first < result.keypoints.size() && 
-               connection.second < result.keypoints.size()){
-                const auto& kpt1 = result.keypoints[connection.first];
-                const auto& kpt2 = result.keypoints[connection.second];
-                
-                if(kpt1.confidence > 0.5f && kpt2.confidence > 0.5f){
-                    cv::line(image, cv::Point(kpt1.x, kpt1.y), 
-                            cv::Point(kpt2.x, kpt2.y), cv::Scalar(255, 0, 0), 2);
-                }
-            }
-        }
-    }
-}
-
 void body_kps_inference::_inference_process(){
     logger::info("[{}] Inference thread started", get_name());
-    
+
     int frame_count = 0;
-    
+
     while(!_worker_stop.load()){
         try{
-            /* Load test image (temporary - replace with actual image source) */
-            std::string test_image_path = fmt::format("./test_image_{}.jpg", frame_count % 10);
-            cv::Mat input_image;
-            
-            /* Try to load test image, if not found create a dummy image */
-            if(fs::exists(test_image_path)){
-                input_image = cv::imread(test_image_path);
-            } else {
-                /* Create dummy 1920x1080 image for testing */
-                input_image = cv::Mat::zeros(1080, 1920, CV_8UC3);
-                cv::putText(input_image, fmt::format("Test Frame {}", frame_count), 
-                           cv::Point(50, 100), cv::FONT_HERSHEY_SIMPLEX, 2, cv::Scalar(255, 255, 255), 3);
-            }
-            
-            if(input_image.empty()){
-                logger::warn("[{}] No input image available, skipping frame", get_name());
+            /* Receive image from ZMQ */
+            zmq::multipart_t msg_multipart;
+
+            if(get_port("image_stream_1")->handle() == nullptr){
+                logger::warn("[{}] image_stream_1 port handle is not valid", get_name());
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 continue;
             }
-            
+
+            /* Receive multipart message with timeout */
+            if(!msg_multipart.recv(*get_port("image_stream_1"), ZMQ_DONTWAIT)){
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                continue;
+            }
+
+            if(msg_multipart.size() < 3){
+                logger::warn("[{}] Invalid multipart message size: {}", get_name(), msg_multipart.size());
+                continue;
+            }
+
+            /* Extract parts: [portname, tag, image_data] */
+            std::string portname = msg_multipart.popstr();
+            std::string tag_str = msg_multipart.popstr();
+            zmq::message_t image_msg = msg_multipart.pop();
+
+            /* Parse tag JSON */
+            json tag = json::parse(tag_str);
+
+            /* Decode image */
+            std::vector<unsigned char> image_data(
+                static_cast<unsigned char*>(image_msg.data()),
+                static_cast<unsigned char*>(image_msg.data()) + image_msg.size()
+            );
+            cv::Mat input_image = cv::imdecode(image_data, cv::IMREAD_COLOR);
+
+            if(input_image.empty()){
+                logger::warn("[{}] Failed to decode image", get_name());
+                continue;
+            }
+
+            logger::debug("[{}] Received image: {}x{}", get_name(), input_image.cols, input_image.rows);
+
             /* Preprocess image */
             cv::Mat processed_image = _preprocess_image(input_image);
-            
+
             /* Copy to input buffer (HWC to CHW format) */
             for(int c = 0; c < 3; c++){
                 for(int h = 0; h < _input_height; h++){
                     for(int w = 0; w < _input_width; w++){
-                        _cpu_input_buffer[c * _input_height * _input_width + h * _input_width + w] = 
+                        _cpu_input_buffer[c * _input_height * _input_width + h * _input_width + w] =
                             processed_image.at<cv::Vec3f>(h, w)[c];
                     }
                 }
             }
-            
+
             /* Copy input to GPU */
             cudaMemcpy(_gpu_input_buffer, _cpu_input_buffer, _input_size, cudaMemcpyHostToDevice);
-            
+
             /* Run inference */
             void* bindings[] = {_gpu_input_buffer, _gpu_output_buffer};
             bool success = _context->executeV2(bindings);
-            
+
             if(success){
                 /* Copy output from GPU */
                 cudaMemcpy(_cpu_output_buffer, _gpu_output_buffer, _output_size, cudaMemcpyDeviceToHost);
-                
+
                 /* Postprocess results */
-                std::vector<PoseResult> results = _postprocess_output(_cpu_output_buffer, 1);
-                
-                /* Draw keypoints on original image */
-                _draw_keypoints(input_image, results);
-                
-                /* Save result image */
-                std::string output_path = fmt::format("./keypoint_result_{}.jpg", frame_count);
-                cv::imwrite(output_path, input_image);
-                
-                logger::debug("[{}] Processed frame {}, detected {} poses", 
+                std::vector<body_kps::PoseResult> results = _postprocess_output(_cpu_output_buffer, 1);
+
+                logger::debug("[{}] Processed frame {}, detected {} poses",
                              get_name(), frame_count, results.size());
+
+                /* Create JSON output */
+                json output;
+                output["frame_id"] = frame_count;
+                output["timestamp"] = tag.value("timestamp", 0);
+                output["camera_id"] = tag.value("id", 1);
+                output["num_poses"] = results.size();
+
+                json poses_array = json::array();
+                for(const auto& result : results){
+                    json pose_obj;
+                    pose_obj["bbox"] = {
+                        {"x", result.bbox.x},
+                        {"y", result.bbox.y},
+                        {"width", result.bbox.width},
+                        {"height", result.bbox.height}
+                    };
+                    pose_obj["confidence"] = result.bbox_confidence;
+
+                    json keypoints_array = json::array();
+                    for(size_t i = 0; i < result.keypoints.size(); i++){
+                        const auto& kpt = result.keypoints[i];
+                        keypoints_array.push_back({
+                            {"id", i},
+                            {"x", kpt.x},
+                            {"y", kpt.y},
+                            {"confidence", kpt.confidence}
+                        });
+                    }
+                    pose_obj["keypoints"] = keypoints_array;
+                    poses_array.push_back(pose_obj);
+                }
+                output["poses"] = poses_array;
+
+                /* Send JSON result via ZMQ */
+                // if(get_port("pose_result")->handle() != nullptr){
+                //     std::string json_str = output.dump();
+                //     zmq::message_t result_msg(json_str.data(), json_str.size());
+                //     if(!result_msg.send(*get_port("pose_result"), ZMQ_DONTWAIT)){
+                //         if(!_worker_stop.load()){
+                //             logger::warn("[{}] Failed to send pose result", get_name());
+                //         }
+                //     }
+                // }
             } else {
                 logger::error("[{}] TensorRT inference failed", get_name());
             }
-            
+
             frame_count++;
-            std::this_thread::sleep_for(std::chrono::milliseconds(33)); // ~30 FPS
-            
+
+        }
+        catch(const zmq::error_t& e){
+            logger::error("[{}] ZMQ error in inference thread: {}", get_name(), e.what());
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        catch(const json::exception& e){
+            logger::error("[{}] JSON parsing error: {}", get_name(), e.what());
         }
         catch(const std::exception& e){
             logger::error("[{}] Exception in inference thread: {}", get_name(), e.what());
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         }
     }
-    
+
     logger::info("[{}] Inference thread stopped", get_name());
 }

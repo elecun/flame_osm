@@ -3,7 +3,7 @@
     "verbose" : 1,
 
     "parameters":{
-        "use_image_stream":false,
+        "use_image_stream":true,
         "use_image_stream_monitoring":true,
         "camera":[
             {"id":1, "name":"Left A Pillar", "portname":"image_stream_1", "file":"sample.avi", "rotate_flag":0}
@@ -26,7 +26,7 @@
         },
         "image_stream_1":{
             "transport":"inproc",
-            "socket_type" : "push",
+            "socket_type" : "pub",
             "queue_size" : 100
         },
         "image_stream_1_monitor":{
