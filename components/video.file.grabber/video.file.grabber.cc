@@ -108,8 +108,6 @@ void video_file_grabber::on_message(const message_t& msg){
 
 void video_file_grabber::_grab_task(json camera_parameters){
 
-    auto last_time = chrono::high_resolution_clock::now();
-
     /* get video file fps for frame rate control */
     double video_fps = _video_capture->get(cv::CAP_PROP_FPS);
     if(video_fps <= 0) video_fps = 30.0; // default to 30fps if not available
@@ -130,8 +128,19 @@ void video_file_grabber::_grab_task(json camera_parameters){
                 continue;
             }
 
+            // /* calc capture time */
+            // auto now = chrono::high_resolution_clock::now();
+            // chrono::duration<double> elapsed = now - last_time;
+            // last_time = now;
+
             if (!captured.empty()) {
                 logger::debug("[{}] Captured image: {}x{}, channels: {}", get_name(), captured.cols, captured.rows, captured.channels());
+
+                /* generate meta tag */
+                json tag;
+                tag["id"] = camera_parameters[0].value("id", 1);
+                tag["fps"] = video_fps;
+                tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(frame_start.time_since_epoch()).count();
 
                 /* image rotate (0=cw_90, 1=180, 2=ccw_90)*/
                 int rotate_flag = -1;
@@ -152,24 +161,20 @@ void video_file_grabber::_grab_task(json camera_parameters){
                     std::vector<unsigned char> serialized_image;
                     cv::imencode(".jpg", captured, serialized_image);
 
-                    /* generate data meta tag */
-                    json tag;
-                    auto now = chrono::high_resolution_clock::now();
-                    chrono::duration<double> elapsed = now - last_time;
-                    last_time = now;
-
-                    tag["fps"] = 1.0/elapsed.count();
+                    /* update tag */
                     tag["height"] = captured.rows;
                     tag["width"] = captured.cols;
-                    tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
 
                     /* send data */
                     if(get_port(portname.c_str())->handle()!=nullptr){
-                        zmq::multipart_t msg_multipart_image;
-                        msg_multipart_image.addstr(tag.dump());
-                        msg_multipart_image.addmem(serialized_image.data(), serialized_image.size());
-                        msg_multipart_image.send(*get_port(portname.c_str()), ZMQ_DONTWAIT);
-                        msg_multipart_image.clear();
+                        message_t msg_multipart;
+                        msg_multipart.addstr(portname);
+                        msg_multipart.addstr(tag.dump());
+                        msg_multipart.addmem(serialized_image.data(), serialized_image.size());
+                        if(!msg_multipart.send(*get_port(portname.c_str()), ZMQ_DONTWAIT)){
+                            logger::warn("[{}] Failed to send message, queue may be full", get_name());
+                        }
+                        msg_multipart.clear(); 
                     }
                     else{
                         logger::warn("[{}] socket handle is not valid ", get_name());
@@ -188,32 +193,27 @@ void video_file_grabber::_grab_task(json camera_parameters){
                     cv::resize(captured, resized, cv::Size(target_width, target_height));
 
                     /* image encoding */
-                    std::vector<unsigned char> serialized_image;
-                    cv::imencode(".jpg", resized, serialized_image);
+                    std::vector<unsigned char> serialized_monitoring_image;
+                    cv::imencode(".jpg", resized, serialized_monitoring_image);
 
-                    /* generate data meta tag */
-                    json tag;
-                    auto now = chrono::high_resolution_clock::now();
-
+                    /* update tag */
                     tag["height"] = resized.rows;
                     tag["width"] = resized.cols;
-                    tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
+
 
                     /* send monitoring data */
-                    string monitor_portname = portname;
-                    size_t pos = monitor_portname.find("image_stream_");
-                    if(pos != string::npos){
-                        monitor_portname.replace(pos, 13, "image_stream_monitor_");
-                    }
-
+                    string monitor_portname = fmt::format("{}_monitor", portname);
                     if(get_port(monitor_portname.c_str())->handle()!=nullptr){
-                        zmq::multipart_t msg_multipart_image;
-                        msg_multipart_image.addstr(tag.dump());
-                        msg_multipart_image.addmem(serialized_image.data(), serialized_image.size());
-                        msg_multipart_image.send(*get_port(monitor_portname.c_str()), ZMQ_DONTWAIT);
-                        msg_multipart_image.clear();
+                        message_t msg_multipart;
+                        msg_multipart.addstr(monitor_portname);
+                        msg_multipart.addstr(tag.dump());
+                        msg_multipart.addmem(serialized_monitoring_image.data(), serialized_monitoring_image.size());
+                        if(!msg_multipart.send(*get_port(monitor_portname.c_str()), ZMQ_DONTWAIT)){
+                            logger::warn("[{}] Failed to send message, queue may be full", get_name());
+                        }
+                        msg_multipart.clear(); 
                     }
-                    serialized_image.clear();
+                    serialized_monitoring_image.clear();
                 }
 
             }
