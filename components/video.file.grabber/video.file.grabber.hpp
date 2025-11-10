@@ -23,6 +23,7 @@
 
 using namespace std;
 using namespace cv;
+using namespace flame::component;
 
 class video_file_grabber : public flame::component::object {
     public:
@@ -36,32 +37,20 @@ class video_file_grabber : public flame::component::object {
         void on_message(const message_t& msg) override;
 
     private:
-        /* task processing by action invoker */
-        void _action_invoke_listener_proc(json parameters);
-        void _action_proc(json args);
+        /* grabber tasks */
+        void _grab_task(json parameters);
 
     private:
-        /* rpc-like api functions */
-        void api_start_grab(const json& args);  /* start frame grab */
-        void api_stop_grab(const json& args);   /* stop frame grab */
+        /* grabbing worker */
+        thread _grab_worker;
 
-    private:
-        /* action thread */
-        atomic<bool> _action_working { false }; /* action thread termination control */
-        thread _invoked_action_thread;
-
-    private:
-        /* action_apis */
-        unordered_map<string, function<void(json)>> api_table;
-
-        /* video capture */
-        cv::VideoCapture _cap;
-
-        /* flag */
-        thread _action_invoke_listener;
+        /* flags */
         atomic<bool> _worker_stop { false };
         atomic<bool> _use_image_stream { false };
-        
+        atomic<bool> _use_image_stream_monitoring { false };
+
+        /* video capture device */
+        unique_ptr<cv::VideoCapture> _video_capture;
 
 }; /* class */
 

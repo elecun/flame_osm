@@ -1,13 +1,12 @@
 
 #include "video.file.grabber.hpp"
 #include <flame/log.hpp>
-#include <flame/def.hpp>
 #include <chrono>
-#include <algorithm>
-#include <thread>
 
 using namespace flame;
 using namespace std;
+using namespace cv;
+
 
 /* create component instance */
 static video_file_grabber* _instance = nullptr;
@@ -18,25 +17,62 @@ void release(){ if(_instance){ delete _instance; _instance = nullptr; }}
 bool video_file_grabber::on_init(){
 
     try{
+
         /* read profile */
         json parameters = get_profile()->parameters();
 
-        /* configure data for data pipelining  */
+        /* check parameters */
+        if(!parameters.contains("camera") || !parameters["camera"].is_array()){
+            logger::warn("[{}] Not found or Invalid 'camera' parameters. It must be valid.", get_name());
+            return false;
+        }
+        logger::info("[{}] {} camera parameter is defined.", get_name(), parameters["camera"].size());
+
+        /* setup pipeline */
         _use_image_stream.store(parameters.value("use_image_stream", false));
+        _use_image_stream_monitoring.store(parameters.value("use_image_stream_monitoring", false));
 
-        /* start api processing from action invoker */
-        _action_invoke_listener = thread(&video_file_grabber::_action_invoke_listener_proc, this, parameters);
+        /* get video file path from first camera entry */
+        json camera_parameters = parameters["camera"];
+        if(camera_parameters.is_array() && !camera_parameters.empty()){
+            string video_file = camera_parameters[0].value("file", "");
+            if(video_file.empty()){
+                logger::error("[{}] No video file specified in 'file' parameter", get_name());
+                return false;
+            }
 
-        /* rpc-like api registration */
-        api_table["api_start_grab"] = [this](const json& args){ this->api_start_grab(args); };
-        api_table["api_stop_grab"] = [this](const json& args){ this->api_stop_grab(args); };
+            /* create video capture */
+            _video_capture = make_unique<cv::VideoCapture>(video_file);
+
+            if(!_video_capture->isOpened()){
+                logger::error("[{}] Failed to open video file: {}", get_name(), video_file);
+                return false;
+            }
+
+            logger::info("[{}] Video file opened successfully: {}", get_name(), video_file);
+            logger::info("[{}] Video properties - Width: {}, Height: {}, FPS: {}, Total Frames: {}",
+                get_name(),
+                (int)_video_capture->get(cv::CAP_PROP_FRAME_WIDTH),
+                (int)_video_capture->get(cv::CAP_PROP_FRAME_HEIGHT),
+                _video_capture->get(cv::CAP_PROP_FPS),
+                (int)_video_capture->get(cv::CAP_PROP_FRAME_COUNT)
+            );
+
+            /* start grab worker */
+            _grab_worker = thread(&video_file_grabber::_grab_task, this, camera_parameters);
+        }
+        else{
+            logger::error("[{}] Camera parameters array is empty", get_name());
+            return false;
+        }
+
     }
     catch(json::exception& e){
-        logger::error("[{}] Component profile read exception : {}", get_name(), e.what());
+        logger::error("Profile Error : {}", e.what());
         return false;
     }
-    catch(cv::Exception::exception& e){
-        logger::error("[{}] Device open exception : {}", get_name(), e.what());
+    catch(cv::Exception& e){
+        logger::error("OpenCV Error : {}", e.what());
         return false;
     }
 
@@ -44,8 +80,7 @@ bool video_file_grabber::on_init(){
 }
 
 void video_file_grabber::on_loop(){
-
-    
+    /* nothing loop */
 }
 
 
@@ -54,132 +89,158 @@ void video_file_grabber::on_close(){
     /* stop worker */
     _worker_stop.store(true);
 
-    /* stop action invoke listener */
-    if(_action_invoke_listener.joinable()){
-        _action_invoke_listener.join();
-        logger::debug("[{}] Grabber is successfully stopped", get_name());
+    /* stop grabbing thread */
+    if(_grab_worker.joinable()){
+        _grab_worker.join();
+        logger::debug("[{}] grabber is now successfully stopped", get_name());
     }
 
-    /* stop grab action */
-    _action_working.store(false);
-    if(_invoked_action_thread.joinable()){
-        _invoked_action_thread.join();
+    /* close video capture */
+    if(_video_capture && _video_capture->isOpened()){
+        _video_capture->release();
     }
+
 }
 
 void video_file_grabber::on_message(const message_t& msg){
-    // Note: The 'msg' parameter is currently unused.
+    /* reserved function */
 }
 
-void video_file_grabber::_action_proc(json args){
-
-    string video_file = args["filepath"].get<string>();
-    int api_ref = static_cast<int>(CAP_FFMPEG);
-    VideoCapture _cap(video_file, api_ref);
-
-    /* check video capture */
-    if(!_cap.isOpened()){
-        logger::error("[{}] {} could not open", get_name(), video_file);
-        return;
-    }
-
-    /* param */
-    const string image_stream_port = "image_stream";
-    const string image_stream_monitor_port = "image_stream_monitor";
+void video_file_grabber::_grab_task(json camera_parameters){
 
     auto last_time = chrono::high_resolution_clock::now();
 
-    /* loop action */
-    _action_working.store(true);
-    logger::debug("[{}] Action is now performing... ", get_name());
-    while(_action_working.load()){
+    /* get video file fps for frame rate control */
+    double video_fps = _video_capture->get(cv::CAP_PROP_FPS);
+    if(video_fps <= 0) video_fps = 30.0; // default to 30fps if not available
+
+    auto frame_duration = chrono::milliseconds((int)(1000.0 / video_fps));
+
+    while(!_worker_stop.load()){
+
+        auto frame_start = chrono::high_resolution_clock::now();
+
+        /* do grab */
         try{
-            
-            /* capture raw frame */
-            Mat raw_frame;
-            _cap >> raw_frame;
-            if(raw_frame.empty()){
-                logger::warn("[{}] Grabbed video frame is empty", get_name());
+            cv::Mat captured;
+
+            if(!_video_capture->read(captured)){
+                logger::info("[{}] End of video file reached, restarting from beginning", get_name());
+                _video_capture->set(cv::CAP_PROP_POS_FRAMES, 0);
                 continue;
             }
 
-            /* tags */
-            json tag;
-            auto now = chrono::high_resolution_clock::now();
-            chrono::duration<double> elapsed = now - last_time;
-            last_time = now;
-            tag["fps"] = 1.0/elapsed.count();
-            tag["height"] = raw_frame.rows;
-            tag["width"] = raw_frame.cols;
-            tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
+            if (!captured.empty()) {
+                logger::debug("[{}] Captured image: {}x{}, channels: {}", get_name(), captured.cols, captured.rows, captured.channels());
 
-            /* send image */
-            if(_use_image_stream.load()){
-
-                /* image encoding */
-                std::vector<unsigned char> serialized_image;
-                cv::imencode(".jpg", raw_frame, serialized_image);
-
-                if(get_port(image_stream_port)->handle()!=nullptr){
-                    zmq::multipart_t msg_multipart_image;
-                    msg_multipart_image.addstr(tag.dump());
-                    msg_multipart_image.addmem(serialized_image.data(), serialized_image.size());
-                    msg_multipart_image.send(*get_port(image_stream_port), ZMQ_DONTWAIT);
-                    msg_multipart_image.clear();
+                /* image rotate (0=cw_90, 1=180, 2=ccw_90)*/
+                int rotate_flag = -1;
+                string portname = "";
+                if(camera_parameters.is_array() && !camera_parameters.empty()){
+                    rotate_flag = camera_parameters[0].value("rotate_flag", -1);
+                    portname = camera_parameters[0].value("portname", "image_stream_1");
                 }
-                else{
-                    logger::warn("[{}] socket handle is not valid ", get_name());
+
+                if(rotate_flag >= 0 && rotate_flag <= 2){
+                    cv::rotate(captured, captured, rotate_flag);
                 }
-                serialized_image.clear();
 
-            }
-        }
-        catch(const zmq::error_t& e){
-            logger::error("[{}] Piepeline Error : {}", get_name(), e.what());
-        }
-    }
+                /* push image */
+                if(_use_image_stream.load()){
 
-    /* final */
-    _cap.release();
-}
+                    /* image encoding */
+                    std::vector<unsigned char> serialized_image;
+                    cv::imencode(".jpg", captured, serialized_image);
 
+                    /* generate data meta tag */
+                    json tag;
+                    auto now = chrono::high_resolution_clock::now();
+                    chrono::duration<double> elapsed = now - last_time;
+                    last_time = now;
 
-void video_file_grabber::_action_invoke_listener_proc(json paramters){
+                    tag["fps"] = 1.0/elapsed.count();
+                    tag["height"] = captured.rows;
+                    tag["width"] = captured.cols;
+                    tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
 
-    logger::debug("[{}] Action invoke listener is now working...", get_name());
-    while(!_worker_stop.load()){
-        try{
-
-            string portname = "action_invoke";
-            zmq::multipart_t msg_multipart;
-            bool success = msg_multipart.recv(*get_port(portname));
-            if(success){
-                string function = msg_multipart.popstr();
-                string str_args = msg_multipart.popstr();
-                auto json_args = json::parse(str_args);
-
-                if(api_table.find(function) != api_table.end()){
-                    api_table[function](json_args);
+                    /* send data */
+                    if(get_port(portname.c_str())->handle()!=nullptr){
+                        zmq::multipart_t msg_multipart_image;
+                        msg_multipart_image.addstr(tag.dump());
+                        msg_multipart_image.addmem(serialized_image.data(), serialized_image.size());
+                        msg_multipart_image.send(*get_port(portname.c_str()), ZMQ_DONTWAIT);
+                        msg_multipart_image.clear();
+                    }
+                    else{
+                        logger::warn("[{}] socket handle is not valid ", get_name());
+                    }
+                    serialized_image.clear();
                 }
-                else {
-                    logger::debug("[{}] '{}' does not support  ", get_name(), function);
+
+                /* publish monitoring image */
+                if(_use_image_stream_monitoring.load()){
+
+                    /* resize image */
+                    cv::Mat resized;
+                    int target_width = 540;
+                    int target_height = 960;
+
+                    cv::resize(captured, resized, cv::Size(target_width, target_height));
+
+                    /* image encoding */
+                    std::vector<unsigned char> serialized_image;
+                    cv::imencode(".jpg", resized, serialized_image);
+
+                    /* generate data meta tag */
+                    json tag;
+                    auto now = chrono::high_resolution_clock::now();
+
+                    tag["height"] = resized.rows;
+                    tag["width"] = resized.cols;
+                    tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
+
+                    /* send monitoring data */
+                    string monitor_portname = portname;
+                    size_t pos = monitor_portname.find("image_stream_");
+                    if(pos != string::npos){
+                        monitor_portname.replace(pos, 13, "image_stream_monitor_");
+                    }
+
+                    if(get_port(monitor_portname.c_str())->handle()!=nullptr){
+                        zmq::multipart_t msg_multipart_image;
+                        msg_multipart_image.addstr(tag.dump());
+                        msg_multipart_image.addmem(serialized_image.data(), serialized_image.size());
+                        msg_multipart_image.send(*get_port(monitor_portname.c_str()), ZMQ_DONTWAIT);
+                        msg_multipart_image.clear();
+                    }
+                    serialized_image.clear();
                 }
+
             }
         }
         catch(const cv::Exception& e){
-            logger::error("[{}] CV Exception : {}", get_name(), e.err);
-            logger::debug("[{}] {}", get_name(), e.what());
-        }
-        catch(const std::out_of_range& e){
-            logger::error("[{}] Invalid parameter access", get_name());
+            logger::debug("[{}] CV Exception {}", get_name(), e.what());
         }
         catch(const zmq::error_t& e){
-            logger::error("[{}] Piepeline Error : {}", get_name(), e.what());
+            logger::error("[{}] Pipeline Error : {}", get_name(), e.what());
         }
         catch(const json::exception& e){
             logger::error("[{}] Data Parse Error : {}", get_name(), e.what());
         }
+        catch(const std::exception& e){
+            logger::error("[{}] Standard Exception : {}", get_name(), e.what());
+        }
+
+        /* frame rate control - sleep to maintain video fps */
+        auto frame_end = chrono::high_resolution_clock::now();
+        auto elapsed = chrono::duration_cast<chrono::milliseconds>(frame_end - frame_start);
+
+        if(elapsed < frame_duration){
+            this_thread::sleep_for(frame_duration - elapsed);
+        }
 
     }
+
+    logger::debug("[{}] Stopped grab task..", get_name());
 
 }

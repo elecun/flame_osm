@@ -35,10 +35,10 @@ bool solectrix_camera_grabber::on_init(){
         _use_image_stream_monitoring.store(parameters.value("use_image_stream_monitoring", false));
 
         /* device instance */
-        _grabber_handle = make_unique<sxpf_grabber>(parameters);
+        _frame_grabber = make_unique<sxpf_grabber>(parameters);
 
         /* device open */
-        if(_grabber_handle->open()){
+        if(_frame_grabber->open()){
             json camera_parameters = parameters["camera"];
             _grab_worker = thread(&solectrix_camera_grabber::_grab_task, this, camera_parameters);
 
@@ -70,7 +70,7 @@ void solectrix_camera_grabber::on_close(){
     }
 
     /* device close */
-    _grabber_handle->close();
+    _frame_grabber->close();
 
 }
 
@@ -86,18 +86,20 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
 
         /* do grab */
         try{
-            cv::Mat captured = _grabber_handle->capture();
+            cv::Mat captured = _frame_grabber->capture();
             if (!captured.empty()) {
                 logger::debug("[{}] Captured image: {}x{}, channels: {}", get_name(), captured.cols, captured.rows, captured.channels());
 
                 /* image rotate (0=cw_90, 1=180, 2=ccw_90)*/
-                int rotate_flag = parameters.value("rotate_flag", -1);
-                if(rotate_flag != -1){
-                    cv::rotate(captured, captured, rotate_flag);
+                int rotate_flag = -1;
+                string portname = "";
+                if(camera_parameters.is_array() && !camera_parameters.empty()){
+                    rotate_flag = camera_parameters[0].value("rotate_flag", -1); // only single image
+                    portname = camera_parameters[0].value("portname", "image_stream_1");
                 }
 
-                /* push image */
-                if(_use_image_stream.load()){
+                if(rotate_flag >= 0 && rotate_flag <= 2){
+                    cv::rotate(captured, captured, rotate_flag);
 
                     /* image encoding */
                     std::vector<unsigned char> serialized_image;
@@ -110,24 +112,58 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
                     last_time = now;
 
                     tag["fps"] = 1.0/elapsed.count();
-                    tag["height"] = raw_frame.rows;
-                    tag["width"] = raw_frame.cols;
+                    tag["height"] = captured.rows;
+                    tag["width"] = captured.cols;
                     tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
 
                     /* send data */
-                    if(get_port("image_stream_1")->handle()!=nullptr){
+                    if(get_port(portname.c_str())->handle()!=nullptr){
                         message_t tag;
                         zmq::multipart_t msg_multipart_image;
-                        msg_multipart_image.addstr(tag.dump());
+                        msg_multipart_image.addstr(portname.c_str());
                         msg_multipart_image.addmem(serialized_image.data(), serialized_image.size());
-                        msg_multipart_image.send(*get_port("image_stream_1"), ZMQ_DONTWAIT);
+                        msg_multipart_image.send(*get_port(portname.c_str()), ZMQ_DONTWAIT);
                         msg_multipart_image.clear();
                     }
                     else{
                         logger::warn("[{}] socket handle is not valid ", get_name());
                     }
                     serialized_image.clear();
+
                 }
+
+                /* push image */
+                // if(_use_image_stream.load()){
+
+                //     /* image encoding */
+                //     std::vector<unsigned char> serialized_image;
+                //     cv::imencode(".jpg", captured, serialized_image);
+
+                //     /* generate data meta tag */
+                //     json tag;
+                //     auto now = chrono::high_resolution_clock::now();
+                //     chrono::duration<double> elapsed = now - last_time;
+                //     last_time = now;
+
+                //     tag["fps"] = 1.0/elapsed.count();
+                //     tag["height"] = raw_frame.rows;
+                //     tag["width"] = raw_frame.cols;
+                //     tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
+
+                //     /* send data */
+                //     if(get_port("image_stream_1")->handle()!=nullptr){
+                //         message_t tag;
+                //         zmq::multipart_t msg_multipart_image;
+                //         msg_multipart_image.addstr(tag.dump());
+                //         msg_multipart_image.addmem(serialized_image.data(), serialized_image.size());
+                //         msg_multipart_image.send(*get_port("image_stream_1"), ZMQ_DONTWAIT);
+                //         msg_multipart_image.clear();
+                //     }
+                //     else{
+                //         logger::warn("[{}] socket handle is not valid ", get_name());
+                //     }
+                //     serialized_image.clear();
+                // }
 
                 /* publish monitoring image */
                 if(_use_image_stream_monitoring.load()){
@@ -136,7 +172,6 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
                     
 
                 }
-)
 
             }
         }

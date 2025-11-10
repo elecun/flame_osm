@@ -11,11 +11,11 @@
 
     "parameters":{
         "camera":[
-            {"name":"Left A Pillar", "card":0, "channel":4, "rotate_flag":0}
+            {"name":"Left A Pillar", "portname":"image_stream_1", "card":0, "channel":4, "rotate_flag":0}
         ],
         "csi2_datatype":"0x1e",
         "left_shift":8,
-        "use_image_stream":false,
+        "use_image_stream":true,
         "use_image_stream_monitoring":true
     },
 
@@ -32,7 +32,7 @@
             "socket_type" : "push",
             "queue_size" : 100
         },
-        "image_stream_monitor_1":{
+        "image_stream_1_monitor":{
             "transport":"tcp",
             "host":"*",
             "port":5110,

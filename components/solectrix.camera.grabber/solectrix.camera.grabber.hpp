@@ -59,7 +59,7 @@ class solectrix_camera_grabber : public flame::component::object {
         atomic<bool> _use_image_stream_monitoring { false };
 
         /* grabber device */
-        unique_ptr<sxpf_grabber> _grabber_handle;
+        unique_ptr<sxpf_grabber> _frame_grabber;
         
         /* device state */
         sxpf_hdl _fg { 0 };

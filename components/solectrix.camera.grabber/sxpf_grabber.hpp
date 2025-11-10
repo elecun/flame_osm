@@ -36,15 +36,17 @@ typedef struct input_channel_s
 /* camera setup */
 typedef struct camera_param {
     string name;
+    string portname;
     int card_endpoint = 0;
     int channel = 0;
     double rotate_cw = 0.0;
     int rotate_flag = -1;
     camera_param(const json& param){
         name = param.at("name").get<string>();
+        portname = param.at("portname").get<string>();
         card_endpoint = param.at("card").get<int>();
         channel = param.at("channel").get<int>();
-        rotate_cw = param.at("rotate").get<double>();
+        rotate_flag = param.value("rotate_flag", -1);
     }
 } camera_param_t;
 

@@ -21,10 +21,14 @@ sxpf_grabber::sxpf_grabber(json parameters){
 
     /* apply from profile */
     json camera_parameters = parameters["camera"];
+
+    
+
     if(camera_parameters.is_array()){
         for(const auto& camera: camera_parameters){
             try{
                 _parameter_container.push_back(camera);
+                logger::debug("(sxpf_grabber) applied camera parameter: {}", camera.dump());
             }
             catch(json::exception& e){
                 logger::info("{sxpf_grabber} Imcompleted camera parameters");
@@ -250,6 +254,8 @@ Mat sxpf_grabber::capture(){
                     captured_image = _process_yuv422_frame(img_hdr, _left_shift);
                     sxpf_release_frame(_grabber_handle, frame_slot, 0);
                 }
+
+                // logger::debug("(sxpf_grabber) Event: SXPF_EVENT_FRAME_RECEIVED on slot {}", frame_slot);
 
             }
                 break;

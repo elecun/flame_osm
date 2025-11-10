@@ -3,8 +3,11 @@
     "verbose" : 1,
 
     "parameters":{
-        "use_image_stream":false,
-        "rotation_cw":90.0,
+        "use_image_stream":true,
+        "use_image_stream_monitoring":true,
+        "camera":[
+            {"name":"Left A Pillar", "portname":"image_stream_1", "file":"sample.mp4"}
+        ],
         "calibration":{
             "focal_length":[1061.013861, 1167.335993],
             "principal_point":[477.171894, 944.795309],
@@ -21,20 +24,21 @@
             "socket_type" : "pub",
             "queue_size" : 10
         },
-         "action_invoke" : {
-            "transport" : "tcp",
-            "host" : "*",
-            "port": 5102,
-            "socket_type" : "pull",
-            "queue_size" : 10,
-            "timeout_ms":300
+        "image_stream_1":{
+            "transport":"inproc",
+            "socket_type" : "push",
+            "queue_size" : 100
         },
-        "image_stream":{
+        "image_stream_1_monitor":{
             "transport":"tcp",
             "host":"*",
-            "port":5103,
+            "port":5110,
             "socket_type" : "pub",
-            "queue_size" : 10
+            "queue_size" : 10,
+            "resolution" : {
+                "width" : 540,
+                "height" : 960
+            }
         }
     }
 }
