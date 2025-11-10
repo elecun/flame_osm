@@ -84,17 +84,11 @@ class AppWindow(QMainWindow):
 
                 for idx, id in enumerate(config["camera_ids"]):
                     self.__frame_window_map[id] = self.findChild(QLabel, config["camera_windows"][idx])
-                    portname = f"image_stream_monitor_source_{id}"
+                    portname = f"image_stream_{id}_monitor"
                     self.__camera_image_subscriber_map[id] = CameraMonitorSubscriber(self.__pipeline_context,connection=config[portname],
-                                                                                     topic=f"{config['image_stream_monitor_topic_prefix']}{id}")
+                                                                                     topic=config[f'image_stream_{id}_monitor_topic'])
                     self.__camera_image_subscriber_map[id].frame_update_signal.connect(self.on_update_camera_image)
                     self.__camera_image_subscriber_map[id].start()
-
-                # video image stream subscriber
-                self.__video_image_subscriber = VideoImageStreamSubscriber(self.__pipeline_context, connection=config["video_stream_source"], 
-                                                                           topic=config["video_stream_source_topic"])
-                self.__video_image_subscriber.frame_update_signal.connect(self.on_update_video_image)
-                self.__video_image_subscriber.start()
 
         except Exception as e:
             self.__console.error(f"{e}")
@@ -118,7 +112,7 @@ class AppWindow(QMainWindow):
 
     def on_update_camera_image(self, image:np.ndarray, tags:dict):
 
-        camera_id = tags["camera_id"]
+        id = tags["id"]
         fps = round(tags["fps"], 1)
 
         print(tags)
@@ -126,16 +120,15 @@ class AppWindow(QMainWindow):
         color_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         if self.__show_frame_info:
             t = datetime.now()
-            cv2.putText(color_image, t.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3], (5, 260), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1, cv2.LINE_AA)
-            cv2.putText(color_image, f"Camera #{camera_id}(fps:{fps})", (5,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (1,255,0), 1, cv2.LINE_AA)
+            cv2.putText(color_image, t.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3], (5, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1, cv2.LINE_AA)
         h, w, ch = color_image.shape
         
 
         qt_image = QImage(color_image.data, w, h, ch*w, QImage.Format.Format_RGB888)
         pixmap = QPixmap.fromImage(qt_image)
         try:
-            self.__frame_window_map[camera_id].setPixmap(pixmap.scaled(self.__frame_window_map[camera_id].size(), Qt.AspectRatioMode.KeepAspectRatio))
-            self.__frame_window_map[camera_id].show()
+            self.__frame_window_map[id].setPixmap(pixmap.scaled(self.__frame_window_map[id].size(), Qt.AspectRatioMode.KeepAspectRatio))
+            self.__frame_window_map[id].show()
         except Exception as e:
             self.__console.error(e)
     
