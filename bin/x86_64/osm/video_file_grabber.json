@@ -4,7 +4,7 @@
 
     "parameters":{
         "use_image_stream":true,
-        "use_image_stream_monitoring":true,
+        "use_image_stream_monitoring":false,
         "camera":[
             {"id":1, "name":"Left A Pillar", "portname":"image_stream_1", "file":"sample.avi", "rotate_flag":0}
         ],
@@ -28,17 +28,6 @@
             "transport":"inproc",
             "socket_type" : "pub",
             "queue_size" : 100
-        },
-        "image_stream_1_monitor":{
-            "transport":"tcp",
-            "host":"*",
-            "port":5110,
-            "socket_type" : "pub",
-            "queue_size" : 10,
-            "resolution" : {
-                "width" : 540,
-                "height" : 960
-            }
         }
     }
 }

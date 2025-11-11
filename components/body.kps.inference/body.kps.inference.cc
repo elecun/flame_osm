@@ -150,6 +150,27 @@ bool body_kps_inference::_load_engine(const std::string& engine_path){
             return false;
         }
 
+        /* Print engine bindings info */
+        int32_t num_bindings = _engine->getNbIOTensors();
+        logger::info("[{}] TensorRT engine has {} IO tensors", get_name(), num_bindings);
+
+        for(int i = 0; i < num_bindings; i++){
+            const char* name = _engine->getIOTensorName(i);
+            nvinfer1::Dims dims = _engine->getTensorShape(name);
+            nvinfer1::DataType dtype = _engine->getTensorDataType(name);
+            nvinfer1::TensorIOMode mode = _engine->getTensorIOMode(name);
+
+            std::string dim_str = "[";
+            for(int j = 0; j < dims.nbDims; j++){
+                dim_str += std::to_string(dims.d[j]);
+                if(j < dims.nbDims - 1) dim_str += ", ";
+            }
+            dim_str += "]";
+
+            logger::info("[{}] Tensor {}: name='{}', shape={}, type={}, mode={}",
+                        get_name(), i, name, dim_str, (int)dtype, (int)mode);
+        }
+
         logger::info("[{}] TensorRT engine loaded successfully", get_name());
         return true;
     }
@@ -198,66 +219,144 @@ void body_kps_inference::_free_buffers(){
 
 cv::Mat body_kps_inference::_preprocess_image(const cv::Mat& image){
     cv::Mat processed;
-    
-    /* Resize to model input size */
-    cv::resize(image, processed, cv::Size(_input_width, _input_height));
-    
+
+    /* Letterbox resize to maintain aspect ratio */
+    int orig_width = image.cols;
+    int orig_height = image.rows;
+
+    _letterbox_scale = std::min(
+        (float)_input_width / orig_width,
+        (float)_input_height / orig_height
+    );
+
+    int new_width = (int)(orig_width * _letterbox_scale);
+    int new_height = (int)(orig_height * _letterbox_scale);
+
+    /* Resize maintaining aspect ratio */
+    cv::Mat resized;
+    cv::resize(image, resized, cv::Size(new_width, new_height));
+
+    /* Create padded image (letterbox) */
+    processed = cv::Mat::zeros(cv::Size(_input_width, _input_height), CV_8UC3);
+    _letterbox_pad_top = (_input_height - new_height) / 2;
+    _letterbox_pad_left = (_input_width - new_width) / 2;
+
+    resized.copyTo(processed(cv::Rect(_letterbox_pad_left, _letterbox_pad_top, new_width, new_height)));
+
     /* Convert BGR to RGB */
     cv::cvtColor(processed, processed, cv::COLOR_BGR2RGB);
-    
+
     /* Convert to float and normalize */
     processed.convertTo(processed, CV_32F, 1.0/255.0);
-    
+
+    logger::info("Letterbox: orig={}x{}, scale={}, new={}x{}, pad=({},{})",
+                 orig_width, orig_height, _letterbox_scale, new_width, new_height, _letterbox_pad_left, _letterbox_pad_top);
+
     return processed;
 }
 
-std::vector<body_kps::PoseResult> body_kps_inference::_postprocess_output(float* output, int batch_size){
+std::vector<body_kps::PoseResult> body_kps_inference::_postprocess_output(float* output, int batch_size, int img_width, int img_height){
     std::vector<body_kps::PoseResult> results;
-    
-    /* YOLO11 pose output format: [batch, 4+kpts*3, 8400] */
+
+    /* YOLO11 pose output format: [boxes, channels] where channels = 4(bbox) + 1(obj_conf) + kpts*3 */
     const int num_boxes = 8400;
+    const int num_channels = 4 + 1 + _num_keypoints * 3;  // 56 for YOLO11-pose
     const float conf_threshold = 0.5f;
-    const float nms_threshold = 0.4f;
-    
+
+    logger::info("Output format: [boxes={}, channels={}]", num_boxes, num_channels);
+
+    /* Debug: print first detection's keypoint data */
+    float* first_box = output;
+    logger::info("=== First Detection Raw Data ===");
+    logger::info("BBox: [{:.2f}, {:.2f}, {:.2f}, {:.2f}]", first_box[0], first_box[1], first_box[2], first_box[3]);
+    logger::info("Index 4: {:.4f}", first_box[4]);
+    logger::info("First keypoint (indices 5-10):");
+    for(int i = 5; i <= 10; i++){
+        logger::info("  [{}] = {:.4f}", i, first_box[i]);
+    }
+    logger::info("Second keypoint (indices 11-16):");
+    for(int i = 11; i <= 16; i++){
+        logger::info("  [{}] = {:.4f}", i, first_box[i]);
+    }
+
+    /* Track best result */
+    float best_confidence = 0.0f;
+    int best_index = -1;
+    int count_above_threshold = 0;
+
+    /* Find the detection with highest object confidence */
     for(int i = 0; i < num_boxes; i++){
-        float* box_data = output + i * (4 + _num_keypoints * 3);
-        
-        /* Extract bounding box */
+        float* box_data = output + i * num_channels;
+
+        /* Object confidence is at index 4 */
+        float obj_conf = box_data[4];
+
+        if(obj_conf > conf_threshold){
+            count_above_threshold++;
+        }
+
+        if(obj_conf > best_confidence){
+            best_confidence = obj_conf;
+            best_index = i;
+        }
+    }
+
+    logger::info("Total detections above threshold ({}): {}, best_confidence: {:.4f}, best_index: {}",
+                 conf_threshold, count_above_threshold, best_confidence, best_index);
+
+    /* Extract only the best detection */
+    if(best_index >= 0){
+        float* box_data = output + best_index * num_channels;
+
+        /* Extract bounding box - boxes-first format */
         float x_center = box_data[0];
         float y_center = box_data[1];
         float width = box_data[2];
         float height = box_data[3];
-        
-        /* Calculate confidence (assuming it's embedded in keypoint confidences) */
-        float max_kpt_conf = 0.0f;
+        float obj_conf = box_data[4];
+
+        logger::info("Raw bbox values: x_center={:.2f}, y_center={:.2f}, width={:.2f}, height={:.2f}, conf={:.4f}",
+                     x_center, y_center, width, height, obj_conf);
+        logger::info("Image dimensions: {}x{}, Letterbox: scale={:.4f}, pad=({},{})",
+                     img_width, img_height, _letterbox_scale, _letterbox_pad_left, _letterbox_pad_top);
+
+        /* Remove letterbox padding and scale to original image coordinates */
+        float x_center_unpadded = (x_center - _letterbox_pad_left) / _letterbox_scale;
+        float y_center_unpadded = (y_center - _letterbox_pad_top) / _letterbox_scale;
+        float width_unpadded = width / _letterbox_scale;
+        float height_unpadded = height / _letterbox_scale;
+
+        logger::info("Unpadded bbox: x_center={:.2f}, y_center={:.2f}, width={:.2f}, height={:.2f}",
+                     x_center_unpadded, y_center_unpadded, width_unpadded, height_unpadded);
+
+        body_kps::PoseResult result;
+        result.bbox_confidence = obj_conf;
+        result.bbox = cv::Rect(
+            x_center_unpadded - width_unpadded/2,
+            y_center_unpadded - height_unpadded/2,
+            width_unpadded,
+            height_unpadded
+        );
+
+        /* Extract keypoints - boxes-first format */
+        /* Keypoints start at index 5: [vis0, x0, y0, vis1, x1, y1, ...] */
         for(int k = 0; k < _num_keypoints; k++){
-            float kpt_conf = box_data[4 + k * 3 + 2];
-            max_kpt_conf = std::max(max_kpt_conf, kpt_conf);
-        }
-        
-        if(max_kpt_conf > conf_threshold){
-            body_kps::PoseResult result;
-            result.bbox_confidence = max_kpt_conf;
-            result.bbox = cv::Rect(
-                (x_center - width/2) * 1920 / _input_width,
-                (y_center - height/2) * 1080 / _input_height,
-                width * 1920 / _input_width,
-                height * 1080 / _input_height
-            );
+            body_kps::KeyPoint kpt;
+            int kpt_offset = 5 + k * 3;
+            float kpt_vis = box_data[kpt_offset + 0];  // visibility/confidence
+            float kpt_x = box_data[kpt_offset + 1];
+            float kpt_y = box_data[kpt_offset + 2];
 
-            /* Extract keypoints */
-            for(int k = 0; k < _num_keypoints; k++){
-                body_kps::KeyPoint kpt;
-                kpt.x = box_data[4 + k * 3] * 1920 / _input_width;
-                kpt.y = box_data[4 + k * 3 + 1] * 1080 / _input_height;
-                kpt.confidence = box_data[4 + k * 3 + 2];
-                result.keypoints.push_back(kpt);
-            }
-
-            results.push_back(result);
+            /* Remove letterbox padding and scale to original image coordinates */
+            kpt.x = (kpt_x - _letterbox_pad_left) / _letterbox_scale;
+            kpt.y = (kpt_y - _letterbox_pad_top) / _letterbox_scale;
+            kpt.confidence = kpt_vis;  // Use visibility as confidence
+            result.keypoints.push_back(kpt);
         }
+
+        results.push_back(result);
     }
-    
+
     return results;
 }
 
@@ -320,6 +419,20 @@ void body_kps_inference::_inference_process(){
                 /* Copy input to GPU */
                 cudaMemcpy(_gpu_input_buffer, _cpu_input_buffer, _input_size, cudaMemcpyHostToDevice);
 
+                /* Set input shape for dynamic shape engine */
+                // Input shape: [batch_size, channels, height, width] = [1, 3, 640, 640]
+                nvinfer1::Dims input_dims;
+                input_dims.nbDims = 4;
+                input_dims.d[0] = 1;  // batch size
+                input_dims.d[1] = 3;  // channels (RGB)
+                input_dims.d[2] = _input_height;  // height
+                input_dims.d[3] = _input_width;   // width
+
+                if(!_context->setInputShape("images", input_dims)){
+                    logger::error("[{}] Failed to set input shape", get_name());
+                    continue;
+                }
+
                 /* Run inference */
                 void* bindings[] = {_gpu_input_buffer, _gpu_output_buffer};
                 bool success = _context->executeV2(bindings);
@@ -328,8 +441,8 @@ void body_kps_inference::_inference_process(){
                     /* Copy output from GPU */
                     cudaMemcpy(_cpu_output_buffer, _gpu_output_buffer, _output_size, cudaMemcpyDeviceToHost);
 
-                    /* Postprocess results */
-                    std::vector<body_kps::PoseResult> results = _postprocess_output(_cpu_output_buffer, 1);
+                    /* Postprocess results (pass actual image dimensions) */
+                    std::vector<body_kps::PoseResult> results = _postprocess_output(_cpu_output_buffer, 1, decoded.cols, decoded.rows);
 
                     auto process_end = chrono::high_resolution_clock::now();
                     auto total_time = chrono::duration_cast<chrono::milliseconds>(process_end - process_start).count();
@@ -337,37 +450,89 @@ void body_kps_inference::_inference_process(){
 
 
                     /* Create JSON output */
-                    json output;
-                    output["frame_id"] = frame_count;
-                    output["timestamp"] = tag.value("timestamp", 0);
-                    output["camera_id"] = tag.value("id", 1);
-                    output["num_poses"] = results.size();
+                    // json output;
+                    // output["id"] = 1;
+                    // output["timestamp"] = chrono::duration_cast<chrono::milliseconds>(process_start.time_since_epoch()).count();
+                    // output["fps"] = 0;
+                    // output["num_poses"] = results.size();
 
-                    json poses_array = json::array();
+                    // json poses_array = json::array();
+                    // for(const auto& result : results){
+                    //     json pose_obj;
+                    //     pose_obj["bbox"] = {
+                    //         {"x", result.bbox.x},
+                    //         {"y", result.bbox.y},
+                    //         {"width", result.bbox.width},
+                    //         {"height", result.bbox.height}
+                    //     };
+                    //     pose_obj["confidence"] = result.bbox_confidence;
+
+                    //     json keypoints_array = json::array();
+                    //     for(size_t i = 0; i < result.keypoints.size(); i++){
+                    //         const auto& kpt = result.keypoints[i];
+                    //         keypoints_array.push_back({
+                    //             {"id", i},
+                    //             {"x", kpt.x},
+                    //             {"y", kpt.y},
+                    //             {"confidence", kpt.confidence}
+                    //         });
+                    //     }
+                    //     pose_obj["keypoints"] = keypoints_array;
+                    //     poses_array.push_back(pose_obj);
+                    // }
+                    // output["poses"] = poses_array;
+
+                    /* Draw keypoints on image */
                     for(const auto& result : results){
-                        json pose_obj;
-                        pose_obj["bbox"] = {
-                            {"x", result.bbox.x},
-                            {"y", result.bbox.y},
-                            {"width", result.bbox.width},
-                            {"height", result.bbox.height}
-                        };
-                        pose_obj["confidence"] = result.bbox_confidence;
+                        logger::info("[{}] Result bbox: ({}, {}, {}, {}), confidence: {}",
+                            get_name(), result.bbox.x, result.bbox.y, result.bbox.width, result.bbox.height, result.bbox_confidence);
 
-                        json keypoints_array = json::array();
+                        /* Draw bounding box */
+                        cv::rectangle(decoded, result.bbox, cv::Scalar(0, 255, 0), 2);
+
+                        /* Draw keypoints */
                         for(size_t i = 0; i < result.keypoints.size(); i++){
                             const auto& kpt = result.keypoints[i];
-                            keypoints_array.push_back({
-                                {"id", i},
-                                {"x", kpt.x},
-                                {"y", kpt.y},
-                                {"confidence", kpt.confidence}
-                            });
+                            logger::debug("[{}] Keypoint {}: ({}, {}), confidence: {}",
+                                get_name(), i, kpt.x, kpt.y, kpt.confidence);
+
+                            if(kpt.confidence > 0.5f){
+                                cv::circle(decoded, cv::Point(kpt.x, kpt.y), 5, cv::Scalar(0, 255, 0), -1);
+                            }
                         }
-                        pose_obj["keypoints"] = keypoints_array;
-                        poses_array.push_back(pose_obj);
                     }
-                    output["poses"] = poses_array;
+
+                    /* Send annotated image via ZMQ */
+                    if(get_port("image_stream_1_monitor")->handle() != nullptr){
+                        /* Resize for monitoring */
+                        cv::Mat resized;
+                        cv::resize(decoded, resized, cv::Size(540, 960));
+
+                        /* Encode image */
+                        std::vector<unsigned char> encoded_image;
+                        cv::imencode(".jpg", resized, encoded_image);
+
+                        /* Create tag */
+                        json monitor_tag;
+                        monitor_tag["id"] = 1;
+                        monitor_tag["fps"] = 0;
+                        monitor_tag["timestamp"] = total_time;
+                        monitor_tag["width"] = resized.cols;
+                        monitor_tag["height"] = resized.rows;
+
+                        /* Send multipart message */
+                        message_t monitor_msg;
+                        monitor_msg.addstr("image_stream_1_monitor");
+                        monitor_msg.addstr(monitor_tag.dump());
+                        monitor_msg.addmem(encoded_image.data(), encoded_image.size());
+
+                        if(!monitor_msg.send(*get_port("image_stream_1_monitor"), ZMQ_DONTWAIT)){
+                            if(!_worker_stop.load()){
+                                logger::warn("[{}] Failed to send annotated image", get_name());
+                            }
+                        }
+                        monitor_msg.clear();
+                    }
 
                     /* Send JSON result via ZMQ */
                     // if(get_port("pose_result")->handle() != nullptr){

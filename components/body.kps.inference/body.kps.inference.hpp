@@ -77,13 +77,18 @@ class body_kps_inference : public flame::component::object {
         size_t _input_size;
         size_t _output_size;
 
+        /* Letterbox padding info (updated during preprocessing) */
+        float _letterbox_scale = 1.0f;
+        int _letterbox_pad_left = 0;
+        int _letterbox_pad_top = 0;
+
         /* Processing functions */
         void _inference_process();
         bool _load_engine(const std::string& engine_path);
         void _allocate_buffers();
         void _free_buffers();
         cv::Mat _preprocess_image(const cv::Mat& image);
-        std::vector<body_kps::PoseResult> _postprocess_output(float* output, int batch_size);
+        std::vector<body_kps::PoseResult> _postprocess_output(float* output, int batch_size, int img_width, int img_height);  // Pass actual image dimensions
 };
 
 EXPORT_COMPONENT_API

@@ -22,6 +22,17 @@
             "socket_type" : "sub",
             "queue_size" : 100
         },
+        "image_stream_1_monitor":{
+            "transport":"tcp",
+            "host":"*",
+            "port":5110,
+            "socket_type" : "pub",
+            "queue_size" : 10,
+            "resolution" : {
+                "width" : 540,
+                "height" : 960
+            }
+        },
         "pose_result" : {
             "transport" : "tcp",
             "host" : "*",
