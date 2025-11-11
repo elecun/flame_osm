@@ -59,7 +59,7 @@ bool body_kps_inference::on_init(){
 
         /* Recalculate buffer sizes based on parameters */
         _input_size = 3 * _input_width * _input_height * sizeof(float);
-        _output_size = (4 + _num_keypoints * 3) * 8400 * sizeof(float);
+        _output_size = (4 + _num_keypoints * 3) * 8400 * sizeof(float); //bounding box(x,y,w,h) x each kps(x,y,confidence), 8400 candidates
 
         /* Load TensorRT engine */
         if(!_load_engine(_model_path)){
@@ -262,14 +262,13 @@ std::vector<body_kps::PoseResult> body_kps_inference::_postprocess_output(float*
 }
 
 void body_kps_inference::_inference_process(){
-    logger::info("[{}] Inference thread started", get_name());
 
-    int frame_count = 0;
+    unsigned long frame_count = 0;
 
     while(!_worker_stop.load()){
         try{
             /* Receive image from ZMQ */
-            zmq::multipart_t msg_multipart;
+            message_t msg_multipart;
 
             if(get_port("image_stream_1")->handle() == nullptr){
                 logger::warn("[{}] image_stream_1 port handle is not valid", get_name());
