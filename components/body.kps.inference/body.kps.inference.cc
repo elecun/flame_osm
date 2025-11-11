@@ -89,7 +89,7 @@ bool body_kps_inference::on_init(){
 
 void body_kps_inference::on_loop(){
     /* Main loop - can be used for periodic tasks */
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // std::this_thread::sleep_for(std::chrono::milliseconds(100));
 }
 
 void body_kps_inference::on_close(){
@@ -264,7 +264,7 @@ std::vector<body_kps::PoseResult> body_kps_inference::_postprocess_output(float*
 void body_kps_inference::_inference_process(){
 
     unsigned long frame_count = 0;
-
+    
     while(!_worker_stop.load()){
         try{
             /* Receive image from ZMQ */
@@ -277,114 +277,114 @@ void body_kps_inference::_inference_process(){
             }
 
             /* Receive multipart message with timeout */
-            if(!msg_multipart.recv(*get_port("image_stream_1"), ZMQ_DONTWAIT)){
+            if(!msg_multipart.recv(*get_port("image_stream_1"))){
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
             }
 
-            if(msg_multipart.size() < 3){
-                logger::warn("[{}] Invalid multipart message size: {}", get_name(), msg_multipart.size());
-                continue;
-            }
+            if(msg_multipart.size()==3){
 
-            /* Extract parts: [portname, tag, image_data] */
-            std::string portname = msg_multipart.popstr();
-            std::string tag_str = msg_multipart.popstr();
-            zmq::message_t image_msg = msg_multipart.pop();
+                auto process_start = chrono::high_resolution_clock::now();
 
-            /* Parse tag JSON */
-            json tag = json::parse(tag_str);
+                /* Extract parts: [portname, tag, image_data] */
+                std::string portname = msg_multipart.popstr();
+                std::string tag_str = msg_multipart.popstr();
+                zmq::message_t image_msg = msg_multipart.pop();
 
-            /* Decode image */
-            std::vector<unsigned char> image_data(
-                static_cast<unsigned char*>(image_msg.data()),
-                static_cast<unsigned char*>(image_msg.data()) + image_msg.size()
-            );
-            cv::Mat input_image = cv::imdecode(image_data, cv::IMREAD_COLOR);
+                /* Parse tag JSON */
+                json tag = json::parse(tag_str);
 
-            if(input_image.empty()){
-                logger::warn("[{}] Failed to decode image", get_name());
-                continue;
-            }
+                vector<unsigned char> image(static_cast<unsigned char*>(image_msg.data()), static_cast<unsigned char*>(image_msg.data())+image_msg.size());
+                cv::Mat decoded = cv::imdecode(image, cv::IMREAD_COLOR);
 
-            logger::debug("[{}] Received image: {}x{}", get_name(), input_image.cols, input_image.rows);
+                if(decoded.empty()){
+                    logger::warn("[{}] Failed to decode image", get_name());
+                    continue;
+                }
 
-            /* Preprocess image */
-            cv::Mat processed_image = _preprocess_image(input_image);
+                logger::debug("[{}] Received image on port {}: {}x{}, tag: {}", get_name(), portname, decoded.cols, decoded.rows, tag_str);
 
-            /* Copy to input buffer (HWC to CHW format) */
-            for(int c = 0; c < 3; c++){
-                for(int h = 0; h < _input_height; h++){
-                    for(int w = 0; w < _input_width; w++){
-                        _cpu_input_buffer[c * _input_height * _input_width + h * _input_width + w] =
-                            processed_image.at<cv::Vec3f>(h, w)[c];
+                /* Preprocess image */
+                cv::Mat processed_image = _preprocess_image(decoded);
+
+                /* Copy to input buffer (HWC to CHW format) */
+                for(int c = 0; c < 3; c++){
+                    for(int h = 0; h < _input_height; h++){
+                        for(int w = 0; w < _input_width; w++){
+                            _cpu_input_buffer[c * _input_height * _input_width + h * _input_width + w] =
+                                processed_image.at<cv::Vec3f>(h, w)[c];
+                        }
                     }
                 }
-            }
 
-            /* Copy input to GPU */
-            cudaMemcpy(_gpu_input_buffer, _cpu_input_buffer, _input_size, cudaMemcpyHostToDevice);
+                /* Copy input to GPU */
+                cudaMemcpy(_gpu_input_buffer, _cpu_input_buffer, _input_size, cudaMemcpyHostToDevice);
 
-            /* Run inference */
-            void* bindings[] = {_gpu_input_buffer, _gpu_output_buffer};
-            bool success = _context->executeV2(bindings);
+                /* Run inference */
+                void* bindings[] = {_gpu_input_buffer, _gpu_output_buffer};
+                bool success = _context->executeV2(bindings);
 
-            if(success){
-                /* Copy output from GPU */
-                cudaMemcpy(_cpu_output_buffer, _gpu_output_buffer, _output_size, cudaMemcpyDeviceToHost);
+                if(success){
+                    /* Copy output from GPU */
+                    cudaMemcpy(_cpu_output_buffer, _gpu_output_buffer, _output_size, cudaMemcpyDeviceToHost);
 
-                /* Postprocess results */
-                std::vector<body_kps::PoseResult> results = _postprocess_output(_cpu_output_buffer, 1);
+                    /* Postprocess results */
+                    std::vector<body_kps::PoseResult> results = _postprocess_output(_cpu_output_buffer, 1);
 
-                logger::debug("[{}] Processed frame {}, detected {} poses",
-                             get_name(), frame_count, results.size());
+                    auto process_end = chrono::high_resolution_clock::now();
+                    auto total_time = chrono::duration_cast<chrono::milliseconds>(process_end - process_start).count();
+                    logger::info("[{}] Frame {}: processing time = {}ms, detected {} poses", get_name(), frame_count, total_time, results.size());
 
-                /* Create JSON output */
-                json output;
-                output["frame_id"] = frame_count;
-                output["timestamp"] = tag.value("timestamp", 0);
-                output["camera_id"] = tag.value("id", 1);
-                output["num_poses"] = results.size();
 
-                json poses_array = json::array();
-                for(const auto& result : results){
-                    json pose_obj;
-                    pose_obj["bbox"] = {
-                        {"x", result.bbox.x},
-                        {"y", result.bbox.y},
-                        {"width", result.bbox.width},
-                        {"height", result.bbox.height}
-                    };
-                    pose_obj["confidence"] = result.bbox_confidence;
+                    /* Create JSON output */
+                    json output;
+                    output["frame_id"] = frame_count;
+                    output["timestamp"] = tag.value("timestamp", 0);
+                    output["camera_id"] = tag.value("id", 1);
+                    output["num_poses"] = results.size();
 
-                    json keypoints_array = json::array();
-                    for(size_t i = 0; i < result.keypoints.size(); i++){
-                        const auto& kpt = result.keypoints[i];
-                        keypoints_array.push_back({
-                            {"id", i},
-                            {"x", kpt.x},
-                            {"y", kpt.y},
-                            {"confidence", kpt.confidence}
-                        });
+                    json poses_array = json::array();
+                    for(const auto& result : results){
+                        json pose_obj;
+                        pose_obj["bbox"] = {
+                            {"x", result.bbox.x},
+                            {"y", result.bbox.y},
+                            {"width", result.bbox.width},
+                            {"height", result.bbox.height}
+                        };
+                        pose_obj["confidence"] = result.bbox_confidence;
+
+                        json keypoints_array = json::array();
+                        for(size_t i = 0; i < result.keypoints.size(); i++){
+                            const auto& kpt = result.keypoints[i];
+                            keypoints_array.push_back({
+                                {"id", i},
+                                {"x", kpt.x},
+                                {"y", kpt.y},
+                                {"confidence", kpt.confidence}
+                            });
+                        }
+                        pose_obj["keypoints"] = keypoints_array;
+                        poses_array.push_back(pose_obj);
                     }
-                    pose_obj["keypoints"] = keypoints_array;
-                    poses_array.push_back(pose_obj);
-                }
-                output["poses"] = poses_array;
+                    output["poses"] = poses_array;
 
-                /* Send JSON result via ZMQ */
-                // if(get_port("pose_result")->handle() != nullptr){
-                //     std::string json_str = output.dump();
-                //     zmq::message_t result_msg(json_str.data(), json_str.size());
-                //     if(!result_msg.send(*get_port("pose_result"), ZMQ_DONTWAIT)){
-                //         if(!_worker_stop.load()){
-                //             logger::warn("[{}] Failed to send pose result", get_name());
-                //         }
-                //     }
-                // }
-            } else {
-                logger::error("[{}] TensorRT inference failed", get_name());
-            }
+                    /* Send JSON result via ZMQ */
+                    // if(get_port("pose_result")->handle() != nullptr){
+                    //     std::string json_str = output.dump();
+                    //     zmq::message_t result_msg(json_str.data(), json_str.size());
+                    //     if(!result_msg.send(*get_port("pose_result"), ZMQ_DONTWAIT)){
+                    //         if(!_worker_stop.load()){
+                    //             logger::warn("[{}] Failed to send pose result", get_name());
+                    //         }
+                    //     }
+                    // }
+
+
+                } else {
+                    logger::error("[{}] TensorRT inference failed", get_name());
+                }
+            }          
 
             frame_count++;
 
