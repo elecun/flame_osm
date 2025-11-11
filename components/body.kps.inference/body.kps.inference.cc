@@ -309,31 +309,45 @@ std::vector<body_kps::PoseResult> body_kps_inference::_postprocess_output(float*
         float* box_data = output + best_index * num_channels;
 
         /* Extract bounding box - boxes-first format */
-        float x_center = box_data[0];
-        float y_center = box_data[1];
-        float width = box_data[2];
-        float height = box_data[3];
+        /* Format is [x1, y1, x2, y2] (xyxy format) not [cx, cy, w, h] */
+        float x1 = box_data[0];
+        float y1 = box_data[1];
+        float x2 = box_data[2];
+        float y2 = box_data[3];
         float obj_conf = box_data[4];
 
-        logger::info("Raw bbox values: x_center={:.2f}, y_center={:.2f}, width={:.2f}, height={:.2f}, conf={:.4f}",
-                     x_center, y_center, width, height, obj_conf);
+        logger::info("Best detection index: {}", best_index);
+        logger::info("Raw bbox values (xyxy): x1={:.2f}, y1={:.2f}, x2={:.2f}, y2={:.2f}, conf={:.4f}",
+                     x1, y1, x2, y2, obj_conf);
+
+        /* Debug: print first few keypoint values */
+        logger::info("First 3 keypoints from best detection:");
+        for(int k = 0; k < 3; k++){
+            int offset = 5 + k * 3;
+            logger::info("  KPT{}: vis={:.4f}, x={:.2f}, y={:.2f}", k, box_data[offset], box_data[offset+1], box_data[offset+2]);
+        }
         logger::info("Image dimensions: {}x{}, Letterbox: scale={:.4f}, pad=({},{})",
                      img_width, img_height, _letterbox_scale, _letterbox_pad_left, _letterbox_pad_top);
 
-        /* Remove letterbox padding and scale to original image coordinates */
-        float x_center_unpadded = (x_center - _letterbox_pad_left) / _letterbox_scale;
-        float y_center_unpadded = (y_center - _letterbox_pad_top) / _letterbox_scale;
-        float width_unpadded = width / _letterbox_scale;
-        float height_unpadded = height / _letterbox_scale;
+        /* Convert to center+size format and remove letterbox padding */
+        float x1_unpadded = (x1 - _letterbox_pad_left) / _letterbox_scale;
+        float y1_unpadded = (y1 - _letterbox_pad_top) / _letterbox_scale;
+        float x2_unpadded = (x2 - _letterbox_pad_left) / _letterbox_scale;
+        float y2_unpadded = (y2 - _letterbox_pad_top) / _letterbox_scale;
 
-        logger::info("Unpadded bbox: x_center={:.2f}, y_center={:.2f}, width={:.2f}, height={:.2f}",
-                     x_center_unpadded, y_center_unpadded, width_unpadded, height_unpadded);
+        float width_unpadded = x2_unpadded - x1_unpadded;
+        float height_unpadded = y2_unpadded - y1_unpadded;
+
+        logger::info("Unpadded bbox (xyxy): x1={:.2f}, y1={:.2f}, x2={:.2f}, y2={:.2f}",
+                     x1_unpadded, y1_unpadded, x2_unpadded, y2_unpadded);
+        logger::info("Unpadded bbox (xywh): x={:.2f}, y={:.2f}, w={:.2f}, h={:.2f}",
+                     x1_unpadded, y1_unpadded, width_unpadded, height_unpadded);
 
         body_kps::PoseResult result;
         result.bbox_confidence = obj_conf;
         result.bbox = cv::Rect(
-            x_center_unpadded - width_unpadded/2,
-            y_center_unpadded - height_unpadded/2,
+            x1_unpadded,
+            y1_unpadded,
             width_unpadded,
             height_unpadded
         );
