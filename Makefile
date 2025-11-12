@@ -128,6 +128,11 @@ body_kps_inference.comp:	$(BUILDDIR)body.kps.inference.o
 $(BUILDDIR)body.kps.inference.o:	$(CURRENT_DIR)/components/body.kps.inference/body.kps.inference.cc
 									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
 
+face_detection_inference.comp:	$(BUILDDIR)face.detection.inference.o
+							$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lnvinfer -lnvonnxparser -lcudart -lcublas
+$(BUILDDIR)face.detection.inference.o:	$(CURRENT_DIR)/components/face.detection.inference/face.detection.inference.cc
+									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
+
 
 os_model_inference.comp:	$(BUILDDIR)os.model.inference.o
 							$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS)
@@ -146,15 +151,11 @@ video_file_grabber.comp:	$(BUILDDIR)video.file.grabber.o
 $(BUILDDIR)video.file.grabber.o:	$(CURRENT_DIR)/components/video.file.grabber/video.file.grabber.cc
 									$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
 
-test.comp:	$(BUILDDIR)test.o
-			$(CC) $(LDFLAGS) $(LD_LIBRARY_PATH) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS)
-$(BUILDDIR)test.o:	$(CURRENT_DIR)/components/test/test.cc
-					$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $^ -o $@
 
 
 all : flame
 
-osm : flame uvc_camera_grabber.comp solectrix_camera_grabber.comp body_kps_inference.comp os_model_inference.comp headpose_model_inference.comp test.comp video_file_grabber.comp
+osm : flame uvc_camera_grabber.comp solectrix_camera_grabber.comp body_kps_inference.comp os_model_inference.comp headpose_model_inference.comp test.comp video_file_grabber.comp face_detection_inference.comp
 
 deploy : FORCE
 	cp $(BUILDDIR)/*.comp $(BUILDDIR)/flame $(BINDIR)
