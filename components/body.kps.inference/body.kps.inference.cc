@@ -249,8 +249,8 @@ cv::Mat body_kps_inference::_preprocess_image(const cv::Mat& image){
     /* Convert to float and normalize */
     processed.convertTo(processed, CV_32F, 1.0/255.0);
 
-    logger::info("Letterbox: orig={}x{}, scale={}, new={}x{}, pad=({},{})",
-                 orig_width, orig_height, _letterbox_scale, new_width, new_height, _letterbox_pad_left, _letterbox_pad_top);
+    // logger::info("Letterbox: orig={}x{}, scale={}, new={}x{}, pad=({},{})",
+    //              orig_width, orig_height, _letterbox_scale, new_width, new_height, _letterbox_pad_left, _letterbox_pad_top);
 
     return processed;
 }
@@ -263,21 +263,7 @@ std::vector<body_kps::PoseResult> body_kps_inference::_postprocess_output(float*
     const int num_channels = 4 + 1 + _num_keypoints * 3;  // 56 for YOLO11-pose
     const float conf_threshold = 0.5f;
 
-    logger::info("Output format: [boxes={}, channels={}]", num_boxes, num_channels);
-
-    /* Debug: print first detection's keypoint data */
-    float* first_box = output;
-    logger::info("=== First Detection Raw Data ===");
-    logger::info("BBox: [{:.2f}, {:.2f}, {:.2f}, {:.2f}]", first_box[0], first_box[1], first_box[2], first_box[3]);
-    logger::info("Index 4: {:.4f}", first_box[4]);
-    logger::info("First keypoint (indices 5-10):");
-    for(int i = 5; i <= 10; i++){
-        logger::info("  [{}] = {:.4f}", i, first_box[i]);
-    }
-    logger::info("Second keypoint (indices 11-16):");
-    for(int i = 11; i <= 16; i++){
-        logger::info("  [{}] = {:.4f}", i, first_box[i]);
-    }
+    // logger::info("Output format: [boxes={}, channels={}]", num_boxes, num_channels);
 
     /* Track best result */
     float best_confidence = 0.0f;
@@ -301,8 +287,7 @@ std::vector<body_kps::PoseResult> body_kps_inference::_postprocess_output(float*
         }
     }
 
-    logger::info("Total detections above threshold ({}): {}, best_confidence: {:.4f}, best_index: {}",
-                 conf_threshold, count_above_threshold, best_confidence, best_index);
+    // logger::info("Total detections above threshold ({}): {}, best_confidence: {:.4f}, best_index: {}", conf_threshold, count_above_threshold, best_confidence, best_index);
 
     /* Extract only the best detection */
     if(best_index >= 0){
@@ -316,19 +301,6 @@ std::vector<body_kps::PoseResult> body_kps_inference::_postprocess_output(float*
         float y2 = box_data[3];
         float obj_conf = box_data[4];
 
-        logger::info("Best detection index: {}", best_index);
-        logger::info("Raw bbox values (xyxy): x1={:.2f}, y1={:.2f}, x2={:.2f}, y2={:.2f}, conf={:.4f}",
-                     x1, y1, x2, y2, obj_conf);
-
-        /* Debug: print first few keypoint values */
-        logger::info("First 3 keypoints from best detection:");
-        for(int k = 0; k < 3; k++){
-            int offset = 5 + k * 3;
-            logger::info("  KPT{}: vis={:.4f}, x={:.2f}, y={:.2f}", k, box_data[offset], box_data[offset+1], box_data[offset+2]);
-        }
-        logger::info("Image dimensions: {}x{}, Letterbox: scale={:.4f}, pad=({},{})",
-                     img_width, img_height, _letterbox_scale, _letterbox_pad_left, _letterbox_pad_top);
-
         /* Convert to center+size format and remove letterbox padding */
         float x1_unpadded = (x1 - _letterbox_pad_left) / _letterbox_scale;
         float y1_unpadded = (y1 - _letterbox_pad_top) / _letterbox_scale;
@@ -337,11 +309,6 @@ std::vector<body_kps::PoseResult> body_kps_inference::_postprocess_output(float*
 
         float width_unpadded = x2_unpadded - x1_unpadded;
         float height_unpadded = y2_unpadded - y1_unpadded;
-
-        logger::info("Unpadded bbox (xyxy): x1={:.2f}, y1={:.2f}, x2={:.2f}, y2={:.2f}",
-                     x1_unpadded, y1_unpadded, x2_unpadded, y2_unpadded);
-        logger::info("Unpadded bbox (xywh): x={:.2f}, y={:.2f}, w={:.2f}, h={:.2f}",
-                     x1_unpadded, y1_unpadded, width_unpadded, height_unpadded);
 
         body_kps::PoseResult result;
         result.bbox_confidence = obj_conf;
@@ -407,6 +374,7 @@ void body_kps_inference::_inference_process(){
                 /* Parse tag JSON */
                 json tag = json::parse(tag_str);
 
+                /* decode & convert image */
                 vector<unsigned char> image(static_cast<unsigned char*>(image_msg.data()), static_cast<unsigned char*>(image_msg.data())+image_msg.size());
                 cv::Mat decoded = cv::imdecode(image, cv::IMREAD_COLOR);
 
@@ -415,7 +383,7 @@ void body_kps_inference::_inference_process(){
                     continue;
                 }
 
-                logger::debug("[{}] Received image on port {}: {}x{}, tag: {}", get_name(), portname, decoded.cols, decoded.rows, tag_str);
+                // logger::debug("[{}] Received image on port {}: {}x{}, tag: {}", get_name(), portname, decoded.cols, decoded.rows, tag_str);
 
                 /* Preprocess image */
                 cv::Mat processed_image = _preprocess_image(decoded);
@@ -498,8 +466,7 @@ void body_kps_inference::_inference_process(){
 
                     /* Draw keypoints on image */
                     for(const auto& result : results){
-                        logger::info("[{}] Result bbox: ({}, {}, {}, {}), confidence: {}",
-                            get_name(), result.bbox.x, result.bbox.y, result.bbox.width, result.bbox.height, result.bbox_confidence);
+                        // logger::info("[{}] Result bbox: ({}, {}, {}, {}), confidence: {}", get_name(), result.bbox.x, result.bbox.y, result.bbox.width, result.bbox.height, result.bbox_confidence);
 
                         /* Draw bounding box */
                         cv::rectangle(decoded, result.bbox, cv::Scalar(0, 255, 0), 2);
@@ -507,9 +474,6 @@ void body_kps_inference::_inference_process(){
                         /* Draw keypoints */
                         for(size_t i = 0; i < result.keypoints.size(); i++){
                             const auto& kpt = result.keypoints[i];
-                            logger::debug("[{}] Keypoint {}: ({}, {}), confidence: {}",
-                                get_name(), i, kpt.x, kpt.y, kpt.confidence);
-
                             if(kpt.confidence > 0.5f){
                                 cv::circle(decoded, cv::Point(kpt.x, kpt.y), 5, cv::Scalar(0, 255, 0), -1);
                             }

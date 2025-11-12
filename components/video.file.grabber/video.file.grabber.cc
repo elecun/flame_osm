@@ -134,7 +134,7 @@ void video_file_grabber::_grab_task(json camera_parameters){
             // last_time = now;
 
             if (!captured.empty()) {
-                logger::debug("[{}] Captured image: {}x{}, channels: {}", get_name(), captured.cols, captured.rows, captured.channels());
+                // logger::debug("[{}] Captured image: {}x{}, channels: {}", get_name(), captured.cols, captured.rows, captured.channels());
 
                 /* generate meta tag */
                 json tag;
