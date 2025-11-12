@@ -5,6 +5,7 @@
 #include <chrono>
 #include <fstream>
 #include <filesystem>
+#include <cuda_runtime.h>
 
 using namespace std;
 namespace fs = std::filesystem;
@@ -72,6 +73,14 @@ bool face_detection_inference::on_init(){
             logger::error("[{}] Failed to load TensorRT engine", get_name());
             return false;
         }
+
+        /* Create CUDA stream for async execution */
+        cudaError_t stream_status = cudaStreamCreate(&_cuda_stream);
+        if(stream_status != cudaSuccess){
+            logger::error("[{}] Failed to create CUDA stream: {}", get_name(), cudaGetErrorString(stream_status));
+            return false;
+        }
+        logger::info("[{}] CUDA stream created successfully", get_name());
 
         /* Allocate CUDA buffers */
         _allocate_buffers();
@@ -144,6 +153,12 @@ void face_detection_inference::_allocate_buffers(){
 }
 
 void face_detection_inference::_free_buffers(){
+    /* Destroy CUDA stream */
+    if(_cuda_stream){
+        cudaStreamDestroy(_cuda_stream);
+        _cuda_stream = nullptr;
+    }
+
     if(_cpu_input_buffer){
         delete[] _cpu_input_buffer;
         _cpu_input_buffer = nullptr;
@@ -164,7 +179,7 @@ void face_detection_inference::_free_buffers(){
         _gpu_output_buffer = nullptr;
     }
 
-    logger::debug("[{}] CUDA buffers freed", get_name());
+    logger::debug("[{}] CUDA buffers and stream freed", get_name());
 }
 
 bool face_detection_inference::_load_engine(const std::string& engine_path){
@@ -408,8 +423,8 @@ void face_detection_inference::_inference_process(){
                     }
                 }
 
-                /* Copy input to GPU */
-                cudaMemcpy(_gpu_input_buffer, _cpu_input_buffer, _input_size, cudaMemcpyHostToDevice);
+                /* Copy input to GPU asynchronously */
+                cudaMemcpyAsync(_gpu_input_buffer, _cpu_input_buffer, _input_size, cudaMemcpyHostToDevice, _cuda_stream);
 
                 /* Set input shape for dynamic shape engine */
                 nvinfer1::Dims input_dims;
@@ -425,12 +440,16 @@ void face_detection_inference::_inference_process(){
                 }
 
                 /* Set tensor addresses */
-                void* bindings[] = {_gpu_input_buffer, _gpu_output_buffer};
-                bool success = _context->executeV2(bindings);
+                _context->setTensorAddress("images", _gpu_input_buffer);
+                _context->setTensorAddress("output0", _gpu_output_buffer);
+
+                /* Run inference asynchronously */
+                bool success = _context->enqueueV3(_cuda_stream);
 
                 if(success){
-                    /* Copy output from GPU */
-                    cudaMemcpy(_cpu_output_buffer, _gpu_output_buffer, _output_size, cudaMemcpyDeviceToHost);
+                    /* Copy output from GPU asynchronously and synchronize */
+                    cudaMemcpyAsync(_cpu_output_buffer, _gpu_output_buffer, _output_size, cudaMemcpyDeviceToHost, _cuda_stream);
+                    cudaStreamSynchronize(_cuda_stream);
 
                     /* Postprocess results */
                     std::vector<face_detection::FaceResult> results = _postprocess_output(_cpu_output_buffer, 1, decoded.cols, decoded.rows);

@@ -4,6 +4,7 @@
 #include <chrono>
 #include <fstream>
 #include <filesystem>
+#include <cuda_runtime.h>
 
 using namespace std;
 namespace fs = std::filesystem;
@@ -76,6 +77,14 @@ bool body_kps_inference::on_init(){
             return false;
         }
 
+        /* Create CUDA stream for async execution */
+        cudaError_t stream_status = cudaStreamCreate(&_cuda_stream);
+        if(stream_status != cudaSuccess){
+            logger::error("[{}] Failed to create CUDA stream: {}", get_name(), cudaGetErrorString(stream_status));
+            return false;
+        }
+        logger::info("[{}] CUDA stream created successfully", get_name());
+
         /* Allocate CUDA memory */
         _allocate_buffers();
 
@@ -103,7 +112,7 @@ void body_kps_inference::on_loop(){
 
 void body_kps_inference::on_close(){
     logger::info("[{}] Shutting down body keypoint inference component", get_name());
-    
+
     /* Stop inference thread */
     _worker_stop.store(true);
     if(_inference_worker.joinable()){
@@ -203,11 +212,17 @@ void body_kps_inference::_allocate_buffers(){
 }
 
 void body_kps_inference::_free_buffers(){
+    /* Destroy CUDA stream */
+    if(_cuda_stream){
+        cudaStreamDestroy(_cuda_stream);
+        _cuda_stream = nullptr;
+    }
+
     if(_cpu_input_buffer){
         delete[] _cpu_input_buffer;
         _cpu_input_buffer = nullptr;
     }
-    
+
     if(_cpu_output_buffer){
         delete[] _cpu_output_buffer;
         _cpu_output_buffer = nullptr;
@@ -223,7 +238,7 @@ void body_kps_inference::_free_buffers(){
         _gpu_output_buffer = nullptr;
     }
 
-    logger::debug("[{}] CUDA buffers freed", get_name());
+    logger::debug("[{}] CUDA buffers and stream freed", get_name());
 }
 
 cv::Mat body_kps_inference::_preprocess_image(const cv::Mat& image){
@@ -407,8 +422,8 @@ void body_kps_inference::_inference_process(){
                     }
                 }
 
-                /* Copy input to GPU */
-                cudaMemcpy(_gpu_input_buffer, _cpu_input_buffer, _input_size, cudaMemcpyHostToDevice);
+                /* Copy input to GPU asynchronously */
+                cudaMemcpyAsync(_gpu_input_buffer, _cpu_input_buffer, _input_size, cudaMemcpyHostToDevice, _cuda_stream);
 
                 /* Set input shape for dynamic shape engine */
                 // Input shape: [batch_size, channels, height, width] = [1, 3, 640, 640]
@@ -424,13 +439,17 @@ void body_kps_inference::_inference_process(){
                     continue;
                 }
 
-                /* Run inference */
-                void* bindings[] = {_gpu_input_buffer, _gpu_output_buffer};
-                bool success = _context->executeV2(bindings);
+                /* Set tensor addresses */
+                _context->setTensorAddress("images", _gpu_input_buffer);
+                _context->setTensorAddress("output0", _gpu_output_buffer);
+
+                /* Run inference asynchronously */
+                bool success = _context->enqueueV3(_cuda_stream);
 
                 if(success){
-                    /* Copy output from GPU */
-                    cudaMemcpy(_cpu_output_buffer, _gpu_output_buffer, _output_size, cudaMemcpyDeviceToHost);
+                    /* Copy output from GPU asynchronously and synchronize */
+                    cudaMemcpyAsync(_cpu_output_buffer, _gpu_output_buffer, _output_size, cudaMemcpyDeviceToHost, _cuda_stream);
+                    cudaStreamSynchronize(_cuda_stream);
 
                     /* Postprocess results (pass actual image dimensions) */
                     std::vector<body_kps::PoseResult> results = _postprocess_output(_cpu_output_buffer, 1, decoded.cols, decoded.rows);

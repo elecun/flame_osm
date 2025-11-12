@@ -112,6 +112,8 @@ void video_file_grabber::_grab_task(json camera_parameters){
     double video_fps = _video_capture->get(cv::CAP_PROP_FPS);
     if(video_fps <= 0) video_fps = 30.0; // default to 30fps if not available
 
+    unsigned long frame_count = 0;
+
     auto frame_duration = chrono::milliseconds((int)(1000.0 / video_fps));
 
     while(!_worker_stop.load()){
@@ -134,7 +136,7 @@ void video_file_grabber::_grab_task(json camera_parameters){
             // last_time = now;
 
             if (!captured.empty()) {
-                // logger::debug("[{}] Captured image: {}x{}, channels: {}", get_name(), captured.cols, captured.rows, captured.channels());
+                logger::debug("[{}] Captured #{} image: {}x{}, channels: {}", get_name(), frame_count, captured.cols, captured.rows, captured.channels());
 
                 /* generate meta tag */
                 json tag;
@@ -217,6 +219,8 @@ void video_file_grabber::_grab_task(json camera_parameters){
                 }
 
             }
+
+            frame_count++;
         }
         catch(const cv::Exception& e){
             logger::debug("[{}] CV Exception {}", get_name(), e.what());
@@ -238,6 +242,8 @@ void video_file_grabber::_grab_task(json camera_parameters){
         if(elapsed < frame_duration){
             this_thread::sleep_for(frame_duration - elapsed);
         }
+
+        
 
     }
 

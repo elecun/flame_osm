@@ -19,6 +19,7 @@
 #include <vector>
 #include <opencv2/opencv.hpp>
 #include <NvInfer.h>
+#include <cuda_runtime.h>
 
 namespace face_detection {
     struct FaceResult {
@@ -62,6 +63,7 @@ class face_detection_inference : public flame::component::object {
         void* _gpu_output_buffer = nullptr;
         float* _cpu_input_buffer = nullptr;
         float* _cpu_output_buffer = nullptr;
+        cudaStream_t _cuda_stream = nullptr;  // CUDA stream for async execution
 
         /* Model parameters */
         std::string _model_path;
