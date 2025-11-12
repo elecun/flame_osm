@@ -6,6 +6,9 @@
 #include <fstream>
 #include <filesystem>
 
+using namespace std;
+namespace fs = std::filesystem;
+
 /* create component instance */
 static face_detection_inference* _instance = nullptr;
 flame::component::object* create(){ if(!_instance) _instance = new face_detection_inference(); return _instance; }
@@ -50,6 +53,19 @@ bool face_detection_inference::on_init(){
             logger::error("[{}] TensorRT engine file not found: {}", get_name(), _model_path);
             return false;
         }
+
+        /* Read model parameters */
+        _input_width = parameters.value("input_width", 640);
+        _input_height = parameters.value("input_height", 640);
+        _gpu_id = parameters.value("gpu_id", 0);
+
+        /* Set CUDA device */
+        cudaError_t cuda_status = cudaSetDevice(_gpu_id);
+        if(cuda_status != cudaSuccess){
+            logger::error("[{}] Failed to set CUDA device {}: {}", get_name(), _gpu_id, cudaGetErrorString(cuda_status));
+            return false;
+        }
+        logger::info("[{}] Using GPU device: {}", get_name(), _gpu_id);
 
         /* Load TensorRT engine */
         if(!_load_engine(_model_path)){
@@ -438,37 +454,37 @@ void face_detection_inference::_inference_process(){
                     }
 
                     /* Send annotated image via ZMQ */
-                    if(get_port("image_stream_1_monitor")->handle() != nullptr){
-                        /* Resize for monitoring */
-                        cv::Mat resized;
-                        cv::resize(decoded, resized, cv::Size(540, 960));
+                    // if(get_port("image_stream_1_monitor")->handle() != nullptr){
+                    //     /* Resize for monitoring */
+                    //     cv::Mat resized;
+                    //     cv::resize(decoded, resized, cv::Size(540, 960));
 
-                        /* Encode image */
-                        vector<unsigned char> encoded;
-                        cv::imencode(".jpg", resized, encoded);
+                    //     /* Encode image */
+                    //     vector<unsigned char> encoded;
+                    //     cv::imencode(".jpg", resized, encoded);
 
-                        /* Create tag */
-                        json monitor_tag;
-                        monitor_tag["id"] = 1;
-                        monitor_tag["fps"] = 0;
-                        monitor_tag["timestamp"] = total_time;
-                        monitor_tag["width"] = resized.cols;
-                        monitor_tag["height"] = resized.rows;
+                    //     /* Create tag */
+                    //     json monitor_tag;
+                    //     monitor_tag["id"] = 1;
+                    //     monitor_tag["fps"] = 0;
+                    //     monitor_tag["timestamp"] = total_time;
+                    //     monitor_tag["width"] = resized.cols;
+                    //     monitor_tag["height"] = resized.rows;
 
-                        /* Create multipart message */
-                        message_t monitor_msg;
-                        monitor_msg.addstr("image_stream_1_monitor");
-                        monitor_msg.addstr(tag_str);
-                        monitor_msg.addmem(encoded.data(), encoded.size());
+                    //     /* Create multipart message */
+                    //     message_t monitor_msg;
+                    //     monitor_msg.addstr("image_stream_1_monitor");
+                    //     monitor_msg.addstr(tag_str);
+                    //     monitor_msg.addmem(encoded.data(), encoded.size());
 
-                        /* Send to monitor port */
-                        if(!monitor_msg.send(*get_port("image_stream_1_monitor"), ZMQ_DONTWAIT)){
-                            if(!_worker_stop.load()){
-                                logger::warn("[{}] Failed to send annotated image", get_name());
-                            }
-                        }
-                        monitor_msg.clear();
-                    }
+                    //     /* Send to monitor port */
+                    //     if(!monitor_msg.send(*get_port("image_stream_1_monitor"), ZMQ_DONTWAIT)){
+                    //         if(!_worker_stop.load()){
+                    //             logger::warn("[{}] Failed to send annotated image", get_name());
+                    //         }
+                    //     }
+                    //     monitor_msg.clear();
+                    // }
                 }
                 else{
                     logger::error("[{}] TensorRT inference failed", get_name());

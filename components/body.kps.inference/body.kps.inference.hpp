@@ -74,6 +74,7 @@ class body_kps_inference : public flame::component::object {
         int _input_width = 640;
         int _input_height = 640;
         int _num_keypoints = 17;
+        int _gpu_id = 0;  // GPU device ID
         size_t _input_size;
         size_t _output_size;
 

@@ -56,6 +56,15 @@ bool body_kps_inference::on_init(){
         _input_width = parameters.value("input_width", 640);
         _input_height = parameters.value("input_height", 640);
         _num_keypoints = parameters.value("num_keypoints", 17);
+        _gpu_id = parameters.value("gpu_id", 0);
+
+        /* Set CUDA device */
+        cudaError_t cuda_status = cudaSetDevice(_gpu_id);
+        if(cuda_status != cudaSuccess){
+            logger::error("[{}] Failed to set CUDA device {}: {}", get_name(), _gpu_id, cudaGetErrorString(cuda_status));
+            return false;
+        }
+        logger::info("[{}] Using GPU device: {}", get_name(), _gpu_id);
 
         /* Recalculate buffer sizes based on parameters */
         _input_size = 3 * _input_width * _input_height * sizeof(float);

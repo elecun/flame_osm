@@ -5,14 +5,15 @@
     "parameters":{
         "model_path":"models/yolo11n-face.engine",
         "input_width": 640,
-        "input_height": 640
+        "input_height": 640,
+        "gpu_id":0
     },
 
     "dataport":{
         "status" : {
             "transport" : "tcp",
             "host" : "*",
-            "port" : 5102,
+            "port" : 5103,
             "socket_type" : "pub",
             "queue_size" : 100
         },
@@ -20,17 +21,6 @@
             "transport" : "inproc",
             "socket_type" : "sub",
             "queue_size" : 100
-        },
-        "image_stream_1_monitor":{
-            "transport":"tcp",
-            "host":"*",
-            "port":5110,
-            "socket_type" : "pub",
-            "queue_size" : 10,
-            "resolution" : {
-                "width" : 540,
-                "height" : 960
-            }
         }
     }
 }

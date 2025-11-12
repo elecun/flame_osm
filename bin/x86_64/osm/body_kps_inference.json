@@ -6,7 +6,8 @@
         "model_path":"models/yolo11x-pose.engine",
         "input_width": 640,
         "input_height": 640,
-        "num_keypoints": 17
+        "num_keypoints": 17,
+        "gpu_id":0
     },
 
     "dataport":{

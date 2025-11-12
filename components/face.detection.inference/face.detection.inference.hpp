@@ -67,6 +67,7 @@ class face_detection_inference : public flame::component::object {
         std::string _model_path;
         int _input_width = 640;
         int _input_height = 640;
+        int _gpu_id = 0;  // GPU device ID
         size_t _input_size;
         size_t _output_size;
 
