@@ -1,7 +1,7 @@
 1_bodykps_gen.py 사용 방법
 ```
 기본 사용 (rotate 없이)
-python 1_bodykps_gen.py --path /path/to/videos
+python 1_bodykps_gen.py --path <path> --rotate 0 --check --autofill
 ID 0번만 회전
 python 1_bodykps_gen.py --path /path/to/videos --rotate 0
 여러 ID 회전 (0, 1, 2번)

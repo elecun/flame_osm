@@ -485,26 +485,40 @@ def main():
     args = parser.parse_args()
 
     # Validate path
-    directory = Path(args.path)
-    if not directory.exists():
+    base_directory = Path(args.path)
+    if not base_directory.exists():
         print(f"Error: Directory does not exist: {args.path}")
         return 1
 
-    if not directory.is_dir():
+    if not base_directory.is_dir():
         print(f"Error: Path is not a directory: {args.path}")
         return 1
 
+    # Input files are in 'camera' subdirectory
+    input_directory = base_directory / "camera"
+    if not input_directory.exists():
+        print(f"Error: Camera directory does not exist: {input_directory}")
+        return 1
+
+    if not input_directory.is_dir():
+        print(f"Error: Camera path is not a directory: {input_directory}")
+        return 1
+
+    # Output files will be saved in base directory
+    output_directory = base_directory
+
     print(f"\n{'=' * 80}")
     print(f"Body Keypoints Generator")
-    print(f"Directory: {directory}")
+    print(f"Input Directory: {input_directory}")
+    print(f"Output Directory: {output_directory}")
     print(f"Autofill: {args.autofill}")
     print(f"Model: {args.model}")
     print(f"Rotate IDs: {args.rotate if args.rotate else 'None'}")
     print(f"Check mode: {args.check}")
     print(f"{'=' * 80}\n")
 
-    # Find file pairs
-    pairs = find_file_pairs(directory)
+    # Find file pairs in camera directory
+    pairs = find_file_pairs(input_directory)
 
     if not pairs:
         print("No file pairs found. Exiting.")
@@ -545,18 +559,18 @@ def main():
         timestamps = read_timestamps(files['csv'])
         print(f"Loaded {len(timestamps)} timestamps from {files['csv'].name}\n")
 
-        # Generate output filename
-        output_path = directory / f"body_kps_{file_id}.csv"
+        # Generate output filename in base directory
+        output_path = output_directory / f"body_kps_{file_id}.csv"
 
         # Check if this ID should be rotated
         should_rotate = file_id in args.rotate
         if should_rotate:
             print(f"  [INFO] ID {file_id} will be rotated 90 degrees clockwise\n")
 
-        # Prepare check visualization path
+        # Prepare check visualization path in base directory
         check_output_path = None
         if args.check:
-            check_output_path = directory / f"check_frame_{file_id}.jpg"
+            check_output_path = output_directory / f"check_frame_{file_id}.jpg"
 
         # Create CSV file and write header immediately
         print(f"Creating output file: {output_path}")
