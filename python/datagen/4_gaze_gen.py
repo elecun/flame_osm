@@ -10,6 +10,7 @@ import argparse
 import csv
 import re
 import tempfile
+import time
 import warnings
 import yaml
 from pathlib import Path
@@ -456,6 +457,9 @@ def process_video_with_gaze(video_path: Path, timestamps: List[float], csv_file,
 
     csv_writer = csv.writer(csv_file)
 
+    # Inference time tracking
+    inference_times = []
+
     frame_idx = 0
     while cap.isOpened():
         ret, frame = cap.read()
@@ -473,11 +477,14 @@ def process_video_with_gaze(video_path: Path, timestamps: List[float], csv_file,
         if model_type == 'simple':
             face, left_eye, right_eye = detect_face_and_eyes(frame)
 
-        # Estimate gaze direction
+        # Estimate gaze direction with timing
+        start_time = time.time()
         pitch, yaw = estimate_gaze_direction(
             frame, gaze_estimator, model_type,
             face=face, left_eye=left_eye, right_eye=right_eye
         )
+        inference_time = time.time() - start_time
+        inference_times.append(inference_time)
 
         # Write to CSV
         row = [timestamps[frame_idx]]
@@ -501,13 +508,23 @@ def process_video_with_gaze(video_path: Path, timestamps: List[float], csv_file,
         frame_idx += 1
 
     cap.release()
-    print(f"  [SUCCESS] Processed all {frame_count} frames\n")
+
+    # Print inference time statistics
+    if inference_times:
+        avg_time = np.mean(inference_times)
+        min_time = np.min(inference_times)
+        max_time = np.max(inference_times)
+        fps = 1.0 / avg_time if avg_time > 0 else 0
+        print(f"  [SUCCESS] Processed all {frame_count} frames")
+        print(f"  Inference time - Avg: {avg_time*1000:.2f}ms, Min: {min_time*1000:.2f}ms, Max: {max_time*1000:.2f}ms")
+        print(f"  Average FPS: {fps:.2f}\n")
+    else:
+        print(f"  [SUCCESS] Processed all {frame_count} frames\n")
 
 
 def process_single_file(video_path: Path, output_path: Path,
                        gaze_estimator,
                        model_type: str = 'simple',
-                       timestamp_csv: Optional[Path] = None,
                        should_rotate: bool = False,
                        check_mode: bool = False) -> None:
     """
@@ -519,7 +536,6 @@ def process_single_file(video_path: Path, output_path: Path,
         output_path: Output CSV file path
         gaze_estimator: GazeEstimator instance (or None for simplified method)
         model_type: Model type ('mpiigaze', 'mpiifacegaze', 'eth-xgaze', or 'simple')
-        timestamp_csv: Optional path to timestamp CSV file
         should_rotate: Whether to rotate frames
         check_mode: Whether to save first frame visualization
     """
@@ -540,17 +556,12 @@ def process_single_file(video_path: Path, output_path: Path,
     if not is_image and not is_video:
         raise ValueError(f"Unsupported file type: {file_ext}. Must be image or video.")
 
-    # Generate or read timestamps
+    # Generate timestamps
     if is_image:
         print("Detected: Image file")
         frame_count = 1
         timestamps = [0.0]
         fps = 30.0
-    elif timestamp_csv is not None and timestamp_csv.exists():
-        print("Detected: Video file")
-        print(f"Reading timestamps from {timestamp_csv.name}...")
-        timestamps = read_timestamps(timestamp_csv)
-        print(f"Loaded {len(timestamps)} timestamps\n")
     else:
         # Generate timestamps from video FPS
         print("Detected: Video file")
@@ -601,11 +612,13 @@ def process_single_file(video_path: Path, output_path: Path,
             if model_type == 'simple':
                 face, left_eye, right_eye = detect_face_and_eyes(img)
 
-            # Estimate gaze direction
+            # Estimate gaze direction with timing
+            start_time = time.time()
             pitch, yaw = estimate_gaze_direction(
                 img, gaze_estimator, model_type,
                 face=face, left_eye=left_eye, right_eye=right_eye
             )
+            inference_time = time.time() - start_time
 
             # Save visualization if check mode
             if check_mode and check_output_path is not None:
@@ -625,7 +638,8 @@ def process_single_file(video_path: Path, output_path: Path,
             csv_file.flush()
 
             print(f"  [SUCCESS] Processed image")
-            print(f"    Pitch: {pitch:.2f} deg, Yaw: {yaw:.2f} deg\n")
+            print(f"    Pitch: {pitch:.2f} deg, Yaw: {yaw:.2f} deg")
+            print(f"    Inference time: {inference_time*1000:.2f}ms\n")
 
         else:
             # Process video
@@ -635,6 +649,9 @@ def process_single_file(video_path: Path, output_path: Path,
 
             cap = cv2.VideoCapture(str(video_path))
             frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+            # Inference time tracking
+            inference_times = []
 
             frame_idx = 0
             while cap.isOpened():
@@ -653,11 +670,14 @@ def process_single_file(video_path: Path, output_path: Path,
                 if model_type == 'simple':
                     face, left_eye, right_eye = detect_face_and_eyes(frame)
 
-                # Estimate gaze direction
+                # Estimate gaze direction with timing
+                start_time = time.time()
                 pitch, yaw = estimate_gaze_direction(
                     frame, gaze_estimator, model_type,
                     face=face, left_eye=left_eye, right_eye=right_eye
                 )
+                inference_time = time.time() - start_time
+                inference_times.append(inference_time)
 
                 # Write to CSV
                 row = [timestamps[frame_idx]]
@@ -681,7 +701,18 @@ def process_single_file(video_path: Path, output_path: Path,
                 frame_idx += 1
 
             cap.release()
-            print(f"  [SUCCESS] Processed all {frame_count} frames\n")
+
+            # Print inference time statistics
+            if inference_times:
+                avg_time = np.mean(inference_times)
+                min_time = np.min(inference_times)
+                max_time = np.max(inference_times)
+                fps = 1.0 / avg_time if avg_time > 0 else 0
+                print(f"  [SUCCESS] Processed all {frame_count} frames")
+                print(f"  Inference time - Avg: {avg_time*1000:.2f}ms, Min: {min_time*1000:.2f}ms, Max: {max_time*1000:.2f}ms")
+                print(f"  Average FPS: {fps:.2f}\n")
+            else:
+                print(f"  [SUCCESS] Processed all {frame_count} frames\n")
 
     print(f"[SUCCESS] Output saved to: {output_path}")
 
@@ -790,13 +821,7 @@ def main():
     parser.add_argument(
         '--no-batch',
         action='store_true',
-        help='Single file mode: process a single video file'
-    )
-    parser.add_argument(
-        '--timestamp',
-        type=str,
-        default=None,
-        help='Timestamp CSV file path (optional, for single file mode)'
+        help='Single file mode: process a single video/image file'
     )
     parser.add_argument(
         '--model',
@@ -815,9 +840,9 @@ def main():
     parser.add_argument(
         '--rotate',
         type=int,
-        nargs='+',
-        default=[],
-        help='IDs to rotate 90 degrees clockwise (batch mode) or use --rotate 1 for single file'
+        nargs='*',
+        default=None,
+        help='IDs to rotate 90 degrees clockwise (batch mode) or use --rotate for single file'
     )
     parser.add_argument(
         '--check',
@@ -873,16 +898,8 @@ def main():
         output_filename = f"gaze_{video_path.stem}.csv"
         output_path = output_dir / output_filename
 
-        # Get timestamp CSV path if provided
-        timestamp_csv = None
-        if args.timestamp:
-            timestamp_csv = Path(args.timestamp)
-            if not timestamp_csv.exists():
-                print(f"[WARNING] Timestamp CSV file does not exist: {args.timestamp}")
-                timestamp_csv = None
-
-        # Check if rotation is requested
-        should_rotate = len(args.rotate) > 0
+        # Check if rotation is requested (--rotate flag present means rotate)
+        should_rotate = args.rotate is not None
 
         try:
             process_single_file(
@@ -890,7 +907,6 @@ def main():
                 output_path=output_path,
                 gaze_estimator=gaze_estimator,
                 model_type=args.model,
-                timestamp_csv=timestamp_csv,
                 should_rotate=should_rotate,
                 check_mode=args.check
             )
@@ -927,7 +943,7 @@ def main():
 
     print(f"Input Directory: {input_directory}")
     print(f"Output Directory: {output_directory}")
-    print(f"Rotate IDs: {args.rotate if args.rotate else 'None'}")
+    print(f"Rotate IDs: {args.rotate if args.rotate is not None else 'None'}")
     print(f"Check mode: {args.check}\n")
 
     # Find file pairs in camera directory

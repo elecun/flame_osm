@@ -8,6 +8,7 @@ Uses PnP algorithm to estimate head pose from 2D facial landmarks.
 import argparse
 import csv
 import re
+import time
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 import cv2
@@ -435,13 +436,22 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
     num_frames = len(landmarks_array)
     csv_writer = csv.writer(csv_file)
 
+    # Inference time tracking
+    inference_times = []
+
+    # Batch processing time tracking
+    batch_start_time = time.time()
+
     # Process each frame's landmarks
     for frame_idx in range(num_frames):
         # Get landmarks for this frame
         landmarks_2d = landmarks_array[frame_idx]
 
-        # Estimate head pose
+        # Estimate head pose with timing
+        start_time = time.time()
         rotation_vec, translation_vec, euler_angles = estimate_head_pose(landmarks_2d, image_shape)
+        inference_time = time.time() - start_time
+        inference_times.append(inference_time)
 
         # Write to CSV
         row = [timestamps[frame_idx]]
@@ -465,9 +475,22 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
         csv_file.flush()
 
         if (frame_idx + 1) % 100 == 0:
-            print(f"  Processed {frame_idx + 1}/{num_frames} frames")
+            batch_elapsed = time.time() - batch_start_time
+            print(f"  Processed {frame_idx + 1}/{num_frames} frames ({batch_elapsed*1000:.2f}ms for 100 frames)")
+            batch_start_time = time.time()
 
-    print(f"  [SUCCESS] Processed all {num_frames} frames\n")
+    print(f"  [SUCCESS] Processed all {num_frames} frames")
+
+    # Print inference time statistics
+    if inference_times:
+        avg_time = np.mean(inference_times)
+        min_time = np.min(inference_times)
+        max_time = np.max(inference_times)
+        fps = 1.0 / avg_time if avg_time > 0 else 0
+        print(f"  Inference time - Avg: {avg_time*1000:.2f}ms, Min: {min_time*1000:.2f}ms, Max: {max_time*1000:.2f}ms")
+        print(f"  Average FPS: {fps:.2f}")
+
+    print()
 
 
 def process_single_file(face_kps_csv: Path, output_path: Path,
@@ -484,7 +507,6 @@ def process_single_file(face_kps_csv: Path, output_path: Path,
         should_rotate: Whether to rotate frames
         check_mode: Whether to save first frame visualization
     """
-    print(f"\n{'=' * 80}")
     print(f"Processing single file: {face_kps_csv.name}")
     print(f"Output: {output_path}")
     print(f"{'=' * 80}\n")
@@ -529,14 +551,23 @@ def process_single_file(face_kps_csv: Path, output_path: Path,
         csv_file.flush()
         print(f"  [SUCCESS] CSV file created with header ({len(header)} columns)\n")
 
+        # Inference time tracking
+        inference_times = []
+
+        # Batch processing time tracking
+        batch_start_time = time.time()
+
         # Process each frame's landmarks
         num_frames = len(landmarks_array)
         for frame_idx in range(num_frames):
             # Get landmarks for this frame
             landmarks_2d = landmarks_array[frame_idx]
 
-            # Estimate head pose
+            # Estimate head pose with timing
+            start_time = time.time()
             rotation_vec, translation_vec, euler_angles = estimate_head_pose(landmarks_2d, image_shape)
+            inference_time = time.time() - start_time
+            inference_times.append(inference_time)
 
             # Write to CSV
             row = [timestamps[frame_idx]]
@@ -560,9 +591,22 @@ def process_single_file(face_kps_csv: Path, output_path: Path,
             csv_file.flush()
 
             if (frame_idx + 1) % 100 == 0:
-                print(f"  Processed {frame_idx + 1}/{num_frames} frames")
+                batch_elapsed = time.time() - batch_start_time
+                print(f"  Processed {frame_idx + 1}/{num_frames} frames ({batch_elapsed*1000:.2f}ms for 100 frames)")
+                batch_start_time = time.time()
 
-        print(f"  [SUCCESS] Processed all {num_frames} frames\n")
+        print(f"  [SUCCESS] Processed all {num_frames} frames")
+
+        # Print inference time statistics
+        if inference_times:
+            avg_time = np.mean(inference_times)
+            min_time = np.min(inference_times)
+            max_time = np.max(inference_times)
+            fps = 1.0 / avg_time if avg_time > 0 else 0
+            print(f"  Inference time - Avg: {avg_time*1000:.2f}ms, Min: {min_time*1000:.2f}ms, Max: {max_time*1000:.2f}ms")
+            print(f"  Average FPS: {fps:.2f}")
+
+        print()
 
     print(f"[SUCCESS] Output saved to: {output_path}")
 
@@ -590,25 +634,25 @@ def main():
     parser.add_argument(
         '--path',
         required=True,
-        help='Directory or face_kps CSV file path (directory for batch mode, file for single mode)'
+        help='Video/image file path (single mode) or directory path (batch mode)'
     )
     parser.add_argument(
         '--no-batch',
         action='store_true',
-        help='Single file mode: process a single face_kps CSV file'
+        help='Single file mode: process a single video/image file'
     )
     parser.add_argument(
-        '--video',
+        '--face-landmark',
         type=str,
         default=None,
-        help='Video file path (optional, for single file mode - used for visualization and image dimensions)'
+        help='Face landmarks CSV file path (required for single file mode)'
     )
     parser.add_argument(
         '--rotate',
         type=int,
-        nargs='+',
-        default=[],
-        help='IDs to rotate 90 degrees clockwise (batch mode) or use --rotate 1 for single file'
+        nargs='*',
+        default=None,
+        help='IDs to rotate 90 degrees clockwise (batch mode) or use --rotate for single file'
     )
     parser.add_argument(
         '--check',
@@ -621,40 +665,41 @@ def main():
     print(f"\n{'=' * 80}")
     print(f"Head Pose Generator")
     print(f"Mode: {'Single File' if args.no_batch else 'Batch'}")
-    print(f"{'=' * 80}\n")
 
     # Single file mode
     if args.no_batch:
-        face_kps_csv = Path(args.path)
-        if not face_kps_csv.exists():
+        file_path = Path(args.path)
+        if not file_path.exists():
             print(f"Error: File does not exist: {args.path}")
             return 1
 
-        if not face_kps_csv.is_file():
+        if not file_path.is_file():
             print(f"Error: Path is not a file: {args.path}")
             return 1
 
+        # Get face landmarks CSV file path (required)
+        if not args.face_landmark:
+            print(f"Error: --face-landmark option is required for single file mode")
+            return 1
+
+        face_kps_csv = Path(args.face_landmark)
+        if not face_kps_csv.exists():
+            print(f"Error: Face landmarks CSV file does not exist: {args.face_landmark}")
+            return 1
+
         # Determine output path
-        output_dir = face_kps_csv.parent
-        output_filename = f"head_pose_{face_kps_csv.stem.replace('face_kps_', '')}.csv"
+        output_dir = file_path.parent
+        output_filename = f"head_pose_{file_path.stem}.csv"
         output_path = output_dir / output_filename
 
-        # Get video path if provided
-        video_path = None
-        if args.video:
-            video_path = Path(args.video)
-            if not video_path.exists():
-                print(f"[WARNING] Video file does not exist: {args.video}")
-                video_path = None
-
-        # Check if rotation is requested
-        should_rotate = len(args.rotate) > 0
+        # Check if rotation is requested (--rotate flag present means rotate)
+        should_rotate = args.rotate is not None
 
         try:
             process_single_file(
                 face_kps_csv=face_kps_csv,
                 output_path=output_path,
-                video_path=video_path,
+                video_path=file_path,
                 should_rotate=should_rotate,
                 check_mode=args.check
             )
@@ -679,13 +724,20 @@ def main():
     # Output files will be saved in base directory
     output_directory = base_directory
 
-    print(f"\n{'=' * 80}")
-    print(f"Head Pose Generator")
-    print(f"Base Directory: {base_directory}")
+    # camera directory must exist
+    input_directory = base_directory / "camera"
+    if not input_directory.exists():
+        print(f"Error: Camera directory does not exist: {input_directory}")
+        return 1
+
+    if not input_directory.is_dir():
+        print(f"Error: Camera path is not a directory: {input_directory}")
+        return 1
+
+    print(f"Input Directory: {input_directory}")
     print(f"Output Directory: {output_directory}")
-    print(f"Rotate IDs: {args.rotate if args.rotate else 'None'}")
-    print(f"Check mode: {args.check}")
-    print(f"{'=' * 80}\n")
+    print(f"Rotate IDs: {args.rotate if args.rotate is not None else 'None'}")
+    print(f"Check mode: {args.check}\n")
 
     # Find file pairs
     pairs = find_file_pairs(base_directory)

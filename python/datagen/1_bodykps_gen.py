@@ -7,6 +7,7 @@ Processes video files and generates body keypoints CSV files using YOLO pose est
 import argparse
 import csv
 import re
+import time
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 import cv2
@@ -388,6 +389,9 @@ def process_video_with_pose(video_path: Path, model: YOLO, csv_file, timestamps:
 
     csv_writer = csv.writer(csv_file)
 
+    # Batch processing time tracking
+    batch_start_time = time.time()
+
     frame_idx = 0
     while cap.isOpened():
         ret, frame = cap.read()
@@ -426,7 +430,9 @@ def process_video_with_pose(video_path: Path, model: YOLO, csv_file, timestamps:
         csv_file.flush()  # Flush to disk immediately
 
         if (frame_idx + 1) % 100 == 0:
-            print(f"  Processed {frame_idx + 1}/{frame_count} frames")
+            batch_elapsed = time.time() - batch_start_time
+            print(f"  Processed {frame_idx + 1}/{frame_count} frames ({batch_elapsed*1000:.2f}ms for 100 frames)")
+            batch_start_time = time.time()
 
         frame_idx += 1
 
@@ -450,7 +456,6 @@ def process_single_file(file_path: Path, model: YOLO, output_path: Path,
         check_mode: Whether to save first frame with keypoints visualization
         autofill: Whether to autofill missing values
     """
-    print(f"\n{'=' * 80}")
     print(f"Processing single file: {file_path.name}")
     print(f"Output: {output_path}")
     print(f"{'=' * 80}\n")
@@ -509,8 +514,11 @@ def process_single_file(file_path: Path, model: YOLO, output_path: Path,
                 img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
                 print("  [INFO] Image rotated 90 degrees clockwise")
 
-            # Run YOLO pose estimation
+            # Run YOLO pose estimation with timing
+            start_time = time.time()
             results = model(img, verbose=False)
+            inference_time = time.time() - start_time
+            print(f"  Inference time: {inference_time*1000:.2f}ms\n")
 
             # Extract keypoints
             kps = np.full((17, 2), np.nan)
@@ -530,12 +538,19 @@ def process_single_file(file_path: Path, model: YOLO, output_path: Path,
                 row.append(kps[kp_idx, 1])
             csv_writer.writerow(row)
 
-            print(f"[SUCCESS] Processed image\n")
+            print(f"[SUCCESS] Processed image")
+            
 
         else:
             # Process video
             all_keypoints = np.full((frame_count, 17, 2), np.nan)
             cap = cv2.VideoCapture(str(file_path))
+
+            # Inference time tracking
+            inference_times = []
+
+            # Batch processing time tracking
+            batch_start_time = time.time()
 
             frame_idx = 0
             while cap.isOpened():
@@ -546,8 +561,11 @@ def process_single_file(file_path: Path, model: YOLO, output_path: Path,
                 if should_rotate:
                     frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
 
-                # Run YOLO pose estimation
+                # Run YOLO pose estimation with timing
+                start_time = time.time()
                 results = model(frame, verbose=False)
+                inference_time = time.time() - start_time
+                inference_times.append(inference_time)
 
                 # Extract keypoints
                 kps = np.full((17, 2), np.nan)
@@ -571,12 +589,25 @@ def process_single_file(file_path: Path, model: YOLO, output_path: Path,
                 csv_file.flush()
 
                 if (frame_idx + 1) % 100 == 0:
-                    print(f"  Processed {frame_idx + 1}/{frame_count} frames")
+                    batch_elapsed = time.time() - batch_start_time
+                    print(f"  Processed {frame_idx + 1}/{frame_count} frames ({batch_elapsed*1000:.2f}ms for 100 frames)")
+                    batch_start_time = time.time()
 
                 frame_idx += 1
 
             cap.release()
-            print(f"[SUCCESS] Processed all {frame_count} frames\n")
+
+            # Print inference time statistics
+            if inference_times:
+                avg_time = np.mean(inference_times)
+                min_time = np.min(inference_times)
+                max_time = np.max(inference_times)
+                fps = 1.0 / avg_time if avg_time > 0 else 0
+                print(f"[SUCCESS] Processed all {frame_count} frames")
+                print(f"  Inference time - Avg: {avg_time*1000:.2f}ms, Min: {min_time*1000:.2f}ms, Max: {max_time*1000:.2f}ms")
+                print(f"  Average FPS: {fps:.2f}\n")
+            else:
+                print(f"[SUCCESS] Processed all {frame_count} frames\n")
 
             # Autofill if requested
             if autofill:
@@ -647,9 +678,9 @@ def main():
     parser.add_argument(
         '--rotate',
         type=int,
-        nargs='+',
-        default=[],
-        help='IDs to rotate 90 degrees clockwise (batch mode) or use --rotate 1 for single file'
+        nargs='*',
+        default=None,
+        help='IDs to rotate 90 degrees clockwise (batch mode) or use --rotate for single file'
     )
     parser.add_argument(
         '--check',
@@ -664,11 +695,9 @@ def main():
     print(f"Body Keypoints Generator")
     print(f"Mode: {'Single File' if args.no_batch else 'Batch'}")
     print(f"Model: {args.model}")
-    print(f"{'=' * 80}\n")
 
-    print(f"Loading YOLO pose model: {args.model}")
+    # Model load
     model = YOLO(args.model)
-    print(f"[SUCCESS] Model loaded\n")
 
     # Single file mode
     if args.no_batch:
@@ -686,8 +715,8 @@ def main():
         output_filename = f"body_kps_{file_path.stem}.csv"
         output_path = output_dir / output_filename
 
-        # Check if rotation is requested (any value in rotate list means rotate)
-        should_rotate = len(args.rotate) > 0
+        # Check if rotation is requested (--rotate flag present means rotate)
+        should_rotate = args.rotate is not None
 
         try:
             process_single_file(
@@ -732,7 +761,7 @@ def main():
     print(f"Input Directory: {input_directory}")
     print(f"Output Directory: {output_directory}")
     print(f"Autofill: {args.autofill}")
-    print(f"Rotate IDs: {args.rotate if args.rotate else 'None'}")
+    print(f"Rotate IDs: {args.rotate if args.rotate is not None else 'None'}")
     print(f"Check mode: {args.check}")
     print(f"{'=' * 80}\n")
 

@@ -8,6 +8,7 @@ import argparse
 import csv
 import os
 import re
+import time
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 import cv2
@@ -429,6 +430,13 @@ def process_video_with_face_alignment(video_path: Path, fa_model_2d: Optional[fa
 
     csv_writer = csv.writer(csv_file)
 
+    # Inference time tracking
+    inference_times_2d = []
+    inference_times_3d = []
+
+    # Batch processing time tracking
+    batch_start_time = time.time()
+
     frame_idx = 0
     while cap.isOpened():
         ret, frame = cap.read()
@@ -439,19 +447,27 @@ def process_video_with_face_alignment(video_path: Path, fa_model_2d: Optional[fa
         if should_rotate:
             frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
 
-        # Detect 2D landmarks
+        # Detect 2D landmarks with timing
         lms_2d = None
         if fa_model_2d is not None:
+            start_time = time.time()
             landmarks_2d = fa_model_2d.get_landmarks(frame)
+            inference_time_2d = time.time() - start_time
+            inference_times_2d.append(inference_time_2d)
+
             lms_2d = np.full((num_landmarks_2d, 2), np.nan)
             if landmarks_2d is not None and len(landmarks_2d) > 0:
                 lms_2d = landmarks_2d[0][:num_landmarks_2d]
             all_landmarks_2d[frame_idx] = lms_2d
 
-        # Detect 3D landmarks
+        # Detect 3D landmarks with timing
         lms_3d = None
         if fa_model_3d is not None:
+            start_time = time.time()
             landmarks_3d = fa_model_3d.get_landmarks(frame)
+            inference_time_3d = time.time() - start_time
+            inference_times_3d.append(inference_time_3d)
+
             lms_3d = np.full((num_landmarks_3d, 3), np.nan)
             if landmarks_3d is not None and len(landmarks_3d) > 0:
                 lms_3d = landmarks_3d[0][:num_landmarks_3d]
@@ -489,12 +505,33 @@ def process_video_with_face_alignment(video_path: Path, fa_model_2d: Optional[fa
         csv_file.flush()  # Flush to disk immediately
 
         if (frame_idx + 1) % 100 == 0:
-            print(f"  Processed {frame_idx + 1}/{frame_count} frames")
+            batch_elapsed = time.time() - batch_start_time
+            print(f"  Processed {frame_idx + 1}/{frame_count} frames ({batch_elapsed*1000:.2f}ms for 100 frames)")
+            batch_start_time = time.time()
 
         frame_idx += 1
 
     cap.release()
-    print(f"  [SUCCESS] Processed all {frame_count} frames\n")
+    print(f"  [SUCCESS] Processed all {frame_count} frames")
+
+    # Print inference time statistics
+    if inference_times_2d:
+        avg_time = np.mean(inference_times_2d)
+        min_time = np.min(inference_times_2d)
+        max_time = np.max(inference_times_2d)
+        fps = 1.0 / avg_time if avg_time > 0 else 0
+        print(f"  2D Inference time - Avg: {avg_time*1000:.2f}ms, Min: {min_time*1000:.2f}ms, Max: {max_time*1000:.2f}ms")
+        print(f"  2D Average FPS: {fps:.2f}")
+
+    if inference_times_3d:
+        avg_time = np.mean(inference_times_3d)
+        min_time = np.min(inference_times_3d)
+        max_time = np.max(inference_times_3d)
+        fps = 1.0 / avg_time if avg_time > 0 else 0
+        print(f"  3D Inference time - Avg: {avg_time*1000:.2f}ms, Min: {min_time*1000:.2f}ms, Max: {max_time*1000:.2f}ms")
+        print(f"  3D Average FPS: {fps:.2f}")
+
+    print()
 
     return all_landmarks_2d, all_landmarks_3d, num_landmarks_2d, num_landmarks_3d
 
@@ -549,7 +586,6 @@ def process_single_file(file_path: Path, fa_model_2d: Optional[face_alignment.Fa
         check_mode: Whether to save first frame with landmarks visualization
         autofill: Whether to autofill missing values
     """
-    print(f"\n{'=' * 80}")
     print(f"Processing single file: {file_path.name}")
     print(f"Output: {output_path}")
     print(f"{'=' * 80}\n")
@@ -620,16 +656,22 @@ def process_single_file(file_path: Path, fa_model_2d: Optional[face_alignment.Fa
             csv_writer.writerow(header)
             print(f"CSV file created with header ({len(header)} columns)\n")
 
-            # Process image
+            # Process image with timing
             lms_2d = None
+            inference_time_2d = 0
             if fa_model_2d is not None:
+                start_time = time.time()
                 landmarks = fa_model_2d.get_landmarks(img)
+                inference_time_2d = time.time() - start_time
                 if landmarks is not None and len(landmarks) > 0:
                     lms_2d = landmarks[0]
 
             lms_3d = None
+            inference_time_3d = 0
             if fa_model_3d is not None:
+                start_time = time.time()
                 landmarks = fa_model_3d.get_landmarks(img)
+                inference_time_3d = time.time() - start_time
                 if landmarks is not None and len(landmarks) > 0:
                     lms_3d = landmarks[0]
 
@@ -650,10 +692,15 @@ def process_single_file(file_path: Path, fa_model_2d: Optional[face_alignment.Fa
                     row.extend([x, y, z])
             csv_writer.writerow(row)
 
-            print(f"[SUCCESS] Processed image\n")
+            print(f"[SUCCESS] Processed image")
+            if inference_time_2d > 0:
+                print(f"  2D Inference time: {inference_time_2d*1000:.2f}ms")
+            if inference_time_3d > 0:
+                print(f"  3D Inference time: {inference_time_3d*1000:.2f}ms")
+            print()
 
         else:
-            # Process video - use existing function
+            # Process video (timing is handled inside the function)
             landmarks_2d, landmarks_3d, num_landmarks_2d, num_landmarks_3d = process_video_with_face_alignment(
                 file_path, fa_model_2d, fa_model_3d, csv_file, timestamps, landmark_type,
                 should_rotate=should_rotate, check_mode=check_mode, check_output_path=check_output_path
@@ -733,9 +780,9 @@ def main():
     parser.add_argument(
         '--rotate',
         type=int,
-        nargs='+',
-        default=[],
-        help='IDs to rotate 90 degrees clockwise (batch mode) or use --rotate 1 for single file'
+        nargs='*',
+        default=None,
+        help='IDs to rotate 90 degrees clockwise (batch mode) or use --rotate for single file'
     )
     parser.add_argument(
         '--check',
@@ -771,15 +818,11 @@ def main():
     print(f"Mode: {'Single File' if args.no_batch else 'Batch'}")
     print(f"Device: {args.device}")
     print(f"Landmark Type: {args.type}")
-    print(f"{'=' * 80}\n")
-
-    print(f"Loading Face Alignment model(s) on {args.device}")
 
     fa_model_2d = None
     fa_model_3d = None
 
     if args.type in ['2d', 'both']:
-        print(f"Loading 2D Face Alignment model with BlazeFace detector...")
         fa_model_2d = face_alignment.FaceAlignment(
             landmarks_type=face_alignment.LandmarksType.TWO_D,
             device=args.device,
@@ -787,10 +830,8 @@ def main():
             face_detector='blazeface',
             face_detector_kwargs={'back_model': True}
         )
-        print(f"[SUCCESS] 2D model loaded\n")
 
     if args.type in ['3d', 'both']:
-        print(f"Loading 3D Face Alignment model with BlazeFace detector...")
         fa_model_3d = face_alignment.FaceAlignment(
             landmarks_type=face_alignment.LandmarksType.THREE_D,
             device=args.device,
@@ -798,7 +839,6 @@ def main():
             face_detector='blazeface',
             face_detector_kwargs={'back_model': True}
         )
-        print(f"[SUCCESS] 3D model loaded\n")
 
     # Single file mode
     if args.no_batch:
@@ -816,8 +856,8 @@ def main():
         output_filename = f"face_kps_{file_path.stem}.csv"
         output_path = output_dir / output_filename
 
-        # Check if rotation is requested
-        should_rotate = len(args.rotate) > 0
+        # Check if rotation is requested (--rotate flag present means rotate)
+        should_rotate = args.rotate is not None
 
         try:
             process_single_file(
@@ -868,7 +908,7 @@ def main():
     print(f"Autofill: {args.autofill}")
     print(f"Device: {args.device}")
     print(f"Landmark Type: {args.type}")
-    print(f"Rotate IDs: {args.rotate if args.rotate else 'None'}")
+    print(f"Rotate IDs: {args.rotate if args.rotate is not None else 'None'}")
     print(f"Check mode: {args.check}")
     print(f"{'=' * 80}\n")
 
