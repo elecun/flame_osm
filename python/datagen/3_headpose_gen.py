@@ -620,9 +620,9 @@ def generate_csv_header() -> List[str]:
     """
     header = [
         'timestamp',
-        'rotation_x', 'rotation_y', 'rotation_z',
-        'translation_x', 'translation_y', 'translation_z',
-        'pitch', 'yaw', 'roll'
+        'head_rotation_x', 'head_rotation_y', 'head_rotation_z',
+        'head_translation_x', 'head_translation_y', 'head_translation_z',
+        'head_pitch', 'head_yaw', 'head_roll'
     ]
     return header
 
