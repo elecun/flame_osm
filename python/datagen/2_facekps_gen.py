@@ -6,6 +6,7 @@ Processes video files and generates face landmark CSV files using Face Alignment
 
 import argparse
 import csv
+import os
 import re
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
@@ -530,6 +531,174 @@ def generate_csv_header(num_landmarks_2d: int, num_landmarks_3d: int, landmark_t
     return header
 
 
+def process_single_file(file_path: Path, fa_model_2d: Optional[face_alignment.FaceAlignment],
+                       fa_model_3d: Optional[face_alignment.FaceAlignment],
+                       output_path: Path, landmark_type: str,
+                       should_rotate: bool = False, check_mode: bool = False,
+                       autofill: bool = False) -> None:
+    """
+    Process a single image or video file for face landmarks.
+
+    Args:
+        file_path: Path to image or video file
+        fa_model_2d: 2D Face Alignment model (or None)
+        fa_model_3d: 3D Face Alignment model (or None)
+        output_path: Output CSV file path
+        landmark_type: Type of landmarks ('2d', '3d', or 'both')
+        should_rotate: Whether to rotate frames 90 degrees clockwise
+        check_mode: Whether to save first frame with landmarks visualization
+        autofill: Whether to autofill missing values
+    """
+    print(f"\n{'=' * 80}")
+    print(f"Processing single file: {file_path.name}")
+    print(f"Output: {output_path}")
+    print(f"{'=' * 80}\n")
+
+    # Check if file is image or video
+    image_extensions = ['.jpg', '.jpeg', '.png', '.bmp']
+    video_extensions = ['.avi', '.mp4', '.mov', '.mkv']
+    file_ext = file_path.suffix.lower()
+
+    is_image = file_ext in image_extensions
+    is_video = file_ext in video_extensions
+
+    if not is_image and not is_video:
+        raise ValueError(f"Unsupported file type: {file_ext}. Must be image or video.")
+
+    # Generate timestamps based on frame count
+    if is_image:
+        print("Detected: Image file")
+        frame_count = 1
+        timestamps = [0.0]
+        fps = 30.0
+    else:
+        print("Detected: Video file")
+        cap = cv2.VideoCapture(str(file_path))
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps == 0:
+            fps = 30.0
+        cap.release()
+        timestamps = [i / fps for i in range(frame_count)]
+        print(f"  Frame count: {frame_count}")
+        print(f"  FPS: {fps:.2f}")
+        print(f"  Duration: {frame_count / fps:.2f} seconds\n")
+
+    check_output_path = None
+    if check_mode:
+        check_output_path = output_path.parent / f"check_face_{file_path.stem}.jpg"
+
+    # For single file, process with the video processing function
+    with open(output_path, 'w', newline='', encoding='utf-8') as csv_file:
+        if is_image:
+            # Process single image
+            img = cv2.imread(str(file_path))
+            if img is None:
+                raise ValueError(f"Cannot read image: {file_path}")
+
+            if should_rotate:
+                img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+                print("  [INFO] Image rotated 90 degrees clockwise")
+
+            # Detect landmarks to get counts
+            num_landmarks_2d = 0
+            num_landmarks_3d = 0
+
+            if fa_model_2d is not None:
+                lms = fa_model_2d.get_landmarks(img)
+                if lms is not None and len(lms) > 0:
+                    num_landmarks_2d = len(lms[0])
+
+            if fa_model_3d is not None:
+                lms = fa_model_3d.get_landmarks(img)
+                if lms is not None and len(lms) > 0:
+                    num_landmarks_3d = len(lms[0])
+
+            # Write header
+            header = generate_csv_header(num_landmarks_2d, num_landmarks_3d, landmark_type)
+            csv_writer = csv.writer(csv_file)
+            csv_writer.writerow(header)
+            print(f"CSV file created with header ({len(header)} columns)\n")
+
+            # Process image
+            lms_2d = None
+            if fa_model_2d is not None:
+                landmarks = fa_model_2d.get_landmarks(img)
+                if landmarks is not None and len(landmarks) > 0:
+                    lms_2d = landmarks[0]
+
+            lms_3d = None
+            if fa_model_3d is not None:
+                landmarks = fa_model_3d.get_landmarks(img)
+                if landmarks is not None and len(landmarks) > 0:
+                    lms_3d = landmarks[0]
+
+            # Save visualization
+            if check_mode and check_output_path is not None:
+                if lms_2d is not None:
+                    visualize_first_frame(img, lms_2d, check_output_path)
+                elif lms_3d is not None:
+                    visualize_first_frame(img, lms_3d[:, :2], check_output_path)
+
+            # Write to CSV
+            row = [timestamps[0]]
+            if lms_2d is not None:
+                for x, y in lms_2d:
+                    row.extend([x, y])
+            if lms_3d is not None:
+                for x, y, z in lms_3d:
+                    row.extend([x, y, z])
+            csv_writer.writerow(row)
+
+            print(f"[SUCCESS] Processed image\n")
+
+        else:
+            # Process video - use existing function
+            landmarks_2d, landmarks_3d, num_landmarks_2d, num_landmarks_3d = process_video_with_face_alignment(
+                file_path, fa_model_2d, fa_model_3d, csv_file, timestamps, landmark_type,
+                should_rotate=should_rotate, check_mode=check_mode, check_output_path=check_output_path
+            )
+
+            # Autofill if requested
+            if autofill and (landmarks_2d is not None or landmarks_3d is not None):
+                print(f"Applying autofill to missing values...")
+                total_missing = 0
+                if landmarks_2d is not None:
+                    total_missing += np.isnan(landmarks_2d).sum()
+                if landmarks_3d is not None:
+                    total_missing += np.isnan(landmarks_3d).sum()
+
+                if total_missing > 0:
+                    print(f"  Found {total_missing} missing values")
+                    if landmarks_2d is not None:
+                        landmarks_2d = autofill_missing_values(landmarks_2d)
+                    if landmarks_3d is not None:
+                        landmarks_3d = autofill_missing_values(landmarks_3d)
+
+                    # Rewrite CSV
+                    print(f"  Rewriting CSV with autofilled values...")
+                    header = generate_csv_header(num_landmarks_2d, num_landmarks_3d, landmark_type)
+                    with open(output_path, 'w', newline='', encoding='utf-8') as f:
+                        writer = csv.writer(f)
+                        writer.writerow(header)
+
+                        for frame_idx, timestamp in enumerate(timestamps):
+                            row = [timestamp]
+                            if landmarks_2d is not None:
+                                for lm_idx in range(num_landmarks_2d):
+                                    row.extend([landmarks_2d[frame_idx, lm_idx, 0], landmarks_2d[frame_idx, lm_idx, 1]])
+                            if landmarks_3d is not None:
+                                for lm_idx in range(num_landmarks_3d):
+                                    row.extend([landmarks_3d[frame_idx, lm_idx, 0], landmarks_3d[frame_idx, lm_idx, 1], landmarks_3d[frame_idx, lm_idx, 2]])
+                            writer.writerow(row)
+
+                    print(f"  [SUCCESS] Autofill completed and CSV updated\n")
+                else:
+                    print(f"  No missing values found\n")
+
+    print(f"[SUCCESS] Output saved to: {output_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Generate face landmarks CSV from video files using Face Alignment Network'
@@ -537,7 +706,12 @@ def main():
     parser.add_argument(
         '--path',
         required=True,
-        help='Directory containing AVI and timestamp CSV files'
+        help='Directory or file path (directory for batch mode, file for single mode)'
+    )
+    parser.add_argument(
+        '--no-batch',
+        action='store_true',
+        help='Single file mode: process a single image or video file'
     )
     parser.add_argument(
         '--autofill',
@@ -561,17 +735,110 @@ def main():
         type=int,
         nargs='+',
         default=[],
-        help='IDs to rotate 90 degrees clockwise (e.g., --rotate 0 1 2)'
+        help='IDs to rotate 90 degrees clockwise (batch mode) or use --rotate 1 for single file'
     )
     parser.add_argument(
         '--check',
         action='store_true',
         help='Save first frame with landmarks visualization as JPG'
     )
+    parser.add_argument(
+        '--model-dir',
+        type=str,
+        default=None,
+        help='Directory containing pre-downloaded model files (sets TORCH_HOME)'
+    )
 
     args = parser.parse_args()
 
-    # Validate path
+    # Set model directory if specified
+    if args.model_dir:
+        model_dir = Path(args.model_dir).resolve()
+        if not model_dir.exists():
+            print(f"Error: Model directory does not exist: {model_dir}")
+            return 1
+        if not model_dir.is_dir():
+            print(f"Error: Model path is not a directory: {model_dir}")
+            return 1
+
+        os.environ['TORCH_HOME'] = str(model_dir)
+        print(f"[INFO] Using model directory: {model_dir}")
+        print(f"[INFO] TORCH_HOME set to: {os.environ['TORCH_HOME']}\n")
+
+    # Load Face Alignment model(s) first
+    print(f"\n{'=' * 80}")
+    print(f"Face Keypoints Generator")
+    print(f"Mode: {'Single File' if args.no_batch else 'Batch'}")
+    print(f"Device: {args.device}")
+    print(f"Landmark Type: {args.type}")
+    print(f"{'=' * 80}\n")
+
+    print(f"Loading Face Alignment model(s) on {args.device}")
+
+    fa_model_2d = None
+    fa_model_3d = None
+
+    if args.type in ['2d', 'both']:
+        print(f"Loading 2D Face Alignment model with BlazeFace detector...")
+        fa_model_2d = face_alignment.FaceAlignment(
+            landmarks_type=face_alignment.LandmarksType.TWO_D,
+            device=args.device,
+            flip_input=False,
+            face_detector='blazeface',
+            face_detector_kwargs={'back_model': True}
+        )
+        print(f"[SUCCESS] 2D model loaded\n")
+
+    if args.type in ['3d', 'both']:
+        print(f"Loading 3D Face Alignment model with BlazeFace detector...")
+        fa_model_3d = face_alignment.FaceAlignment(
+            landmarks_type=face_alignment.LandmarksType.THREE_D,
+            device=args.device,
+            flip_input=False,
+            face_detector='blazeface',
+            face_detector_kwargs={'back_model': True}
+        )
+        print(f"[SUCCESS] 3D model loaded\n")
+
+    # Single file mode
+    if args.no_batch:
+        file_path = Path(args.path)
+        if not file_path.exists():
+            print(f"Error: File does not exist: {args.path}")
+            return 1
+
+        if not file_path.is_file():
+            print(f"Error: Path is not a file: {args.path}")
+            return 1
+
+        # Determine output path
+        output_dir = file_path.parent
+        output_filename = f"face_kps_{file_path.stem}.csv"
+        output_path = output_dir / output_filename
+
+        # Check if rotation is requested
+        should_rotate = len(args.rotate) > 0
+
+        try:
+            process_single_file(
+                file_path=file_path,
+                fa_model_2d=fa_model_2d,
+                fa_model_3d=fa_model_3d,
+                output_path=output_path,
+                landmark_type=args.type,
+                should_rotate=should_rotate,
+                check_mode=args.check,
+                autofill=args.autofill
+            )
+        except Exception as e:
+            print(f"\nError processing file: {e}")
+            import traceback
+            traceback.print_exc()
+            return 1
+
+        return 0
+
+    # Batch mode (original logic)
     base_directory = Path(args.path)
     if not base_directory.exists():
         print(f"Error: Directory does not exist: {args.path}")

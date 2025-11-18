@@ -436,6 +436,176 @@ def process_video_with_pose(video_path: Path, model: YOLO, csv_file, timestamps:
     return all_keypoints
 
 
+def process_single_file(file_path: Path, model: YOLO, output_path: Path,
+                       should_rotate: bool = False, check_mode: bool = False,
+                       autofill: bool = False) -> None:
+    """
+    Process a single image or video file.
+
+    Args:
+        file_path: Path to image or video file
+        model: YOLO model
+        output_path: Output CSV file path
+        should_rotate: Whether to rotate frames 90 degrees clockwise
+        check_mode: Whether to save first frame with keypoints visualization
+        autofill: Whether to autofill missing values
+    """
+    print(f"\n{'=' * 80}")
+    print(f"Processing single file: {file_path.name}")
+    print(f"Output: {output_path}")
+    print(f"{'=' * 80}\n")
+
+    # Check if file is image or video
+    image_extensions = ['.jpg', '.jpeg', '.png', '.bmp']
+    video_extensions = ['.avi', '.mp4', '.mov', '.mkv']
+    file_ext = file_path.suffix.lower()
+
+    is_image = file_ext in image_extensions
+    is_video = file_ext in video_extensions
+
+    if not is_image and not is_video:
+        raise ValueError(f"Unsupported file type: {file_ext}. Must be image or video.")
+
+    # Generate timestamps based on frame count
+    if is_image:
+        print("Detected: Image file")
+        frame_count = 1
+        timestamps = [0.0]
+        fps = 30.0  # Default FPS for single image
+    else:
+        print("Detected: Video file")
+        cap = cv2.VideoCapture(str(file_path))
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps == 0:
+            fps = 30.0  # Default if FPS cannot be determined
+        cap.release()
+
+        # Generate timestamps based on FPS
+        timestamps = [i / fps for i in range(frame_count)]
+        print(f"  Frame count: {frame_count}")
+        print(f"  FPS: {fps:.2f}")
+        print(f"  Duration: {frame_count / fps:.2f} seconds\n")
+
+    # Create CSV file and write header
+    header = generate_csv_header()
+    check_output_path = None
+    if check_mode:
+        check_output_path = output_path.parent / f"check_{file_path.stem}.jpg"
+
+    with open(output_path, 'w', newline='', encoding='utf-8') as csv_file:
+        csv_writer = csv.writer(csv_file)
+        csv_writer.writerow(header)
+        csv_file.flush()
+        print(f"CSV file created with header ({len(header)} columns)\n")
+
+        if is_image:
+            # Process single image
+            img = cv2.imread(str(file_path))
+            if img is None:
+                raise ValueError(f"Cannot read image: {file_path}")
+
+            if should_rotate:
+                img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+                print("  [INFO] Image rotated 90 degrees clockwise")
+
+            # Run YOLO pose estimation
+            results = model(img, verbose=False)
+
+            # Extract keypoints
+            kps = np.full((17, 2), np.nan)
+            if len(results) > 0 and results[0].keypoints is not None:
+                keypoints = results[0].keypoints.xy
+                if len(keypoints) > 0:
+                    kps = keypoints[0].cpu().numpy()
+
+            # Save visualization if check mode
+            if check_mode and check_output_path is not None:
+                visualize_first_frame(img, kps, check_output_path)
+
+            # Write to CSV
+            row = [timestamps[0]]
+            for kp_idx in range(17):
+                row.append(kps[kp_idx, 0])
+                row.append(kps[kp_idx, 1])
+            csv_writer.writerow(row)
+
+            print(f"[SUCCESS] Processed image\n")
+
+        else:
+            # Process video
+            all_keypoints = np.full((frame_count, 17, 2), np.nan)
+            cap = cv2.VideoCapture(str(file_path))
+
+            frame_idx = 0
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                if should_rotate:
+                    frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+
+                # Run YOLO pose estimation
+                results = model(frame, verbose=False)
+
+                # Extract keypoints
+                kps = np.full((17, 2), np.nan)
+                if len(results) > 0 and results[0].keypoints is not None:
+                    keypoints = results[0].keypoints.xy
+                    if len(keypoints) > 0:
+                        kps = keypoints[0].cpu().numpy()
+
+                all_keypoints[frame_idx] = kps
+
+                # Save first frame visualization if check mode
+                if check_mode and frame_idx == 0 and check_output_path is not None:
+                    visualize_first_frame(frame, kps, check_output_path)
+
+                # Write to CSV immediately
+                row = [timestamps[frame_idx]]
+                for kp_idx in range(17):
+                    row.append(kps[kp_idx, 0])
+                    row.append(kps[kp_idx, 1])
+                csv_writer.writerow(row)
+                csv_file.flush()
+
+                if (frame_idx + 1) % 100 == 0:
+                    print(f"  Processed {frame_idx + 1}/{frame_count} frames")
+
+                frame_idx += 1
+
+            cap.release()
+            print(f"[SUCCESS] Processed all {frame_count} frames\n")
+
+            # Autofill if requested
+            if autofill:
+                print(f"Applying autofill to missing values...")
+                missing_count = np.isnan(all_keypoints).sum()
+                if missing_count > 0:
+                    print(f"  Found {missing_count} missing values")
+                    all_keypoints = autofill_missing_values(all_keypoints)
+
+                    # Rewrite CSV with filled values
+                    print(f"  Rewriting CSV with autofilled values...")
+                    with open(output_path, 'w', newline='', encoding='utf-8') as f:
+                        writer = csv.writer(f)
+                        writer.writerow(header)
+
+                        for frame_idx, timestamp in enumerate(timestamps):
+                            row = [timestamp]
+                            for kp_idx in range(17):
+                                row.append(all_keypoints[frame_idx, kp_idx, 0])
+                                row.append(all_keypoints[frame_idx, kp_idx, 1])
+                            writer.writerow(row)
+
+                    print(f"  [SUCCESS] Autofill completed and CSV updated\n")
+                else:
+                    print(f"  No missing values found\n")
+
+    print(f"[SUCCESS] Output saved to: {output_path}")
+
+
 def generate_csv_header() -> List[str]:
     """
     Generate CSV header with timestamp and keypoint names.
@@ -457,7 +627,12 @@ def main():
     parser.add_argument(
         '--path',
         required=True,
-        help='Directory containing AVI and timestamp CSV files'
+        help='Directory or file path (directory for batch mode, file for single mode)'
+    )
+    parser.add_argument(
+        '--no-batch',
+        action='store_true',
+        help='Single file mode: process a single image or video file'
     )
     parser.add_argument(
         '--autofill',
@@ -474,7 +649,7 @@ def main():
         type=int,
         nargs='+',
         default=[],
-        help='IDs to rotate 90 degrees clockwise (e.g., --rotate 0 1 2)'
+        help='IDs to rotate 90 degrees clockwise (batch mode) or use --rotate 1 for single file'
     )
     parser.add_argument(
         '--check',
@@ -484,7 +659,54 @@ def main():
 
     args = parser.parse_args()
 
-    # Validate path
+    # Load YOLO model first
+    print(f"\n{'=' * 80}")
+    print(f"Body Keypoints Generator")
+    print(f"Mode: {'Single File' if args.no_batch else 'Batch'}")
+    print(f"Model: {args.model}")
+    print(f"{'=' * 80}\n")
+
+    print(f"Loading YOLO pose model: {args.model}")
+    model = YOLO(args.model)
+    print(f"[SUCCESS] Model loaded\n")
+
+    # Single file mode
+    if args.no_batch:
+        file_path = Path(args.path)
+        if not file_path.exists():
+            print(f"Error: File does not exist: {args.path}")
+            return 1
+
+        if not file_path.is_file():
+            print(f"Error: Path is not a file: {args.path}")
+            return 1
+
+        # Determine output path
+        output_dir = file_path.parent
+        output_filename = f"body_kps_{file_path.stem}.csv"
+        output_path = output_dir / output_filename
+
+        # Check if rotation is requested (any value in rotate list means rotate)
+        should_rotate = len(args.rotate) > 0
+
+        try:
+            process_single_file(
+                file_path=file_path,
+                model=model,
+                output_path=output_path,
+                should_rotate=should_rotate,
+                check_mode=args.check,
+                autofill=args.autofill
+            )
+        except Exception as e:
+            print(f"\nError processing file: {e}")
+            import traceback
+            traceback.print_exc()
+            return 1
+
+        return 0
+
+    # Batch mode (original logic)
     base_directory = Path(args.path)
     if not base_directory.exists():
         print(f"Error: Directory does not exist: {args.path}")
@@ -507,12 +729,9 @@ def main():
     # Output files will be saved in base directory
     output_directory = base_directory
 
-    print(f"\n{'=' * 80}")
-    print(f"Body Keypoints Generator")
     print(f"Input Directory: {input_directory}")
     print(f"Output Directory: {output_directory}")
     print(f"Autofill: {args.autofill}")
-    print(f"Model: {args.model}")
     print(f"Rotate IDs: {args.rotate if args.rotate else 'None'}")
     print(f"Check mode: {args.check}")
     print(f"{'=' * 80}\n")
@@ -537,13 +756,6 @@ def main():
             print("Exiting.")
             return 1
         print()
-
-    # Load YOLO model
-    print(f"{'=' * 80}")
-    print(f"Loading YOLO pose model: {args.model}")
-    print(f"{'=' * 80}\n")
-    model = YOLO(args.model)
-    print(f"[SUCCESS] Model loaded\n")
 
     # Process each pair
     print(f"{'=' * 80}")

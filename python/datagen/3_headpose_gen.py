@@ -470,6 +470,103 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
     print(f"  [SUCCESS] Processed all {num_frames} frames\n")
 
 
+def process_single_file(face_kps_csv: Path, output_path: Path,
+                       video_path: Optional[Path] = None,
+                       should_rotate: bool = False,
+                       check_mode: bool = False) -> None:
+    """
+    Process a single face landmarks CSV file and estimate head pose.
+
+    Args:
+        face_kps_csv: Path to face_kps CSV file
+        output_path: Output CSV file path
+        video_path: Optional path to video file (for visualization and image size)
+        should_rotate: Whether to rotate frames
+        check_mode: Whether to save first frame visualization
+    """
+    print(f"\n{'=' * 80}")
+    print(f"Processing single file: {face_kps_csv.name}")
+    print(f"Output: {output_path}")
+    print(f"{'=' * 80}\n")
+
+    # Read face landmarks
+    print(f"Reading face landmarks from {face_kps_csv.name}...")
+    timestamps, landmarks_array = read_face_landmarks_csv(face_kps_csv)
+    print(f"Loaded {len(timestamps)} frames with {landmarks_array.shape[1]} landmarks\n")
+
+    # Get image shape from video or use default
+    image_shape = (480, 640)  # Default shape
+    first_frame = None
+
+    if video_path is not None and video_path.exists():
+        print(f"Reading video for image dimensions: {video_path.name}")
+        cap = cv2.VideoCapture(str(video_path))
+        if cap.isOpened():
+            ret, first_frame = cap.read()
+            if ret:
+                if should_rotate:
+                    first_frame = cv2.rotate(first_frame, cv2.ROTATE_90_CLOCKWISE)
+                image_shape = first_frame.shape[:2]
+                print(f"  Video dimensions: {image_shape[1]}x{image_shape[0]}")
+            cap.release()
+        else:
+            print(f"  [WARNING] Could not open video file, using default dimensions")
+    else:
+        print(f"  No video file provided, using default dimensions: {image_shape[1]}x{image_shape[0]}")
+
+    # Prepare check output path
+    check_output_path = None
+    if check_mode:
+        check_output_path = output_path.parent / f"check_headpose_{output_path.stem.replace('head_pose_', '')}.jpg"
+
+    # Create CSV file and write header
+    print(f"\nCreating output file: {output_path}")
+    header = generate_csv_header()
+
+    with open(output_path, 'w', newline='', encoding='utf-8') as csv_file:
+        csv_writer = csv.writer(csv_file)
+        csv_writer.writerow(header)
+        csv_file.flush()
+        print(f"  [SUCCESS] CSV file created with header ({len(header)} columns)\n")
+
+        # Process each frame's landmarks
+        num_frames = len(landmarks_array)
+        for frame_idx in range(num_frames):
+            # Get landmarks for this frame
+            landmarks_2d = landmarks_array[frame_idx]
+
+            # Estimate head pose
+            rotation_vec, translation_vec, euler_angles = estimate_head_pose(landmarks_2d, image_shape)
+
+            # Write to CSV
+            row = [timestamps[frame_idx]]
+
+            if rotation_vec is not None and translation_vec is not None:
+                # Add rotation vector
+                row.extend(rotation_vec.ravel().tolist())
+                # Add translation vector
+                row.extend(translation_vec.ravel().tolist())
+                # Add Euler angles
+                row.extend(euler_angles.tolist())
+
+                # Visualize first frame if check mode
+                if check_mode and frame_idx == 0 and check_output_path is not None and first_frame is not None:
+                    visualize_head_pose(first_frame, landmarks_2d, rotation_vec, translation_vec, euler_angles, check_output_path)
+            else:
+                # Write NaN for failed estimation
+                row.extend([np.nan] * 9)  # 3 rotation + 3 translation + 3 euler angles
+
+            csv_writer.writerow(row)
+            csv_file.flush()
+
+            if (frame_idx + 1) % 100 == 0:
+                print(f"  Processed {frame_idx + 1}/{num_frames} frames")
+
+        print(f"  [SUCCESS] Processed all {num_frames} frames\n")
+
+    print(f"[SUCCESS] Output saved to: {output_path}")
+
+
 def generate_csv_header() -> List[str]:
     """
     Generate CSV header for head pose data.
@@ -493,14 +590,25 @@ def main():
     parser.add_argument(
         '--path',
         required=True,
-        help='Directory containing camera subdirectory and face_kps CSV files'
+        help='Directory or face_kps CSV file path (directory for batch mode, file for single mode)'
+    )
+    parser.add_argument(
+        '--no-batch',
+        action='store_true',
+        help='Single file mode: process a single face_kps CSV file'
+    )
+    parser.add_argument(
+        '--video',
+        type=str,
+        default=None,
+        help='Video file path (optional, for single file mode - used for visualization and image dimensions)'
     )
     parser.add_argument(
         '--rotate',
         type=int,
         nargs='+',
         default=[],
-        help='IDs to rotate 90 degrees clockwise (e.g., --rotate 0 1 2)'
+        help='IDs to rotate 90 degrees clockwise (batch mode) or use --rotate 1 for single file'
     )
     parser.add_argument(
         '--check',
@@ -510,7 +618,55 @@ def main():
 
     args = parser.parse_args()
 
-    # Validate path
+    print(f"\n{'=' * 80}")
+    print(f"Head Pose Generator")
+    print(f"Mode: {'Single File' if args.no_batch else 'Batch'}")
+    print(f"{'=' * 80}\n")
+
+    # Single file mode
+    if args.no_batch:
+        face_kps_csv = Path(args.path)
+        if not face_kps_csv.exists():
+            print(f"Error: File does not exist: {args.path}")
+            return 1
+
+        if not face_kps_csv.is_file():
+            print(f"Error: Path is not a file: {args.path}")
+            return 1
+
+        # Determine output path
+        output_dir = face_kps_csv.parent
+        output_filename = f"head_pose_{face_kps_csv.stem.replace('face_kps_', '')}.csv"
+        output_path = output_dir / output_filename
+
+        # Get video path if provided
+        video_path = None
+        if args.video:
+            video_path = Path(args.video)
+            if not video_path.exists():
+                print(f"[WARNING] Video file does not exist: {args.video}")
+                video_path = None
+
+        # Check if rotation is requested
+        should_rotate = len(args.rotate) > 0
+
+        try:
+            process_single_file(
+                face_kps_csv=face_kps_csv,
+                output_path=output_path,
+                video_path=video_path,
+                should_rotate=should_rotate,
+                check_mode=args.check
+            )
+        except Exception as e:
+            print(f"\nError processing file: {e}")
+            import traceback
+            traceback.print_exc()
+            return 1
+
+        return 0
+
+    # Batch mode (original logic)
     base_directory = Path(args.path)
     if not base_directory.exists():
         print(f"Error: Directory does not exist: {args.path}")

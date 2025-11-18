@@ -9,12 +9,25 @@ Estimates eye gaze direction (pitch and yaw angles).
 import argparse
 import csv
 import re
+import tempfile
+import warnings
+import yaml
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 import cv2
 import numpy as np
 try:
-    from ptgaze import GazeEstimator
+    from omegaconf import OmegaConf
+    from ptgaze.gaze_estimator import GazeEstimator
+    from ptgaze.utils import (
+        download_dlib_pretrained_model,
+        download_mpiigaze_model,
+        download_mpiifacegaze_model,
+        download_ethxgaze_model,
+        expanduser_all,
+        generate_dummy_camera_params
+    )
+    import torch
     PTGAZE_AVAILABLE = True
 except ImportError:
     PTGAZE_AVAILABLE = False
@@ -178,7 +191,7 @@ def detect_face_and_eyes(frame: np.ndarray) -> Tuple[Optional[Tuple], Optional[T
     Detect face and eyes using Haar cascades.
 
     Args:
-        frame: Input frame
+        frame: Input frame (RGB format)
 
     Returns:
         Tuple of (face_rect, left_eye_rect, right_eye_rect)
@@ -187,7 +200,7 @@ def detect_face_and_eyes(frame: np.ndarray) -> Tuple[Optional[Tuple], Optional[T
     face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
     eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
 
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
 
     # Detect faces
     faces = face_cascade.detectMultiScale(gray, 1.3, 5)
@@ -221,14 +234,14 @@ def estimate_gaze_direction_simple(frame: np.ndarray, left_eye: Tuple, right_eye
     This is a fallback method when ptgaze is not available.
 
     Args:
-        frame: Input frame
+        frame: Input frame (RGB format)
         left_eye: Left eye rectangle (x, y, w, h)
         right_eye: Right eye rectangle (x, y, w, h)
 
     Returns:
         Tuple of (pitch, yaw) in degrees
     """
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
 
     # Extract eye regions
     lex, ley, lew, leh = left_eye
@@ -294,7 +307,7 @@ def estimate_gaze_direction(frame: np.ndarray, gaze_estimator, model_type: str,
     Estimate gaze direction using the selected model.
 
     Args:
-        frame: Input frame
+        frame: Input frame (RGB format, will be converted to BGR for ptgaze)
         gaze_estimator: GazeEstimator instance (or None for simplified method)
         model_type: Model type ('mpiigaze', 'mpiifacegaze', 'eth-xgaze', or 'simple')
         face: Face rectangle (x, y, w, h) - used for simplified method
@@ -310,31 +323,44 @@ def estimate_gaze_direction(frame: np.ndarray, gaze_estimator, model_type: str,
             return np.nan, np.nan
         return estimate_gaze_direction_simple(frame, left_eye, right_eye)
 
-    # Use ptgaze model
-    result = gaze_estimator.predict(frame)
+    # Use ptgaze model (ptgaze expects BGR format)
+    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
-    if result is None or len(result) == 0:
+    try:
+        # Detect faces
+        faces = gaze_estimator.detect_faces(frame_bgr)
+
+        if not faces or len(faces) == 0:
+            return np.nan, np.nan
+
+        # Use first detected face
+        detected_face = faces[0]
+
+        # Estimate gaze
+        gaze_estimator.estimate_gaze(frame_bgr, detected_face)
+
+        # Extract gaze vector from face
+        if hasattr(detected_face, 'gaze_vector'):
+            gaze_vector = detected_face.gaze_vector
+        elif hasattr(detected_face, 'normalized_gaze_vector'):
+            gaze_vector = detected_face.normalized_gaze_vector
+        else:
+            return np.nan, np.nan
+
+        # Convert gaze vector to pitch and yaw
+        # Gaze vector is normalized 3D vector (x, y, z)
+        x, y, z = gaze_vector
+
+        # Calculate pitch and yaw from gaze vector
+        # Pitch: angle in vertical plane (up/down)
+        # Yaw: angle in horizontal plane (left/right)
+        pitch = np.degrees(np.arcsin(-y))
+        yaw = np.degrees(np.arctan2(x, -z))
+
+        return pitch, yaw
+    except Exception as e:
+        print(f"  [WARNING] Gaze estimation failed: {e}")
         return np.nan, np.nan
-
-    # Get first detected face
-    face_result = result[0]
-
-    # Extract gaze vector
-    gaze_vector = face_result.get('gaze_vector', None)
-    if gaze_vector is None:
-        return np.nan, np.nan
-
-    # Convert gaze vector to pitch and yaw
-    # Gaze vector is normalized 3D vector (x, y, z)
-    x, y, z = gaze_vector
-
-    # Calculate pitch and yaw from gaze vector
-    # Pitch: angle in vertical plane (up/down)
-    # Yaw: angle in horizontal plane (left/right)
-    pitch = np.degrees(np.arcsin(-y))
-    yaw = np.degrees(np.arctan2(x, -z))
-
-    return pitch, yaw
 
 
 def visualize_gaze(frame: np.ndarray, face: Tuple, left_eye: Tuple, right_eye: Tuple,
@@ -343,7 +369,7 @@ def visualize_gaze(frame: np.ndarray, face: Tuple, left_eye: Tuple, right_eye: T
     Visualize gaze direction on frame.
 
     Args:
-        frame: Input frame
+        frame: Input frame (RGB format)
         face: Face rectangle
         left_eye: Left eye rectangle
         right_eye: Right eye rectangle
@@ -394,8 +420,9 @@ def visualize_gaze(frame: np.ndarray, face: Tuple, left_eye: Tuple, right_eye: T
     cv2.putText(vis_frame, f"Pitch: {pitch:.2f} deg", (10, 30), font, font_scale, color, thickness)
     cv2.putText(vis_frame, f"Yaw:   {yaw:.2f} deg", (10, 60), font, font_scale, color, thickness)
 
-    # Save visualization
-    cv2.imwrite(str(output_path), vis_frame)
+    # Save visualization (convert RGB to BGR for cv2.imwrite)
+    vis_frame_bgr = cv2.cvtColor(vis_frame, cv2.COLOR_RGB2BGR)
+    cv2.imwrite(str(output_path), vis_frame_bgr)
     print(f"  [CHECK] Gaze visualization saved to: {output_path}")
 
 
@@ -407,6 +434,7 @@ def process_video_with_gaze(video_path: Path, timestamps: List[float], csv_file,
                             check_output_path: Optional[Path] = None):
     """
     Process video and estimate gaze for each frame.
+    Frames are converted from BGR to RGB before processing.
 
     Args:
         video_path: Path to video file
@@ -433,6 +461,9 @@ def process_video_with_gaze(video_path: Path, timestamps: List[float], csv_file,
         ret, frame = cap.read()
         if not ret:
             break
+
+        # Convert BGR to RGB
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         if should_rotate:
             frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
@@ -473,6 +504,188 @@ def process_video_with_gaze(video_path: Path, timestamps: List[float], csv_file,
     print(f"  [SUCCESS] Processed all {frame_count} frames\n")
 
 
+def process_single_file(video_path: Path, output_path: Path,
+                       gaze_estimator,
+                       model_type: str = 'simple',
+                       timestamp_csv: Optional[Path] = None,
+                       should_rotate: bool = False,
+                       check_mode: bool = False) -> None:
+    """
+    Process a single video or image file and estimate gaze.
+    Images/frames are converted from BGR to RGB before processing.
+
+    Args:
+        video_path: Path to video or image file
+        output_path: Output CSV file path
+        gaze_estimator: GazeEstimator instance (or None for simplified method)
+        model_type: Model type ('mpiigaze', 'mpiifacegaze', 'eth-xgaze', or 'simple')
+        timestamp_csv: Optional path to timestamp CSV file
+        should_rotate: Whether to rotate frames
+        check_mode: Whether to save first frame visualization
+    """
+    print(f"\n{'=' * 80}")
+    print(f"Processing single file: {video_path.name}")
+    print(f"Output: {output_path}")
+    print(f"Model: {model_type}")
+    print(f"{'=' * 80}\n")
+
+    # Check if file is image or video
+    image_extensions = ['.jpg', '.jpeg', '.png', '.bmp']
+    video_extensions = ['.avi', '.mp4', '.mov', '.mkv']
+    file_ext = video_path.suffix.lower()
+
+    is_image = file_ext in image_extensions
+    is_video = file_ext in video_extensions
+
+    if not is_image and not is_video:
+        raise ValueError(f"Unsupported file type: {file_ext}. Must be image or video.")
+
+    # Generate or read timestamps
+    if is_image:
+        print("Detected: Image file")
+        frame_count = 1
+        timestamps = [0.0]
+        fps = 30.0
+    elif timestamp_csv is not None and timestamp_csv.exists():
+        print("Detected: Video file")
+        print(f"Reading timestamps from {timestamp_csv.name}...")
+        timestamps = read_timestamps(timestamp_csv)
+        print(f"Loaded {len(timestamps)} timestamps\n")
+    else:
+        # Generate timestamps from video FPS
+        print("Detected: Video file")
+        print("Generating timestamps from video FPS...")
+        cap = cv2.VideoCapture(str(video_path))
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps == 0:
+            fps = 30.0
+        cap.release()
+        timestamps = [i / fps for i in range(frame_count)]
+        print(f"  Frame count: {frame_count}")
+        print(f"  FPS: {fps:.2f}")
+        print(f"  Duration: {frame_count / fps:.2f} seconds\n")
+
+    # Prepare check output path
+    check_output_path = None
+    if check_mode:
+        check_output_path = output_path.parent / f"check_gaze_{output_path.stem.replace('gaze_', '')}.jpg"
+
+    # Create CSV file and write header
+    print(f"Creating output file: {output_path}")
+    header = generate_csv_header()
+
+    with open(output_path, 'w', newline='', encoding='utf-8') as csv_file:
+        csv_writer = csv.writer(csv_file)
+        csv_writer.writerow(header)
+        csv_file.flush()
+        print(f"  [SUCCESS] CSV file created with header ({len(header)} columns)\n")
+
+        # Process image or video
+        if is_image:
+            # Process single image
+            print(f"Processing image...")
+            img = cv2.imread(str(video_path))
+            if img is None:
+                raise ValueError(f"Cannot read image: {video_path}")
+
+            # Convert BGR to RGB
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+            if should_rotate:
+                print(f"  [INFO] Image will be rotated 90 degrees clockwise")
+                img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+
+            # For simplified method, detect face and eyes first
+            face, left_eye, right_eye = None, None, None
+            if model_type == 'simple':
+                face, left_eye, right_eye = detect_face_and_eyes(img)
+
+            # Estimate gaze direction
+            pitch, yaw = estimate_gaze_direction(
+                img, gaze_estimator, model_type,
+                face=face, left_eye=left_eye, right_eye=right_eye
+            )
+
+            # Save visualization if check mode
+            if check_mode and check_output_path is not None:
+                # For visualization, we need face and eyes
+                if face is None or left_eye is None or right_eye is None:
+                    face, left_eye, right_eye = detect_face_and_eyes(img)
+
+                if face is not None and left_eye is not None and right_eye is not None:
+                    visualize_gaze(img, face, left_eye, right_eye, pitch, yaw, check_output_path)
+                else:
+                    print(f"  [WARNING] Cannot visualize: face or eyes not detected")
+
+            # Write to CSV
+            row = [timestamps[0]]
+            row.extend([pitch, yaw])
+            csv_writer.writerow(row)
+            csv_file.flush()
+
+            print(f"  [SUCCESS] Processed image")
+            print(f"    Pitch: {pitch:.2f} deg, Yaw: {yaw:.2f} deg\n")
+
+        else:
+            # Process video
+            print(f"Processing video...")
+            if should_rotate:
+                print(f"  [INFO] Video will be rotated 90 degrees clockwise")
+
+            cap = cv2.VideoCapture(str(video_path))
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+            frame_idx = 0
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                # Convert BGR to RGB
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+                if should_rotate:
+                    frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+
+                # For simplified method, detect face and eyes first
+                face, left_eye, right_eye = None, None, None
+                if model_type == 'simple':
+                    face, left_eye, right_eye = detect_face_and_eyes(frame)
+
+                # Estimate gaze direction
+                pitch, yaw = estimate_gaze_direction(
+                    frame, gaze_estimator, model_type,
+                    face=face, left_eye=left_eye, right_eye=right_eye
+                )
+
+                # Write to CSV
+                row = [timestamps[frame_idx]]
+                row.extend([pitch, yaw])
+
+                csv_writer.writerow(row)
+                csv_file.flush()
+
+                # Visualize first frame if check mode
+                if check_mode and frame_idx == 0 and check_output_path is not None:
+                    # For visualization, we need face and eyes
+                    if face is None or left_eye is None or right_eye is None:
+                        face, left_eye, right_eye = detect_face_and_eyes(frame)
+
+                    if face is not None and left_eye is not None and right_eye is not None:
+                        visualize_gaze(frame, face, left_eye, right_eye, pitch, yaw, check_output_path)
+
+                if (frame_idx + 1) % 100 == 0:
+                    print(f"  Processed {frame_idx + 1}/{frame_count} frames")
+
+                frame_idx += 1
+
+            cap.release()
+            print(f"  [SUCCESS] Processed all {frame_count} frames\n")
+
+    print(f"[SUCCESS] Output saved to: {output_path}")
+
+
 def generate_csv_header() -> List[str]:
     """
     Generate CSV header for gaze data.
@@ -483,6 +696,88 @@ def generate_csv_header() -> List[str]:
     return ['timestamp', 'pitch', 'yaw']
 
 
+def create_gaze_estimator_config(model_type: str, device: str):
+    """
+    Create ptgaze config for GazeEstimator.
+
+    Args:
+        model_type: Model type ('mpiigaze', 'mpiifacegaze', 'eth-xgaze')
+        device: Device to use ('cpu' or 'cuda')
+
+    Returns:
+        OmegaConf DictConfig object
+    """
+    if not PTGAZE_AVAILABLE:
+        return None
+
+    # Get ptgaze package root
+    import ptgaze
+    package_root = Path(ptgaze.__file__).parent.resolve()
+
+    # Map model types to config files and mode names
+    config_map = {
+        'mpiigaze': ('mpiigaze.yaml', 'MPIIGaze'),
+        'mpiifacegaze': ('mpiifacegaze.yaml', 'MPIIFaceGaze'),
+        'eth-xgaze': ('eth-xgaze.yaml', 'ETH-XGaze')
+    }
+
+    if model_type not in config_map:
+        raise ValueError(f"Unknown model type: {model_type}")
+
+    config_file, mode_name = config_map[model_type]
+    config_path = package_root / 'data' / 'configs' / config_file
+
+    # Load config
+    config = OmegaConf.load(config_path)
+    config.PACKAGE_ROOT = package_root.as_posix()
+
+    # Set device
+    config.device = device
+    if config.device == 'cuda' and not torch.cuda.is_available():
+        config.device = 'cpu'
+        warnings.warn('Run on CPU because CUDA is not available.')
+
+    # Use dummy camera params (we'll handle camera separately)
+    config.gaze_estimator.use_dummy_camera_params = True
+
+    # Expand user paths
+    expanduser_all(config)
+
+    # Generate dummy camera params (required for initialization)
+    # We'll use a temporary dummy file
+    out_file = tempfile.NamedTemporaryFile(suffix='.yaml', delete=False, mode='w')
+    dummy_params = {
+        'image_width': 640,
+        'image_height': 480,
+        'camera_matrix': {
+            'rows': 3,
+            'cols': 3,
+            'data': [640, 0., 320, 0., 640, 240, 0., 0., 1.]
+        },
+        'distortion_coefficients': {
+            'rows': 1,
+            'cols': 5,
+            'data': [0., 0., 0., 0., 0.]
+        }
+    }
+    yaml.safe_dump(dummy_params, out_file)
+    out_file.close()
+    config.gaze_estimator.camera_params = out_file.name
+
+    # Download required models
+    if config.face_detector.mode == 'dlib':
+        download_dlib_pretrained_model()
+
+    if mode_name == 'MPIIGaze':
+        download_mpiigaze_model()
+    elif mode_name == 'MPIIFaceGaze':
+        download_mpiifacegaze_model()
+    elif mode_name == 'ETH-XGaze':
+        download_ethxgaze_model()
+
+    return config
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Generate gaze estimation data from video files using MPIIGaze models'
@@ -490,7 +785,18 @@ def main():
     parser.add_argument(
         '--path',
         required=True,
-        help='Directory containing camera subdirectory with AVI and timestamp CSV files'
+        help='Directory or video file path (directory for batch mode, file for single mode)'
+    )
+    parser.add_argument(
+        '--no-batch',
+        action='store_true',
+        help='Single file mode: process a single video file'
+    )
+    parser.add_argument(
+        '--timestamp',
+        type=str,
+        default=None,
+        help='Timestamp CSV file path (optional, for single file mode)'
     )
     parser.add_argument(
         '--model',
@@ -511,7 +817,7 @@ def main():
         type=int,
         nargs='+',
         default=[],
-        help='IDs to rotate 90 degrees clockwise (e.g., --rotate 0 1 2)'
+        help='IDs to rotate 90 degrees clockwise (batch mode) or use --rotate 1 for single file'
     )
     parser.add_argument(
         '--check',
@@ -521,7 +827,82 @@ def main():
 
     args = parser.parse_args()
 
-    # Validate path
+    print(f"\n{'=' * 80}")
+    print(f"Gaze Estimation Generator")
+    print(f"Mode: {'Single File' if args.no_batch else 'Batch'}")
+    print(f"Model: {args.model}")
+    print(f"Device: {args.device}")
+    print(f"{'=' * 80}\n")
+
+    # Initialize gaze estimator
+    gaze_estimator = None
+    if args.model != 'simple':
+        if not PTGAZE_AVAILABLE:
+            print("Error: ptgaze library is required for advanced models (mpiigaze, mpiifacegaze, eth-xgaze)")
+            print("Install with: pip install ptgaze")
+            print("Falling back to simplified method...\n")
+            args.model = 'simple'
+        else:
+            print(f"Initializing {args.model} model on {args.device}...")
+            try:
+                # Create config and initialize GazeEstimator
+                config = create_gaze_estimator_config(args.model, args.device)
+                gaze_estimator = GazeEstimator(config)
+                print(f"  [SUCCESS] {args.model} model initialized on {args.device}\n")
+            except Exception as e:
+                print(f"  [ERROR] Failed to initialize {args.model}: {e}")
+                print("  Falling back to simplified method...\n")
+                import traceback
+                traceback.print_exc()
+                args.model = 'simple'
+                gaze_estimator = None
+
+    # Single file mode
+    if args.no_batch:
+        video_path = Path(args.path)
+        if not video_path.exists():
+            print(f"Error: File does not exist: {args.path}")
+            return 1
+
+        if not video_path.is_file():
+            print(f"Error: Path is not a file: {args.path}")
+            return 1
+
+        # Determine output path
+        output_dir = video_path.parent
+        output_filename = f"gaze_{video_path.stem}.csv"
+        output_path = output_dir / output_filename
+
+        # Get timestamp CSV path if provided
+        timestamp_csv = None
+        if args.timestamp:
+            timestamp_csv = Path(args.timestamp)
+            if not timestamp_csv.exists():
+                print(f"[WARNING] Timestamp CSV file does not exist: {args.timestamp}")
+                timestamp_csv = None
+
+        # Check if rotation is requested
+        should_rotate = len(args.rotate) > 0
+
+        try:
+            process_single_file(
+                video_path=video_path,
+                output_path=output_path,
+                gaze_estimator=gaze_estimator,
+                model_type=args.model,
+                timestamp_csv=timestamp_csv,
+                should_rotate=should_rotate,
+                check_mode=args.check
+            )
+        except Exception as e:
+            print(f"\nError processing file: {e}")
+            import traceback
+            traceback.print_exc()
+            return 1
+
+        return 0
+
+    # Batch mode (original logic)
     base_directory = Path(args.path)
     if not base_directory.exists():
         print(f"Error: Directory does not exist: {args.path}")
@@ -544,40 +925,10 @@ def main():
     # Output files will be saved in base directory
     output_directory = base_directory
 
-    print(f"\n{'=' * 80}")
-    print(f"Gaze Estimation Generator")
     print(f"Input Directory: {input_directory}")
     print(f"Output Directory: {output_directory}")
-    print(f"Model: {args.model}")
-    print(f"Device: {args.device}")
     print(f"Rotate IDs: {args.rotate if args.rotate else 'None'}")
-    print(f"Check mode: {args.check}")
-    print(f"{'=' * 80}\n")
-
-    # Initialize gaze estimator
-    gaze_estimator = None
-    if args.model != 'simple':
-        if not PTGAZE_AVAILABLE:
-            print("Error: ptgaze library is required for advanced models (mpiigaze, mpiifacegaze, eth-xgaze)")
-            print("Install with: pip install ptgaze")
-            print("Falling back to simplified method...\n")
-            args.model = 'simple'
-        else:
-            print(f"Initializing {args.model} model on {args.device}...")
-            try:
-                # Map model names to ptgaze model names
-                model_map = {
-                    'mpiigaze': 'MPIIGaze',
-                    'mpiifacegaze': 'MPIIFaceGaze',
-                    'eth-xgaze': 'ETH-XGaze'
-                }
-                gaze_estimator = GazeEstimator(model=model_map[args.model], device=args.device)
-                print(f"  [SUCCESS] {args.model} model initialized on {args.device}\n")
-            except Exception as e:
-                print(f"  [ERROR] Failed to initialize {args.model}: {e}")
-                print("  Falling back to simplified method...\n")
-                args.model = 'simple'
-                gaze_estimator = None
+    print(f"Check mode: {args.check}\n")
 
     # Find file pairs in camera directory
     pairs = find_file_pairs(input_directory)
