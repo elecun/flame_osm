@@ -4,10 +4,9 @@
     "num_face_nodes": 68,
     "body_in_channels": 2,
     "face_2d_in_channels": 2,
-    "face_3d_in_channels": 3,
     "head_pose_features": 9,
     "hidden_channels": 64,
-    "num_gcn_layers": 3,
+    "num_gcn_layers": 4,
     "temporal_kernel_size": 9,
     "dropout": 0.3
   },
@@ -24,10 +23,19 @@
     "lr_scheduler_factor": 0.5
   },
   "data": {
-    "csv_file": "merge_0.csv",
+    "csv_path": "merge_0.csv",
+    "is_directory": false,
     "normalize": true,
     "shuffle": true,
-    "num_workers": 4
+    "num_workers": 4,
+    "features": {
+      "use_body_kps": true,
+      "use_face_kps_2d": true,
+      "use_head_pose": true,
+      "body_pattern": ["nose_", "eye_", "ear_", "shoulder_", "elbow_", "wrist_", "hip_", "knee_", "ankle_"],
+      "face_2d_pattern": "landmark_.*_2d",
+      "head_pose_cols": ["head_rotation_x", "head_rotation_y", "head_rotation_z", "head_translation_x", "head_translation_y", "head_translation_z", "head_pitch", "head_yaw", "head_roll"]
+    }
   },
   "output": {
     "model_save_path": "checkpoints",

@@ -153,62 +153,109 @@ class AttentionSTGCN(nn.Module):
     """
     STGCN model for attention prediction from body and face keypoints
     """
-    def __init__(self, config):
+    def __init__(self, config, feature_dims=None):
         super(AttentionSTGCN, self).__init__()
 
         self.config = config
         model_cfg = config['model']
 
-        # Create adjacency matrices for body and face skeletons
-        self.body_adj = self._create_body_adjacency()
-        self.face_adj = self._create_face_adjacency()
+        # Get feature configuration
+        feature_config = config['data'].get('features', {})
+        self.use_body = feature_config.get('use_body_kps', True)
+        self.use_face_2d = feature_config.get('use_face_kps_2d', True)
+        self.use_head_pose = feature_config.get('use_head_pose', True)
 
-        # Feature dimensions
-        body_features = model_cfg['num_body_nodes'] * model_cfg['body_in_channels']
-        face_2d_features = model_cfg['num_face_nodes'] * model_cfg['face_2d_in_channels']
-        face_3d_features = model_cfg['num_face_nodes'] * model_cfg['face_3d_in_channels']
-        head_pose_features = model_cfg['head_pose_features']
+        # Determine feature dimensions
+        if feature_dims is not None:
+            # Use actual dimensions from data
+            body_features = feature_dims.get('body', 0)
+            face_2d_features = feature_dims.get('face_2d', 0)
+            head_pose_features = feature_dims.get('head_pose', 0)
+        else:
+            # Use config defaults (for backward compatibility)
+            body_features = model_cfg['num_body_nodes'] * model_cfg['body_in_channels'] if self.use_body else 0
+            face_2d_features = model_cfg['num_face_nodes'] * model_cfg['face_2d_in_channels'] if self.use_face_2d else 0
+            head_pose_features = model_cfg['head_pose_features'] if self.use_head_pose else 0
+
+        # Calculate number of nodes
+        self.num_body_nodes = body_features // model_cfg.get('body_in_channels', 2) if body_features > 0 else 17
+        self.num_face_nodes = face_2d_features // model_cfg.get('face_2d_in_channels', 2) if face_2d_features > 0 else 68
 
         hidden_channels = model_cfg['hidden_channels']
 
+        # Create adjacency matrices for body and face skeletons
+        if self.use_body and body_features > 0:
+            self.body_adj = self._create_body_adjacency()
+        else:
+            self.body_adj = None
+
+        if self.use_face_2d and face_2d_features > 0:
+            self.face_adj = self._create_face_adjacency()
+        else:
+            self.face_adj = None
+
         # Input projection layers
-        self.body_proj = nn.Linear(model_cfg['body_in_channels'], hidden_channels)
-        self.face_2d_proj = nn.Linear(model_cfg['face_2d_in_channels'], hidden_channels)
-        self.face_3d_proj = nn.Linear(model_cfg['face_3d_in_channels'], hidden_channels)
+        if self.use_body and body_features > 0:
+            self.body_proj = nn.Linear(model_cfg.get('body_in_channels', 2), hidden_channels)
+        else:
+            self.body_proj = None
+
+        if self.use_face_2d and face_2d_features > 0:
+            self.face_2d_proj = nn.Linear(model_cfg.get('face_2d_in_channels', 2), hidden_channels)
+        else:
+            self.face_2d_proj = None
 
         # STGCN blocks for body
-        self.body_stgcn_blocks = nn.ModuleList([
-            STGCNBlock(
-                hidden_channels,
-                hidden_channels,
-                self.body_adj,
-                temporal_kernel_size=model_cfg['temporal_kernel_size'],
-                dropout=model_cfg['dropout']
-            ) for _ in range(model_cfg['num_gcn_layers'])
-        ])
+        if self.use_body and body_features > 0:
+            self.body_stgcn_blocks = nn.ModuleList([
+                STGCNBlock(
+                    hidden_channels,
+                    hidden_channels,
+                    self.body_adj,
+                    temporal_kernel_size=model_cfg['temporal_kernel_size'],
+                    dropout=model_cfg['dropout']
+                ) for _ in range(model_cfg['num_gcn_layers'])
+            ])
+        else:
+            self.body_stgcn_blocks = None
 
         # STGCN blocks for face
-        self.face_stgcn_blocks = nn.ModuleList([
-            STGCNBlock(
-                hidden_channels,
-                hidden_channels,
-                self.face_adj,
-                temporal_kernel_size=model_cfg['temporal_kernel_size'],
-                dropout=model_cfg['dropout']
-            ) for _ in range(model_cfg['num_gcn_layers'])
-        ])
+        if self.use_face_2d and face_2d_features > 0:
+            self.face_stgcn_blocks = nn.ModuleList([
+                STGCNBlock(
+                    hidden_channels,
+                    hidden_channels,
+                    self.face_adj,
+                    temporal_kernel_size=model_cfg['temporal_kernel_size'],
+                    dropout=model_cfg['dropout']
+                ) for _ in range(model_cfg['num_gcn_layers'])
+            ])
+        else:
+            self.face_stgcn_blocks = None
 
         # Head pose processing
-        self.head_pose_fc = nn.Sequential(
-            nn.Linear(head_pose_features, hidden_channels),
-            nn.ReLU(),
-            nn.Dropout(model_cfg['dropout'])
-        )
+        if self.use_head_pose and head_pose_features > 0:
+            self.head_pose_fc = nn.Sequential(
+                nn.Linear(head_pose_features, hidden_channels),
+                nn.ReLU(),
+                nn.Dropout(model_cfg['dropout'])
+            )
+        else:
+            self.head_pose_fc = None
+
+        # Calculate total features for fusion layer
+        total_features = 0
+        if self.use_body and body_features > 0:
+            total_features += self.num_body_nodes * hidden_channels
+        if self.use_face_2d and face_2d_features > 0:
+            total_features += self.num_face_nodes * hidden_channels
+        if self.use_head_pose and head_pose_features > 0:
+            total_features += hidden_channels
+
+        if total_features == 0:
+            raise ValueError("At least one feature type must be enabled")
 
         # Fusion and prediction layers
-        # Body: num_body_nodes * hidden, Face: num_face_nodes * hidden (2D+3D combined), Head pose: hidden
-        total_features = hidden_channels * (model_cfg['num_body_nodes'] + model_cfg['num_face_nodes']) + hidden_channels
-
         self.fusion = nn.Sequential(
             nn.Linear(total_features, hidden_channels * 4),
             nn.ReLU(),
@@ -314,58 +361,78 @@ class AttentionSTGCN(nn.Module):
 
         return adj_normalized
 
-    def forward(self, body_kps, face_kps_2d, face_kps_3d, head_pose):
+    def forward(self, body_kps, face_kps_2d, head_pose):
         """
         Args:
-            body_kps: (batch_size, sequence_length, num_body_nodes * 2)
-            face_kps_2d: (batch_size, sequence_length, num_face_nodes * 2)
-            face_kps_3d: (batch_size, sequence_length, num_face_nodes * 3)
-            head_pose: (batch_size, sequence_length, 9)
+            body_kps: (batch_size, sequence_length, num_body_nodes * 2) or None
+            face_kps_2d: (batch_size, sequence_length, num_face_nodes * 2) or None
+            head_pose: (batch_size, sequence_length, head_pose_features) or None
         Returns:
             attention: (batch_size, 1)
         """
-        batch_size, seq_len = body_kps.shape[0], body_kps.shape[1]
+        features_list = []
 
-        # Reshape body keypoints: (B, T, N*2) -> (B, T, N, 2)
-        body_kps = body_kps.reshape(batch_size, seq_len, self.config['model']['num_body_nodes'], 2)
+        # Process body keypoints
+        if self.use_body and self.body_proj is not None and body_kps is not None:
+            batch_size, seq_len = body_kps.shape[0], body_kps.shape[1]
 
-        # Reshape face keypoints
-        face_kps_2d = face_kps_2d.reshape(batch_size, seq_len, self.config['model']['num_face_nodes'], 2)
-        face_kps_3d = face_kps_3d.reshape(batch_size, seq_len, self.config['model']['num_face_nodes'], 3)
+            # Reshape body keypoints: (B, T, N*2) -> (B, T, N, 2)
+            body_kps = body_kps.reshape(batch_size, seq_len, self.num_body_nodes, 2)
 
-        # Project features
-        body_features = self.body_proj(body_kps)  # (B, T, N_body, hidden)
-        face_2d_features = self.face_2d_proj(face_kps_2d)  # (B, T, N_face, hidden)
-        face_3d_features = self.face_3d_proj(face_kps_3d)  # (B, T, N_face, hidden)
+            # Project features
+            body_features = self.body_proj(body_kps)  # (B, T, N_body, hidden)
 
-        # Combine 2D and 3D face features
-        face_features = face_2d_features + face_3d_features  # (B, T, N_face, hidden)
+            # Reshape for STGCN: (B, T, N, C) -> (B, N, C, T)
+            body_features = body_features.permute(0, 2, 3, 1)
 
-        # Reshape for STGCN: (B, T, N, C) -> (B, N, C, T)
-        body_features = body_features.permute(0, 2, 3, 1)
-        face_features = face_features.permute(0, 2, 3, 1)
+            # Apply STGCN blocks
+            for block in self.body_stgcn_blocks:
+                body_features = block(body_features)
 
-        # Apply STGCN blocks
-        for block in self.body_stgcn_blocks:
-            body_features = block(body_features)
+            # Global pooling over time: (B, N, C, T) -> (B, N, C)
+            body_features = body_features.mean(dim=-1)
 
-        for block in self.face_stgcn_blocks:
-            face_features = block(face_features)
+            # Flatten spatial features: (B, N, C) -> (B, N*C)
+            body_features = body_features.reshape(batch_size, -1)
+            features_list.append(body_features)
+        else:
+            batch_size = face_kps_2d.shape[0] if face_kps_2d is not None else head_pose.shape[0]
+            seq_len = face_kps_2d.shape[1] if face_kps_2d is not None else head_pose.shape[1]
 
-        # Global pooling over time: (B, N, C, T) -> (B, N, C)
-        body_features = body_features.mean(dim=-1)
-        face_features = face_features.mean(dim=-1)
+        # Process face keypoints (2D)
+        if self.use_face_2d and self.face_2d_proj is not None and face_kps_2d is not None:
+            # Reshape face keypoints
+            face_kps_2d = face_kps_2d.reshape(batch_size, seq_len, self.num_face_nodes, 2)
 
-        # Flatten spatial features: (B, N, C) -> (B, N*C)
-        body_features = body_features.reshape(batch_size, -1)
-        face_features = face_features.reshape(batch_size, -1)
+            # Project features
+            face_features = self.face_2d_proj(face_kps_2d)  # (B, T, N_face, hidden)
 
-        # Process head pose: (B, T, 9) -> (B, 9)
-        head_pose_avg = head_pose.mean(dim=1)
-        head_pose_features = self.head_pose_fc(head_pose_avg)  # (B, hidden)
+            # Reshape for STGCN: (B, T, N, C) -> (B, N, C, T)
+            face_features = face_features.permute(0, 2, 3, 1)
+
+            # Apply STGCN blocks
+            for block in self.face_stgcn_blocks:
+                face_features = block(face_features)
+
+            # Global pooling over time: (B, N, C, T) -> (B, N, C)
+            face_features = face_features.mean(dim=-1)
+
+            # Flatten spatial features: (B, N, C) -> (B, N*C)
+            face_features = face_features.reshape(batch_size, -1)
+            features_list.append(face_features)
+
+        # Process head pose
+        if self.use_head_pose and self.head_pose_fc is not None and head_pose is not None:
+            # (B, T, head_pose_features) -> (B, head_pose_features)
+            head_pose_avg = head_pose.mean(dim=1)
+            head_pose_features = self.head_pose_fc(head_pose_avg)  # (B, hidden)
+            features_list.append(head_pose_features)
 
         # Concatenate all features
-        combined = torch.cat([body_features, face_features, head_pose_features], dim=-1)
+        if len(features_list) == 0:
+            raise ValueError("No features available for prediction")
+
+        combined = torch.cat(features_list, dim=-1)
 
         # Predict attention
         attention = self.fusion(combined)
@@ -384,24 +451,30 @@ def load_config(config_path):
 if __name__ == '__main__':
     # Test model
     config = load_config('config.json')
-    model = AttentionSTGCN(config)
+
+    # Create dummy feature dims
+    feature_dims = {
+        'body': 17 * 2,
+        'face_2d': 68 * 2,
+        'head_pose': 9
+    }
+
+    model = AttentionSTGCN(config, feature_dims)
 
     batch_size = 4
     seq_len = config['training']['sequence_length']
 
-    # Create dummy input
+    # Create dummy input (no 3D face landmarks)
     body_kps = torch.randn(batch_size, seq_len, 17 * 2)
     face_kps_2d = torch.randn(batch_size, seq_len, 68 * 2)
-    face_kps_3d = torch.randn(batch_size, seq_len, 68 * 3)
     head_pose = torch.randn(batch_size, seq_len, 9)
 
     # Forward pass
-    output = model(body_kps, face_kps_2d, face_kps_3d, head_pose)
+    output = model(body_kps, face_kps_2d, head_pose)
 
     print(f"Input shapes:")
     print(f"  Body keypoints: {body_kps.shape}")
     print(f"  Face keypoints 2D: {face_kps_2d.shape}")
-    print(f"  Face keypoints 3D: {face_kps_3d.shape}")
     print(f"  Head pose: {head_pose.shape}")
     print(f"Output shape: {output.shape}")
     print(f"Output range: [{output.min().item():.3f}, {output.max().item():.3f}]")

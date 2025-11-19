@@ -52,13 +52,12 @@ def train_epoch(model, train_loader, criterion, optimizer, device):
     for batch in pbar:
         body_kps = batch['body_kps'].to(device)
         face_kps_2d = batch['face_kps_2d'].to(device)
-        face_kps_3d = batch['face_kps_3d'].to(device)
         head_pose = batch['head_pose'].to(device)
         attention = batch['attention'].to(device)
 
-        # Forward pass
+        # Forward pass (no 3D face landmarks)
         optimizer.zero_grad()
-        outputs = model(body_kps, face_kps_2d, face_kps_3d, head_pose)
+        outputs = model(body_kps, face_kps_2d, head_pose)
 
         # Compute loss
         loss = criterion(outputs, attention)
@@ -95,12 +94,11 @@ def validate_epoch(model, val_loader, criterion, device):
         for batch in tqdm(val_loader, desc='Validation'):
             body_kps = batch['body_kps'].to(device)
             face_kps_2d = batch['face_kps_2d'].to(device)
-            face_kps_3d = batch['face_kps_3d'].to(device)
             head_pose = batch['head_pose'].to(device)
             attention = batch['attention'].to(device)
 
-            # Forward pass
-            outputs = model(body_kps, face_kps_2d, face_kps_3d, head_pose)
+            # Forward pass (no 3D face landmarks)
+            outputs = model(body_kps, face_kps_2d, head_pose)
 
             # Compute loss
             loss = criterion(outputs, attention)
@@ -187,7 +185,7 @@ def train_model(config, csv_file, device='cuda'):
 
     # Create data loaders
     print("Creating data loaders...")
-    train_loader, val_loader, test_loader, scaler = create_data_loaders(config, csv_file)
+    train_loader, val_loader, test_loader, scaler, feature_dims = create_data_loaders(config, csv_file)
 
     # Save scaler
     scaler_path = os.path.join(config['output']['model_save_path'], 'scaler.pkl')
@@ -195,9 +193,15 @@ def train_model(config, csv_file, device='cuda'):
         pickle.dump(scaler, f)
     print(f"Saved scaler to {scaler_path}")
 
+    # Save feature dimensions
+    feature_dims_path = os.path.join(config['output']['model_save_path'], 'feature_dims.pkl')
+    with open(feature_dims_path, 'wb') as f:
+        pickle.dump(feature_dims, f)
+    print(f"Saved feature dimensions to {feature_dims_path}")
+
     # Create model
     print("\nCreating model...")
-    model = AttentionSTGCN(config).to(device)
+    model = AttentionSTGCN(config, feature_dims).to(device)
 
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
@@ -266,14 +270,14 @@ def train_model(config, csv_file, device='cuda'):
         # Get current learning rate
         current_lr = optimizer.param_groups[0]['lr']
 
-        # Record history
-        history['train_loss'].append(train_loss)
-        history['val_loss'].append(val_loss)
-        history['train_mae'].append(train_mae)
-        history['val_mae'].append(val_mae)
-        history['train_rmse'].append(train_rmse)
-        history['val_rmse'].append(val_rmse)
-        history['learning_rate'].append(current_lr)
+        # Record history (convert to Python native types for JSON serialization)
+        history['train_loss'].append(float(train_loss))
+        history['val_loss'].append(float(val_loss))
+        history['train_mae'].append(float(train_mae))
+        history['val_mae'].append(float(val_mae))
+        history['train_rmse'].append(float(train_rmse))
+        history['val_rmse'].append(float(val_rmse))
+        history['learning_rate'].append(float(current_lr))
 
         # Log metrics
         writer.add_scalar('Loss/train', train_loss, epoch)
@@ -296,9 +300,9 @@ def train_model(config, csv_file, device='cuda'):
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
-                    'val_loss': val_loss,
-                    'val_mae': val_mae,
-                    'val_rmse': val_rmse,
+                    'val_loss': float(val_loss),
+                    'val_mae': float(val_mae),
+                    'val_rmse': float(val_rmse),
                     'config': config
                 }
                 model_path = os.path.join(config['output']['model_save_path'], 'best_model.pth')
@@ -331,12 +335,12 @@ def train_model(config, csv_file, device='cuda'):
         json.dump(history, f, indent=2)
     print(f"Saved training history to {history_path}")
 
-    # Save final results
+    # Save final results (convert to Python native types for JSON serialization)
     results = {
-        'test_loss': test_loss,
-        'test_mae': test_mae,
-        'test_rmse': test_rmse,
-        'best_val_loss': best_val_loss
+        'test_loss': float(test_loss),
+        'test_mae': float(test_mae),
+        'test_rmse': float(test_rmse),
+        'best_val_loss': float(best_val_loss)
     }
 
     results_path = os.path.join(config['output']['model_save_path'], 'results.json')

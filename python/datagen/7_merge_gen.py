@@ -78,14 +78,14 @@ def main():
     parser = argparse.ArgumentParser(description='Merge multiple CSV files into one')
     parser.add_argument('--path', type=str, required=True,
                         help='Working directory path')
-    parser.add_argument('--reference', type=int, required=True,
+    parser.add_argument('--time-reference', type=int, required=True,
                         help='Reference number (e.g., 0 for timestamp_0.csv)')
 
     args = parser.parse_args()
 
     # Construct paths
     working_dir = Path(args.path)
-    ref = args.reference
+    ref = args.time_reference
 
     timestamp_file = working_dir / 'camera' / f'timestamp_{ref}.csv'
     body_kps_file = working_dir / f'body_kps_{ref}.csv'

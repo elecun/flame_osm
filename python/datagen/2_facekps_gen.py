@@ -249,7 +249,7 @@ def read_timestamps(csv_path: Path) -> List[float]:
 
 def autofill_missing_values(landmarks_sequence: np.ndarray) -> np.ndarray:
     """
-    Fill missing values (NaN) with average of neighboring 5 values.
+    Fill missing values (-1.0) with average of neighboring 5 values.
 
     Args:
         landmarks_sequence: Array of shape (num_frames, num_landmarks, 2 or 3)
@@ -263,24 +263,90 @@ def autofill_missing_values(landmarks_sequence: np.ndarray) -> np.ndarray:
     for lm_idx in range(num_landmarks):
         for coord_idx in range(num_coords):  # x, y or x, y, z
             for frame_idx in range(num_frames):
-                if np.isnan(filled[frame_idx, lm_idx, coord_idx]):
+                if filled[frame_idx, lm_idx, coord_idx] == -1.0:
                     # Get neighboring values within window
                     window_start = max(0, frame_idx - 5)
                     window_end = min(num_frames, frame_idx + 6)
 
                     neighbor_values = []
                     for i in range(window_start, window_end):
-                        if i != frame_idx and not np.isnan(filled[i, lm_idx, coord_idx]):
+                        if i != frame_idx and filled[i, lm_idx, coord_idx] != -1.0:
                             neighbor_values.append(filled[i, lm_idx, coord_idx])
 
                     # Fill with average of neighbors
                     if neighbor_values:
                         filled[frame_idx, lm_idx, coord_idx] = np.mean(neighbor_values)
                     else:
-                        # If no valid neighbors, keep as 0
-                        filled[frame_idx, lm_idx, coord_idx] = 0.0
+                        # If no valid neighbors, keep as -1.0
+                        filled[frame_idx, lm_idx, coord_idx] = -1.0
 
     return filled
+
+
+def calculate_eye_aspect_ratio(landmarks: np.ndarray) -> Tuple[float, float, float]:
+    """
+    Calculate Eye Aspect Ratio (EAR) from face landmarks.
+    Returns left EAR, right EAR, and maximum of the two.
+
+    EAR formula: EAR = (‖p2 - p6‖ + ‖p3 - p5‖) / (2 * ‖p1 - p4‖)
+
+    Left eye: landmarks 36-41 (p1=36, p2=37, p3=38, p4=39, p5=40, p6=41)
+    Right eye: landmarks 42-47 (p1=42, p2=43, p3=44, p4=45, p5=46, p6=47)
+
+    Args:
+        landmarks: Face landmarks array (num_landmarks, 2)
+
+    Returns:
+        Tuple of (left_ear, right_ear, max_ear), or (-1.0, -1.0, -1.0) if landmarks are invalid
+    """
+    # Check if landmarks are valid (not all -1.0)
+    if landmarks is None or np.all(landmarks == -1.0):
+        return -1.0, -1.0, -1.0
+
+    # Left eye: landmarks 36-41
+    # Right eye: landmarks 42-47
+    left_eye_indices = [36, 37, 38, 39, 40, 41]
+    right_eye_indices = [42, 43, 44, 45, 46, 47]
+
+    left_ear = -1.0
+    right_ear = -1.0
+
+    # Calculate left eye EAR
+    if len(landmarks) > max(left_eye_indices):
+        left_eye = landmarks[left_eye_indices]
+        # Check if all left eye landmarks are valid
+        if not np.any(left_eye == -1.0):
+            # EAR = (||p2 - p6|| + ||p3 - p5||) / (2 * ||p1 - p4||)
+            # p1=36(0), p2=37(1), p3=38(2), p4=39(3), p5=40(4), p6=41(5)
+            p1, p2, p3, p4, p5, p6 = left_eye
+            numerator = np.linalg.norm(p2 - p6) + np.linalg.norm(p3 - p5)
+            denominator = 2.0 * np.linalg.norm(p1 - p4)
+            if denominator > 0:
+                left_ear = numerator / denominator
+
+    # Calculate right eye EAR
+    if len(landmarks) > max(right_eye_indices):
+        right_eye = landmarks[right_eye_indices]
+        # Check if all right eye landmarks are valid
+        if not np.any(right_eye == -1.0):
+            # p1=42(0), p2=43(1), p3=44(2), p4=45(3), p5=46(4), p6=47(5)
+            p1, p2, p3, p4, p5, p6 = right_eye
+            numerator = np.linalg.norm(p2 - p6) + np.linalg.norm(p3 - p5)
+            denominator = 2.0 * np.linalg.norm(p1 - p4)
+            if denominator > 0:
+                right_ear = numerator / denominator
+
+    # Calculate maximum of left and right EAR
+    if left_ear == -1.0 and right_ear == -1.0:
+        max_ear = -1.0
+    elif left_ear == -1.0:
+        max_ear = right_ear
+    elif right_ear == -1.0:
+        max_ear = left_ear
+    else:
+        max_ear = max(left_ear, right_ear)
+
+    return left_ear, right_ear, max_ear
 
 
 def visualize_first_frame(frame: np.ndarray, landmarks: np.ndarray, output_path: Path):
@@ -331,14 +397,14 @@ def visualize_first_frame(frame: np.ndarray, landmarks: np.ndarray, output_path:
                 pt2 = landmarks[idx2]
 
                 # Only draw if both points are valid
-                if not (np.isnan(pt1[0]) or np.isnan(pt2[0])):
+                if not (pt1[0] == -1.0 or pt2[0] == -1.0):
                     start_point = (int(pt1[0]), int(pt1[1]))
                     end_point = (int(pt2[0]), int(pt2[1]))
                     cv2.line(vis_frame, start_point, end_point, line_color, line_thickness)
 
     # Draw landmark points on top of lines
     for idx, (x, y) in enumerate(landmarks):
-        if not np.isnan(x):
+        if x != -1.0:
             point = (int(x), int(y))
             # Different colors for different face regions
             if idx < 17:  # Jawline
@@ -389,41 +455,53 @@ def process_video_with_face_alignment(video_path: Path, fa_model_2d: Optional[fa
     cap = cv2.VideoCapture(str(video_path))
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    # Process first frame to determine number of landmarks
-    ret, first_frame = cap.read()
-    if not ret:
-        print(f"  [ERROR] Could not read first frame")
+    # Search for first valid face detection to determine number of landmarks
+    num_landmarks_2d = 0
+    all_landmarks_2d = None
+    num_landmarks_3d = 0
+    all_landmarks_3d = None
+
+    max_search_frames = min(frame_count, 100)  # Search up to 100 frames
+    print(f"  Searching for face in first {max_search_frames} frames...")
+
+    for search_idx in range(max_search_frames):
+        ret, search_frame = cap.read()
+        if not ret:
+            break
+
+        if should_rotate:
+            search_frame = cv2.rotate(search_frame, cv2.ROTATE_90_CLOCKWISE)
+
+        # Try 2D landmarks if not yet determined
+        if fa_model_2d is not None and num_landmarks_2d == 0:
+            search_landmarks_2d = fa_model_2d.get_landmarks(search_frame)
+            if search_landmarks_2d is not None and len(search_landmarks_2d) > 0:
+                num_landmarks_2d = len(search_landmarks_2d[0])
+                print(f"  Detected {num_landmarks_2d} 2D landmarks in frame {search_idx}")
+                all_landmarks_2d = np.full((frame_count, num_landmarks_2d, 2), -1.0)
+
+        # Try 3D landmarks if not yet determined
+        if fa_model_3d is not None and num_landmarks_3d == 0:
+            search_landmarks_3d = fa_model_3d.get_landmarks(search_frame)
+            if search_landmarks_3d is not None and len(search_landmarks_3d) > 0:
+                num_landmarks_3d = len(search_landmarks_3d[0])
+                print(f"  Detected {num_landmarks_3d} 3D landmarks in frame {search_idx}")
+                all_landmarks_3d = np.full((frame_count, num_landmarks_3d, 3), -1.0)
+
+        # If both are determined (or not needed), break
+        if (fa_model_2d is None or num_landmarks_2d > 0) and (fa_model_3d is None or num_landmarks_3d > 0):
+            break
+
+    # Check if any landmarks were detected
+    if fa_model_2d is not None and num_landmarks_2d == 0:
+        print(f"  [ERROR] No face detected in any frame for 2D landmarks")
         cap.release()
         return None, None, 0, 0
 
-    if should_rotate:
-        first_frame = cv2.rotate(first_frame, cv2.ROTATE_90_CLOCKWISE)
-
-    # Detect 2D landmarks if requested
-    num_landmarks_2d = 0
-    all_landmarks_2d = None
-    if fa_model_2d is not None:
-        first_landmarks_2d = fa_model_2d.get_landmarks(first_frame)
-        if first_landmarks_2d is None or len(first_landmarks_2d) == 0:
-            print(f"  [ERROR] No face detected in first frame for 2D landmarks")
-            cap.release()
-            return None, None, 0, 0
-        num_landmarks_2d = len(first_landmarks_2d[0])
-        print(f"  Detected {num_landmarks_2d} 2D landmarks per face")
-        all_landmarks_2d = np.full((frame_count, num_landmarks_2d, 2), np.nan)
-
-    # Detect 3D landmarks if requested
-    num_landmarks_3d = 0
-    all_landmarks_3d = None
-    if fa_model_3d is not None:
-        first_landmarks_3d = fa_model_3d.get_landmarks(first_frame)
-        if first_landmarks_3d is None or len(first_landmarks_3d) == 0:
-            print(f"  [ERROR] No face detected in first frame for 3D landmarks")
-            cap.release()
-            return None, None, 0, 0
-        num_landmarks_3d = len(first_landmarks_3d[0])
-        print(f"  Detected {num_landmarks_3d} 3D landmarks per face")
-        all_landmarks_3d = np.full((frame_count, num_landmarks_3d, 3), np.nan)
+    if fa_model_3d is not None and num_landmarks_3d == 0:
+        print(f"  [ERROR] No face detected in any frame for 3D landmarks")
+        cap.release()
+        return None, None, 0, 0
 
     # Reset video to beginning
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -455,7 +533,7 @@ def process_video_with_face_alignment(video_path: Path, fa_model_2d: Optional[fa
             inference_time_2d = time.time() - start_time
             inference_times_2d.append(inference_time_2d)
 
-            lms_2d = np.full((num_landmarks_2d, 2), np.nan)
+            lms_2d = np.full((num_landmarks_2d, 2), -1.0)
             if landmarks_2d is not None and len(landmarks_2d) > 0:
                 lms_2d = landmarks_2d[0][:num_landmarks_2d]
             all_landmarks_2d[frame_idx] = lms_2d
@@ -468,7 +546,7 @@ def process_video_with_face_alignment(video_path: Path, fa_model_2d: Optional[fa
             inference_time_3d = time.time() - start_time
             inference_times_3d.append(inference_time_3d)
 
-            lms_3d = np.full((num_landmarks_3d, 3), np.nan)
+            lms_3d = np.full((num_landmarks_3d, 3), -1.0)
             if landmarks_3d is not None and len(landmarks_3d) > 0:
                 lms_3d = landmarks_3d[0][:num_landmarks_3d]
             all_landmarks_3d[frame_idx] = lms_3d
@@ -500,6 +578,13 @@ def process_video_with_face_alignment(video_path: Path, fa_model_2d: Optional[fa
                 row.append(x)
                 row.append(y)
                 row.append(z)
+
+        # Add eye aspect ratio if 2D landmarks are available
+        if lms_2d is not None:
+            left_ear, right_ear, max_ear = calculate_eye_aspect_ratio(lms_2d)
+            row.append(left_ear)
+            row.append(right_ear)
+            row.append(max_ear)
 
         csv_writer.writerow(row)
         csv_file.flush()  # Flush to disk immediately
@@ -564,6 +649,12 @@ def generate_csv_header(num_landmarks_2d: int, num_landmarks_3d: int, landmark_t
             header.append(f'{lm_name}_x_3d')
             header.append(f'{lm_name}_y_3d')
             header.append(f'{lm_name}_z_3d')
+
+    # Add eye aspect ratio if 2D landmarks are available
+    if landmark_type in ['2d', 'both'] and num_landmarks_2d > 0:
+        header.append('left_eye_aspect_ratio')
+        header.append('right_eye_aspect_ratio')
+        header.append('eye_aspect_ratio')
 
     return header
 
@@ -711,9 +802,9 @@ def process_single_file(file_path: Path, fa_model_2d: Optional[face_alignment.Fa
                 print(f"Applying autofill to missing values...")
                 total_missing = 0
                 if landmarks_2d is not None:
-                    total_missing += np.isnan(landmarks_2d).sum()
+                    total_missing += (landmarks_2d == -1.0).sum()
                 if landmarks_3d is not None:
-                    total_missing += np.isnan(landmarks_3d).sum()
+                    total_missing += (landmarks_3d == -1.0).sum()
 
                 if total_missing > 0:
                     print(f"  Found {total_missing} missing values")
@@ -987,37 +1078,51 @@ def main():
         if args.check:
             check_output_path = output_directory / f"check_face_{file_id}.jpg"
 
-        # Detect number of landmarks from first frame
+        # Detect number of landmarks from first frames (search up to 100 frames)
         print(f"Detecting number of landmarks...")
         cap = cv2.VideoCapture(str(files['avi']))
-        ret, first_frame = cap.read()
-        cap.release()
-
-        if not ret:
-            print(f"  [ERROR] Could not read video file\n")
-            continue
-
-        if should_rotate:
-            first_frame = cv2.rotate(first_frame, cv2.ROTATE_90_CLOCKWISE)
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
         num_landmarks_2d = 0
         num_landmarks_3d = 0
+        max_search_frames = min(frame_count, 100)
 
-        if fa_model_2d is not None:
-            first_landmarks_2d = fa_model_2d.get_landmarks(first_frame)
-            if first_landmarks_2d is None or len(first_landmarks_2d) == 0:
-                print(f"  [ERROR] No face detected in first frame for 2D, skipping ID {file_id}\n")
-                continue
-            num_landmarks_2d = len(first_landmarks_2d[0])
-            print(f"  Detected {num_landmarks_2d} 2D landmarks")
+        for search_idx in range(max_search_frames):
+            ret, search_frame = cap.read()
+            if not ret:
+                break
 
-        if fa_model_3d is not None:
-            first_landmarks_3d = fa_model_3d.get_landmarks(first_frame)
-            if first_landmarks_3d is None or len(first_landmarks_3d) == 0:
-                print(f"  [ERROR] No face detected in first frame for 3D, skipping ID {file_id}\n")
-                continue
-            num_landmarks_3d = len(first_landmarks_3d[0])
-            print(f"  Detected {num_landmarks_3d} 3D landmarks")
+            if should_rotate:
+                search_frame = cv2.rotate(search_frame, cv2.ROTATE_90_CLOCKWISE)
+
+            # Try 2D landmarks if not yet determined
+            if fa_model_2d is not None and num_landmarks_2d == 0:
+                search_landmarks_2d = fa_model_2d.get_landmarks(search_frame)
+                if search_landmarks_2d is not None and len(search_landmarks_2d) > 0:
+                    num_landmarks_2d = len(search_landmarks_2d[0])
+                    print(f"  Detected {num_landmarks_2d} 2D landmarks in frame {search_idx}")
+
+            # Try 3D landmarks if not yet determined
+            if fa_model_3d is not None and num_landmarks_3d == 0:
+                search_landmarks_3d = fa_model_3d.get_landmarks(search_frame)
+                if search_landmarks_3d is not None and len(search_landmarks_3d) > 0:
+                    num_landmarks_3d = len(search_landmarks_3d[0])
+                    print(f"  Detected {num_landmarks_3d} 3D landmarks in frame {search_idx}")
+
+            # If both are determined (or not needed), break
+            if (fa_model_2d is None or num_landmarks_2d > 0) and (fa_model_3d is None or num_landmarks_3d > 0):
+                break
+
+        cap.release()
+
+        # Check if any landmarks were detected
+        if fa_model_2d is not None and num_landmarks_2d == 0:
+            print(f"  [ERROR] No face detected in any frame for 2D, skipping ID {file_id}\n")
+            continue
+
+        if fa_model_3d is not None and num_landmarks_3d == 0:
+            print(f"  [ERROR] No face detected in any frame for 3D, skipping ID {file_id}\n")
+            continue
 
         print()
 
@@ -1053,10 +1158,10 @@ def main():
 
             total_missing = 0
             if landmarks_2d is not None:
-                missing_2d = np.isnan(landmarks_2d).sum()
+                missing_2d = (landmarks_2d == -1.0).sum()
                 total_missing += missing_2d
             if landmarks_3d is not None:
-                missing_3d = np.isnan(landmarks_3d).sum()
+                missing_3d = (landmarks_3d == -1.0).sum()
                 total_missing += missing_3d
 
             if total_missing > 0:

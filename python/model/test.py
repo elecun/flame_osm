@@ -13,12 +13,16 @@ from model import AttentionSTGCN
 from dataset import AttentionDataset
 
 
-def load_model(checkpoint_path, device='cuda'):
+def load_model(checkpoint_path, feature_dims_path, device='cuda'):
     """Load trained model from checkpoint"""
     checkpoint = torch.load(checkpoint_path, map_location=device)
     config = checkpoint['config']
 
-    model = AttentionSTGCN(config).to(device)
+    # Load feature dimensions
+    with open(feature_dims_path, 'rb') as f:
+        feature_dims = pickle.load(f)
+
+    model = AttentionSTGCN(config, feature_dims).to(device)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
 
@@ -28,7 +32,7 @@ def load_model(checkpoint_path, device='cuda'):
     print(f"Validation MAE: {checkpoint['val_mae']:.4f}")
     print(f"Validation RMSE: {checkpoint['val_rmse']:.4f}")
 
-    return model, config
+    return model, config, feature_dims
 
 
 def test_model(model, test_loader, device='cuda'):
@@ -44,12 +48,11 @@ def test_model(model, test_loader, device='cuda'):
         for batch in tqdm(test_loader, desc='Testing'):
             body_kps = batch['body_kps'].to(device)
             face_kps_2d = batch['face_kps_2d'].to(device)
-            face_kps_3d = batch['face_kps_3d'].to(device)
             head_pose = batch['head_pose'].to(device)
             attention = batch['attention'].to(device)
 
-            # Forward pass
-            outputs = model(body_kps, face_kps_2d, face_kps_3d, head_pose)
+            # Forward pass (no 3D face landmarks)
+            outputs = model(body_kps, face_kps_2d, head_pose)
 
             # Compute loss
             loss = criterion(outputs, attention)
@@ -134,6 +137,8 @@ def main():
                         help='Path to CSV file')
     parser.add_argument('--scaler', type=str, default='checkpoints/scaler.pkl',
                         help='Path to scaler file')
+    parser.add_argument('--feature_dims', type=str, default='checkpoints/feature_dims.pkl',
+                        help='Path to feature dimensions file')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu',
                         help='Device to use for testing')
     parser.add_argument('--output', type=str, default='test_results.png',
@@ -143,7 +148,7 @@ def main():
 
     # Load model
     print("Loading model...")
-    model, config = load_model(args.checkpoint, device=args.device)
+    model, config, feature_dims = load_model(args.checkpoint, args.feature_dims, device=args.device)
 
     # Load scaler
     print("\nLoading scaler...")
@@ -152,6 +157,9 @@ def main():
 
     # Create test dataset
     print("\nCreating test dataset...")
+
+    # Get feature configuration
+    feature_config = config['data'].get('features', None)
 
     # Load full dataset and use last portion as test
     df = pd.read_csv(args.csv)
@@ -173,7 +181,8 @@ def main():
         sequence_length=config['training']['sequence_length'],
         normalize=config['data']['normalize'],
         train=False,
-        scaler=scaler
+        scaler=scaler,
+        feature_config=feature_config
     )
 
     test_loader = torch.utils.data.DataLoader(
