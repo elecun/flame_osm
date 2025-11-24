@@ -6,7 +6,7 @@
     "face_2d_in_channels": 2,
     "head_pose_features": 9,
     "hidden_channels": 64,
-    "num_gcn_layers": 6,
+    "num_gcn_layers": 4,
     "temporal_kernel_size": 9,
     "dropout": 0.3
   },

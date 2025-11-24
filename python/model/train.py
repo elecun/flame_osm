@@ -343,12 +343,22 @@ def train_model(config, csv_file, device='cuda'):
     return model, results
 
 
+def get_default_device():
+    """Get the best available device: CUDA > MPS > CPU"""
+    if torch.cuda.is_available():
+        return 'cuda'
+    elif torch.backends.mps.is_available():
+        return 'mps'
+    else:
+        return 'cpu'
+
+
 def main():
     parser = argparse.ArgumentParser(description='Train STGCN for attention prediction')
     parser.add_argument('--config', type=str, default='config.json', help='Path to config file')
     parser.add_argument('--csv', type=str, default='merge_0.csv', help='Path to CSV file')
-    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu',
-                        help='Device to use for training')
+    parser.add_argument('--device', type=str, default=get_default_device(),
+                        help='Device to use for training (cuda/mps/cpu)')
 
     args = parser.parse_args()
 

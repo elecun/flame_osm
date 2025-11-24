@@ -420,6 +420,21 @@ def match_timestamps_to_fixations_and_saccades(
     k_coefficients_ewma = fixation_zscores_ewma - saccade_zscores_ewma
 
     # ============================================================
+    # Apply additional EWMA smoothing for attention level classification
+    # ============================================================
+    alpha_k = 0.02  # Much slower smoothing for stable attention classification
+    k_smooth = np.zeros(len(results))
+    k_smooth_value = None
+
+    for t in range(len(k_coefficients_ewma)):
+        k_raw = k_coefficients_ewma[t]
+        if k_smooth_value is None:
+            k_smooth_value = k_raw
+        else:
+            k_smooth_value = alpha_k * k_raw + (1 - alpha_k) * k_smooth_value
+        k_smooth[t] = k_smooth_value
+
+    # ============================================================
     # Method 3: MAD (Median Absolute Deviation)
     # ============================================================
     fixation_zscores_mad = np.zeros(len(results))
@@ -462,8 +477,8 @@ def match_timestamps_to_fixations_and_saccades(
             result['k_coefficient_ewma'] = k_coefficients_ewma[i]
             result['k_coefficient_mad'] = k_coefficients_mad[i]
 
-            # Classify attention level based on EWMA K coefficient
-            result['attention_level'] = classify_attention_level(k_coefficients_ewma[i], k1, k2)
+            # Classify attention level based on smoothed K coefficient (k_smooth)
+            result['attention_level'] = classify_attention_level(k_smooth[i], k1, k2)
         else:
             result['k_coefficient_rolling'] = ''
             result['k_coefficient_ewma'] = ''
