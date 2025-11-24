@@ -45,15 +45,15 @@ def train_epoch(model, train_loader, criterion, optimizer, device):
     """Train for one epoch"""
     model.train()
     total_loss = 0.0
-    predictions = []
-    targets = []
+    correct = 0
+    total = 0
 
     pbar = tqdm(train_loader, desc='Training')
     for batch in pbar:
         body_kps = batch['body_kps'].to(device)
         face_kps_2d = batch['face_kps_2d'].to(device)
         head_pose = batch['head_pose'].to(device)
-        attention = batch['attention'].to(device)
+        attention = batch['attention_level'].to(device)
 
         # Forward pass (no 3D face landmarks)
         optimizer.zero_grad()
@@ -67,26 +67,26 @@ def train_epoch(model, train_loader, criterion, optimizer, device):
         optimizer.step()
 
         total_loss += loss.item()
-        predictions.extend(outputs.detach().cpu().numpy())
-        targets.extend(attention.detach().cpu().numpy())
 
-        pbar.set_postfix({'loss': f'{loss.item():.4f}'})
+        # Calculate accuracy
+        _, predicted = torch.max(outputs.data, 1)
+        total += attention.size(0)
+        correct += (predicted == attention).sum().item()
+
+        pbar.set_postfix({'loss': f'{loss.item():.4f}', 'acc': f'{100 * correct / total:.2f}%'})
 
     avg_loss = total_loss / len(train_loader)
-    predictions = np.array(predictions)
-    targets = np.array(targets)
+    accuracy = 100 * correct / total
 
-    # Compute metrics
-    mae = np.mean(np.abs(predictions - targets))
-    rmse = np.sqrt(np.mean((predictions - targets) ** 2))
-
-    return avg_loss, mae, rmse
+    return avg_loss, accuracy
 
 
 def validate_epoch(model, val_loader, criterion, device):
     """Validate for one epoch"""
     model.eval()
     total_loss = 0.0
+    correct = 0
+    total = 0
     predictions = []
     targets = []
 
@@ -95,7 +95,7 @@ def validate_epoch(model, val_loader, criterion, device):
             body_kps = batch['body_kps'].to(device)
             face_kps_2d = batch['face_kps_2d'].to(device)
             head_pose = batch['head_pose'].to(device)
-            attention = batch['attention'].to(device)
+            attention = batch['attention_level'].to(device)
 
             # Forward pass (no 3D face landmarks)
             outputs = model(body_kps, face_kps_2d, head_pose)
@@ -104,23 +104,26 @@ def validate_epoch(model, val_loader, criterion, device):
             loss = criterion(outputs, attention)
 
             total_loss += loss.item()
-            predictions.extend(outputs.cpu().numpy())
+
+            # Calculate accuracy
+            _, predicted = torch.max(outputs.data, 1)
+            total += attention.size(0)
+            correct += (predicted == attention).sum().item()
+
+            predictions.extend(predicted.cpu().numpy())
             targets.extend(attention.cpu().numpy())
 
     avg_loss = total_loss / len(val_loader)
+    accuracy = 100 * correct / total
     predictions = np.array(predictions)
     targets = np.array(targets)
 
-    # Compute metrics
-    mae = np.mean(np.abs(predictions - targets))
-    rmse = np.sqrt(np.mean((predictions - targets) ** 2))
-
-    return avg_loss, mae, rmse, predictions, targets
+    return avg_loss, accuracy, predictions, targets
 
 
 def plot_training_curves(history, save_path):
     """
-    Plot training curves (loss, MAE, RMSE, learning rate)
+    Plot training curves (loss, accuracy, learning rate)
 
     Args:
         history: Dictionary containing training history
@@ -134,36 +137,30 @@ def plot_training_curves(history, save_path):
     axes[0, 0].plot(epochs, history['train_loss'], 'b-', label='Train Loss', linewidth=2)
     axes[0, 0].plot(epochs, history['val_loss'], 'r-', label='Validation Loss', linewidth=2)
     axes[0, 0].set_xlabel('Epoch', fontsize=12)
-    axes[0, 0].set_ylabel('Loss (MSE)', fontsize=12)
+    axes[0, 0].set_ylabel('Loss (CrossEntropy)', fontsize=12)
     axes[0, 0].set_title('Training and Validation Loss', fontsize=14, fontweight='bold')
     axes[0, 0].legend(fontsize=10)
     axes[0, 0].grid(True, alpha=0.3)
 
-    # Plot 2: MAE
-    axes[0, 1].plot(epochs, history['train_mae'], 'b-', label='Train MAE', linewidth=2)
-    axes[0, 1].plot(epochs, history['val_mae'], 'r-', label='Validation MAE', linewidth=2)
+    # Plot 2: Accuracy
+    axes[0, 1].plot(epochs, history['train_acc'], 'b-', label='Train Accuracy', linewidth=2)
+    axes[0, 1].plot(epochs, history['val_acc'], 'r-', label='Validation Accuracy', linewidth=2)
     axes[0, 1].set_xlabel('Epoch', fontsize=12)
-    axes[0, 1].set_ylabel('MAE', fontsize=12)
-    axes[0, 1].set_title('Mean Absolute Error', fontsize=14, fontweight='bold')
+    axes[0, 1].set_ylabel('Accuracy (%)', fontsize=12)
+    axes[0, 1].set_title('Training and Validation Accuracy', fontsize=14, fontweight='bold')
     axes[0, 1].legend(fontsize=10)
     axes[0, 1].grid(True, alpha=0.3)
 
-    # Plot 3: RMSE
-    axes[1, 0].plot(epochs, history['train_rmse'], 'b-', label='Train RMSE', linewidth=2)
-    axes[1, 0].plot(epochs, history['val_rmse'], 'r-', label='Validation RMSE', linewidth=2)
+    # Plot 3: Learning Rate
+    axes[1, 0].plot(epochs, history['learning_rate'], 'g-', linewidth=2)
     axes[1, 0].set_xlabel('Epoch', fontsize=12)
-    axes[1, 0].set_ylabel('RMSE', fontsize=12)
-    axes[1, 0].set_title('Root Mean Squared Error', fontsize=14, fontweight='bold')
-    axes[1, 0].legend(fontsize=10)
+    axes[1, 0].set_ylabel('Learning Rate', fontsize=12)
+    axes[1, 0].set_title('Learning Rate Schedule', fontsize=14, fontweight='bold')
+    axes[1, 0].set_yscale('log')
     axes[1, 0].grid(True, alpha=0.3)
 
-    # Plot 4: Learning Rate
-    axes[1, 1].plot(epochs, history['learning_rate'], 'g-', linewidth=2)
-    axes[1, 1].set_xlabel('Epoch', fontsize=12)
-    axes[1, 1].set_ylabel('Learning Rate', fontsize=12)
-    axes[1, 1].set_title('Learning Rate Schedule', fontsize=14, fontweight='bold')
-    axes[1, 1].set_yscale('log')
-    axes[1, 1].grid(True, alpha=0.3)
+    # Plot 4: Empty (reserved for future use)
+    axes[1, 1].axis('off')
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
@@ -209,8 +206,8 @@ def train_model(config, csv_file, device='cuda'):
     print(f"Total parameters: {total_params:,}")
     print(f"Trainable parameters: {trainable_params:,}")
 
-    # Loss and optimizer
-    criterion = nn.MSELoss()
+    # Loss and optimizer (CrossEntropyLoss for classification)
+    criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(
         model.parameters(),
         lr=config['training']['learning_rate'],
@@ -239,10 +236,8 @@ def train_model(config, csv_file, device='cuda'):
     history = {
         'train_loss': [],
         'val_loss': [],
-        'train_mae': [],
-        'val_mae': [],
-        'train_rmse': [],
-        'val_rmse': [],
+        'train_acc': [],
+        'val_acc': [],
         'learning_rate': []
     }
 
@@ -255,12 +250,12 @@ def train_model(config, csv_file, device='cuda'):
         print("-" * 50)
 
         # Train
-        train_loss, train_mae, train_rmse = train_epoch(
+        train_loss, train_acc = train_epoch(
             model, train_loader, criterion, optimizer, device
         )
 
         # Validate
-        val_loss, val_mae, val_rmse, val_preds, val_targets = validate_epoch(
+        val_loss, val_acc, val_preds, val_targets = validate_epoch(
             model, val_loader, criterion, device
         )
 
@@ -273,23 +268,19 @@ def train_model(config, csv_file, device='cuda'):
         # Record history (convert to Python native types for JSON serialization)
         history['train_loss'].append(float(train_loss))
         history['val_loss'].append(float(val_loss))
-        history['train_mae'].append(float(train_mae))
-        history['val_mae'].append(float(val_mae))
-        history['train_rmse'].append(float(train_rmse))
-        history['val_rmse'].append(float(val_rmse))
+        history['train_acc'].append(float(train_acc))
+        history['val_acc'].append(float(val_acc))
         history['learning_rate'].append(float(current_lr))
 
         # Log metrics
         writer.add_scalar('Loss/train', train_loss, epoch)
         writer.add_scalar('Loss/val', val_loss, epoch)
-        writer.add_scalar('MAE/train', train_mae, epoch)
-        writer.add_scalar('MAE/val', val_mae, epoch)
-        writer.add_scalar('RMSE/train', train_rmse, epoch)
-        writer.add_scalar('RMSE/val', val_rmse, epoch)
+        writer.add_scalar('Accuracy/train', train_acc, epoch)
+        writer.add_scalar('Accuracy/val', val_acc, epoch)
         writer.add_scalar('LR', current_lr, epoch)
 
-        print(f"Train Loss: {train_loss:.4f}, MAE: {train_mae:.4f}, RMSE: {train_rmse:.4f}")
-        print(f"Val   Loss: {val_loss:.4f}, MAE: {val_mae:.4f}, RMSE: {val_rmse:.4f}")
+        print(f"Train Loss: {train_loss:.4f}, Accuracy: {train_acc:.2f}%")
+        print(f"Val   Loss: {val_loss:.4f}, Accuracy: {val_acc:.2f}%")
         print()
 
         # Save best model
@@ -301,8 +292,7 @@ def train_model(config, csv_file, device='cuda'):
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                     'val_loss': float(val_loss),
-                    'val_mae': float(val_mae),
-                    'val_rmse': float(val_rmse),
+                    'val_acc': float(val_acc),
                     'config': config
                 }
                 model_path = os.path.join(config['output']['model_save_path'], 'best_model.pth')
@@ -318,11 +308,11 @@ def train_model(config, csv_file, device='cuda'):
 
     # Test on test set
     print("\nEvaluating on test set...")
-    test_loss, test_mae, test_rmse, test_preds, test_targets = validate_epoch(
+    test_loss, test_acc, test_preds, test_targets = validate_epoch(
         model, test_loader, criterion, device
     )
 
-    print(f"Test Loss: {test_loss:.4f}, MAE: {test_mae:.4f}, RMSE: {test_rmse:.4f}")
+    print(f"Test Loss: {test_loss:.4f}, Accuracy: {test_acc:.2f}%")
 
     # Plot training curves
     print("\nGenerating training curves...")
@@ -338,8 +328,7 @@ def train_model(config, csv_file, device='cuda'):
     # Save final results (convert to Python native types for JSON serialization)
     results = {
         'test_loss': float(test_loss),
-        'test_mae': float(test_mae),
-        'test_rmse': float(test_rmse),
+        'test_acc': float(test_acc),
         'best_val_loss': float(best_val_loss)
     }
 
@@ -372,8 +361,7 @@ def main():
 
     print("\nTraining completed!")
     print(f"Best validation loss: {results['best_val_loss']:.4f}")
-    print(f"Test MAE: {results['test_mae']:.4f}")
-    print(f"Test RMSE: {results['test_rmse']:.4f}")
+    print(f"Test Accuracy: {results['test_acc']:.2f}%")
 
 
 if __name__ == '__main__':

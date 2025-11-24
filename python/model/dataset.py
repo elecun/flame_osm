@@ -62,7 +62,7 @@ class AttentionDataset(Dataset):
         if self.use_body:
             self.body_cols = [col for col in combined_df.columns if any(
                 joint in col for joint in feature_config['body_pattern']
-            )]
+            ) and '_aspect_ratio' not in col]
         else:
             self.body_cols = []
 
@@ -94,8 +94,8 @@ class AttentionDataset(Dataset):
         else:
             self.head_pose_data = np.zeros((len(combined_df), 0), dtype=np.float32)
 
-        # Extract target (attention)
-        self.attention = combined_df['attention'].values.astype(np.float32)
+        # Extract target (attention) - convert 1,2,3,4,5 to 0,1,2,3,4 for classification
+        self.attention = (combined_df['attention_level'].values - 1).astype(np.int64)
 
         # Normalize features
         if normalize:
@@ -202,13 +202,13 @@ class AttentionDataset(Dataset):
         head_pose_seq = torch.from_numpy(self.head_pose_data[start_idx:end_idx])
 
         # Get target (use last frame's attention value)
-        attention = torch.tensor(self.attention[end_idx - 1], dtype=torch.float32)
+        attention = torch.tensor(self.attention[end_idx - 1], dtype=torch.long)
 
         return {
             'body_kps': body_seq,
             'face_kps_2d': face_2d_seq,
             'head_pose': head_pose_seq,
-            'attention': attention
+            'attention_level': attention
         }
 
     def get_scaler(self):
@@ -443,6 +443,6 @@ if __name__ == '__main__':
         print(f"  Body keypoints: {batch['body_kps'].shape}")
         print(f"  Face keypoints 2D: {batch['face_kps_2d'].shape}")
         print(f"  Head pose: {batch['head_pose'].shape}")
-        print(f"  Attention: {batch['attention'].shape}")
-        print(f"  Attention range: [{batch['attention'].min():.3f}, {batch['attention'].max():.3f}]")
+        print(f"  Attention_level: {batch['attention_level'].shape}")
+        print(f"  Attention range: [{batch['attention_level'].min():.3f}, {batch['attention_level'].max():.3f}]")
         break

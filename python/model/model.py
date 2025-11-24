@@ -255,7 +255,7 @@ class AttentionSTGCN(nn.Module):
         if total_features == 0:
             raise ValueError("At least one feature type must be enabled")
 
-        # Fusion and prediction layers
+        # Fusion and prediction layers (5-class classification)
         self.fusion = nn.Sequential(
             nn.Linear(total_features, hidden_channels * 4),
             nn.ReLU(),
@@ -266,8 +266,7 @@ class AttentionSTGCN(nn.Module):
             nn.Linear(hidden_channels * 2, hidden_channels),
             nn.ReLU(),
             nn.Dropout(model_cfg['dropout']),
-            nn.Linear(hidden_channels, 1),
-            nn.Sigmoid()  # Output between 0 and 1
+            nn.Linear(hidden_channels, 5)  # 5 classes: 1,2,3,4,5
         )
 
     def _create_body_adjacency(self):
@@ -434,10 +433,10 @@ class AttentionSTGCN(nn.Module):
 
         combined = torch.cat(features_list, dim=-1)
 
-        # Predict attention
-        attention = self.fusion(combined)
+        # Predict attention (logits for 5 classes)
+        attention_logits = self.fusion(combined)
 
-        return attention.squeeze(-1)
+        return attention_logits
 
 
 def load_config(config_path):

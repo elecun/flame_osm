@@ -461,6 +461,7 @@ def process_video_with_gaze(video_path: Path, timestamps: List[float], csv_file,
     inference_times = []
 
     frame_idx = 0
+    batch_start_time = time.time()
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
@@ -503,7 +504,9 @@ def process_video_with_gaze(video_path: Path, timestamps: List[float], csv_file,
                 visualize_gaze(frame, face, left_eye, right_eye, pitch, yaw, check_output_path)
 
         if (frame_idx + 1) % 100 == 0:
-            print(f"  Processed {frame_idx + 1}/{frame_count} frames")
+            batch_time = (time.time() - batch_start_time) * 1000
+            print(f"  Processed {frame_idx + 1}/{frame_count} frames ({batch_time:.2f}ms)")
+            batch_start_time = time.time()
 
         frame_idx += 1
 
@@ -654,6 +657,7 @@ def process_single_file(video_path: Path, output_path: Path,
             inference_times = []
 
             frame_idx = 0
+            batch_start_time = time.time()
             while cap.isOpened():
                 ret, frame = cap.read()
                 if not ret:
@@ -696,7 +700,9 @@ def process_single_file(video_path: Path, output_path: Path,
                         visualize_gaze(frame, face, left_eye, right_eye, pitch, yaw, check_output_path)
 
                 if (frame_idx + 1) % 100 == 0:
-                    print(f"  Processed {frame_idx + 1}/{frame_count} frames")
+                    batch_time = (time.time() - batch_start_time) * 1000
+                    print(f"  Processed {frame_idx + 1}/{frame_count} frames ({batch_time:.2f}ms)")
+                    batch_start_time = time.time()
 
                 frame_idx += 1
 

@@ -94,7 +94,7 @@ def main():
     face_kps_file = working_dir / f'face_kps_{ref}.csv'
     head_pose_file = working_dir / f'head_pose_{ref}.csv'
     eeg_performance_file = working_dir / 'eeg_performance.csv'
-    eyetracker_attention_file = working_dir / 'eyetracker_attention.csv'
+    eyetracker_attention_file = working_dir / 'eyetrack_attention.csv'
     output_file = working_dir / f'merge_{ref}.csv'
 
     print(f"Working directory: {working_dir}")
