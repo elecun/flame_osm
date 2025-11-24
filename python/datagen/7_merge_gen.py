@@ -51,7 +51,7 @@ def check_row_counts(dataframes, file_names):
         return False
 
 
-def merge_dataframes(timestamp_df, body_kps_df, face_kps_df, head_pose_df, eeg_performance_df):
+def merge_dataframes(timestamp_df, body_kps_df, face_kps_df, head_pose_df, eeg_performance_df, eyetracker_attention_df):
     """
     Merge all dataframes by concatenating columns
     Assumes all dataframes have the same number of rows
@@ -61,6 +61,7 @@ def merge_dataframes(timestamp_df, body_kps_df, face_kps_df, head_pose_df, eeg_p
     face_kps_clean = face_kps_df[[col for col in face_kps_df.columns if col.lower() != 'timestamp']]
     head_pose_clean = head_pose_df[[col for col in head_pose_df.columns if col.lower() != 'timestamp']]
     eeg_performance_clean = eeg_performance_df[[col for col in eeg_performance_df.columns if col.lower() != 'timestamp']]
+    eyetracker_attention_clean = eyetracker_attention_df[[col for col in eyetracker_attention_df.columns if col.lower() != 'timestamp']]
 
     # Concatenate all dataframes at once for better performance
     merged_df = pd.concat([
@@ -68,7 +69,8 @@ def merge_dataframes(timestamp_df, body_kps_df, face_kps_df, head_pose_df, eeg_p
         body_kps_clean,
         face_kps_clean,
         head_pose_clean,
-        eeg_performance_clean
+        eeg_performance_clean,
+        eyetracker_attention_clean
     ], axis=1)
 
     return merged_df
@@ -92,6 +94,7 @@ def main():
     face_kps_file = working_dir / f'face_kps_{ref}.csv'
     head_pose_file = working_dir / f'head_pose_{ref}.csv'
     eeg_performance_file = working_dir / 'eeg_performance.csv'
+    eyetracker_attention_file = working_dir / 'eyetracker_attention.csv'
     output_file = working_dir / f'merge_{ref}.csv'
 
     print(f"Working directory: {working_dir}")
@@ -108,6 +111,7 @@ def main():
         face_kps_df = load_csv_file(face_kps_file, f"face_kps_{ref}.csv")
         head_pose_df = load_csv_file(head_pose_file, f"head_pose_{ref}.csv")
         eeg_performance_df = load_csv_file(eeg_performance_file, "eeg_performance.csv")
+        eyetracker_attention_df = load_csv_file(eyetracker_attention_file, "eyetracker_attention.csv")
     except FileNotFoundError as e:
         print(f"\nError: {e}")
         return
@@ -116,13 +120,14 @@ def main():
     print()
     print("Step 2: Validating row counts...")
 
-    dataframes = [timestamp_df, body_kps_df, face_kps_df, head_pose_df, eeg_performance_df]
+    dataframes = [timestamp_df, body_kps_df, face_kps_df, head_pose_df, eeg_performance_df, eyetracker_attention_df]
     file_names = [
         f'timestamp_{ref}.csv',
         f'body_kps_{ref}.csv',
         f'face_kps_{ref}.csv',
         f'head_pose_{ref}.csv',
-        'eeg_performance.csv'
+        'eeg_performance.csv',
+        'eyetracker_attention.csv'
     ]
 
     if not check_row_counts(dataframes, file_names):
@@ -132,7 +137,7 @@ def main():
     # Merge dataframes
     print()
     print("Step 3: Merging dataframes...")
-    merged_df = merge_dataframes(timestamp_df, body_kps_df, face_kps_df, head_pose_df, eeg_performance_df)
+    merged_df = merge_dataframes(timestamp_df, body_kps_df, face_kps_df, head_pose_df, eeg_performance_df, eyetracker_attention_df)
     print(f"Merged dataframe has {len(merged_df)} rows and {len(merged_df.columns)} columns")
     print()
 

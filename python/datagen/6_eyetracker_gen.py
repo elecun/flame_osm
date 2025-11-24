@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-Eye Tracker Data K Coefficient Generator
+Eye Tracker Data Fixation and Saccade Mapper
 
-This script processes eye tracker data and calculates K coefficients based on gaze stability.
+This script maps camera timestamps to eye tracker fixation IDs and saccade amplitudes.
+For each camera timestamp, it checks if the timestamp falls within any fixation or saccade period
+and records the corresponding fixation ID and/or saccade amplitude.
 """
 
 import argparse
@@ -10,10 +12,32 @@ import csv
 import sys
 from pathlib import Path
 import numpy as np
-from typing import Tuple
+from typing import List, Dict
+from dataclasses import dataclass
 
 
-def load_time_reference(base_path: Path, time_reference_id: int) -> Tuple[float, float]:
+@dataclass
+class Fixation:
+    """Fixation data from eye tracker"""
+    fixation_id: int
+    start_timestamp_ns: int
+    end_timestamp_ns: int
+    duration_ms: float
+    fixation_x: float
+    fixation_y: float
+
+
+@dataclass
+class Saccade:
+    """Saccade data from eye tracker"""
+    saccade_id: int
+    start_timestamp_ns: int
+    end_timestamp_ns: int
+    duration_ms: float
+    amplitude_deg: float
+
+
+def load_time_reference(base_path: Path, time_reference_id: int) -> np.ndarray:
     """
     Load time reference from camera/timestamp_{id}.csv
 
@@ -22,7 +46,7 @@ def load_time_reference(base_path: Path, time_reference_id: int) -> Tuple[float,
         time_reference_id: ID for the timestamp file (e.g., 0 for timestamp_0.csv)
 
     Returns:
-        Tuple of (start_time_sec, end_time_sec)
+        Array of timestamps in seconds
     """
     timestamp_file = base_path / "camera" / f"timestamp_{time_reference_id}.csv"
 
@@ -39,8 +63,7 @@ def load_time_reference(base_path: Path, time_reference_id: int) -> Tuple[float,
     if not timestamps:
         raise ValueError(f"No timestamps found in timestamp_{time_reference_id}.csv")
 
-    # Return start and end times in seconds
-    return min(timestamps), max(timestamps)
+    return np.array(timestamps)
 
 
 def find_eyetracker_data_dir(base_path: Path) -> Path:
@@ -69,137 +92,391 @@ def find_eyetracker_data_dir(base_path: Path) -> Path:
     return subdirs[0]
 
 
-def load_gaze_data(data_dir: Path) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def load_fixations(data_dir: Path) -> List[Fixation]:
     """
-    Load gaze data from gaze.csv
+    Load fixation data from fixations.csv
 
     Args:
         data_dir: Directory containing eyetracker CSV files
 
     Returns:
-        Tuple of (timestamps_ns, gaze_x, gaze_y)
+        List of Fixation objects
     """
-    gaze_file = data_dir / "gaze.csv"
+    fixations_file = data_dir / "fixations.csv"
 
-    if not gaze_file.exists():
-        raise FileNotFoundError(f"Gaze data file not found: {gaze_file}")
+    if not fixations_file.exists():
+        raise FileNotFoundError(f"Fixations data file not found: {fixations_file}")
 
-    timestamps = []
-    gaze_x = []
-    gaze_y = []
+    fixations = []
 
-    with open(gaze_file, 'r') as f:
+    with open(fixations_file, 'r') as f:
         reader = csv.DictReader(f)
         for row in reader:
             try:
-                timestamps.append(int(row['timestamp [ns]']))
-                gaze_x.append(float(row['gaze x [px]']))
-                gaze_y.append(float(row['gaze y [px]']))
+                fixation_id = int(row['fixation id'])
+                start_timestamp_ns = int(row['start timestamp [ns]'])
+                end_timestamp_ns = int(row['end timestamp [ns]'])
+                duration_ms = float(row['duration [ms]'])
+                fixation_x = float(row['fixation x [px]'])
+                fixation_y = float(row['fixation y [px]'])
+
+                fixations.append(Fixation(
+                    fixation_id=fixation_id,
+                    start_timestamp_ns=start_timestamp_ns,
+                    end_timestamp_ns=end_timestamp_ns,
+                    duration_ms=duration_ms,
+                    fixation_x=fixation_x,
+                    fixation_y=fixation_y
+                ))
             except (ValueError, KeyError) as e:
-                print(f"Warning: Skipping invalid row: {e}")
+                print(f"Warning: Skipping invalid fixation row: {e}")
                 continue
 
-    return np.array(timestamps), np.array(gaze_x), np.array(gaze_y)
+    return fixations
 
 
-def filter_data_by_time_range(timestamps_ns: np.ndarray,
-                               gaze_x: np.ndarray,
-                               gaze_y: np.ndarray,
-                               start_time_sec: float,
-                               end_time_sec: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def load_saccades(data_dir: Path) -> List[Saccade]:
     """
-    Filter gaze data to only include samples within the time reference range
+    Load saccade data from saccades.csv
 
     Args:
-        timestamps_ns: Timestamps in nanoseconds
-        gaze_x: Gaze X coordinates
-        gaze_y: Gaze Y coordinates
-        start_time_sec: Start time in seconds
-        end_time_sec: End time in seconds
+        data_dir: Directory containing eyetracker CSV files
 
     Returns:
-        Filtered (timestamps_ns, gaze_x, gaze_y)
+        List of Saccade objects
     """
-    # Convert nanoseconds to seconds for comparison
-    timestamps_sec = timestamps_ns / 1e9
+    saccades_file = data_dir / "saccades.csv"
 
-    # Create mask for timestamps within range
-    mask = (timestamps_sec >= start_time_sec) & (timestamps_sec <= end_time_sec)
+    if not saccades_file.exists():
+        raise FileNotFoundError(f"Saccades data file not found: {saccades_file}")
 
-    return timestamps_ns[mask], gaze_x[mask], gaze_y[mask]
+    saccades = []
+
+    with open(saccades_file, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            try:
+                saccade_id = int(row['saccade id'])
+                start_timestamp_ns = int(row['start timestamp [ns]'])
+                end_timestamp_ns = int(row['end timestamp [ns]'])
+                duration_ms = float(row['duration [ms]'])
+                amplitude_deg = float(row['amplitude [deg]'])
+
+                saccades.append(Saccade(
+                    saccade_id=saccade_id,
+                    start_timestamp_ns=start_timestamp_ns,
+                    end_timestamp_ns=end_timestamp_ns,
+                    duration_ms=duration_ms,
+                    amplitude_deg=amplitude_deg
+                ))
+            except (ValueError, KeyError) as e:
+                print(f"Warning: Skipping invalid saccade row: {e}")
+                continue
+
+    return saccades
 
 
-def calculate_k_coefficient(gaze_x: np.ndarray, gaze_y: np.ndarray) -> dict:
+def classify_attention_level(k_coefficient: float, k1: float, k2: float) -> int:
     """
-    Calculate K coefficient and related metrics for gaze stability
-
-    K coefficient measures the stability of gaze points:
-    - Lower K coefficient indicates more stable gaze (fixation)
-    - Higher K coefficient indicates more scattered gaze (saccades/pursuit)
+    Classify K coefficient into attention level (1-5)
 
     Args:
-        gaze_x: Array of gaze X coordinates in pixels
-        gaze_y: Array of gaze Y coordinates in pixels
+        k_coefficient: K coefficient value (EWMA)
+        k1: First threshold (weak attention boundary)
+        k2: Second threshold (strong attention boundary)
 
     Returns:
-        Dictionary containing K coefficient and related metrics
+        Attention level:
+        1 = Strong Ambient Attention (k <= -k2)
+        2 = Weak Ambient Attention (-k2 < k <= -k1)
+        3 = Neutral (-k1 < k < +k1)
+        4 = Weak Focal Attention (+k1 <= k < +k2)
+        5 = Strong Focal Attention (k >= +k2)
     """
-    if len(gaze_x) == 0 or len(gaze_y) == 0:
-        return {
-            'k_coefficient': None,
-            'std_x': None,
-            'std_y': None,
-            'mean_x': None,
-            'mean_y': None,
-            'dispersion': None,
-            'n_samples': 0
-        }
-
-    # Calculate basic statistics
-    mean_x = np.mean(gaze_x)
-    mean_y = np.mean(gaze_y)
-    std_x = np.std(gaze_x)
-    std_y = np.std(gaze_y)
-
-    # Calculate dispersion (spread of gaze points)
-    dispersion = np.sqrt(std_x**2 + std_y**2)
-
-    # K coefficient is typically defined as the normalized dispersion
-    # We use the coefficient of variation (CV) as the K coefficient
-    # CV = std / mean, but for 2D gaze we use dispersion / distance from origin
-    distance_from_origin = np.sqrt(mean_x**2 + mean_y**2)
-
-    if distance_from_origin > 0:
-        k_coefficient = dispersion / distance_from_origin
+    if k_coefficient >= k2:
+        return 5  # Strong Focal Attention
+    elif k_coefficient >= k1:
+        return 4  # Weak Focal Attention
+    elif k_coefficient > -k1:
+        return 3  # Neutral
+    elif k_coefficient > -k2:
+        return 2  # Weak Ambient Attention
     else:
-        # If mean is at origin, use absolute dispersion
-        k_coefficient = dispersion
+        return 1  # Strong Ambient Attention
 
-    # Alternative K coefficient based on median absolute deviation
-    median_x = np.median(gaze_x)
-    median_y = np.median(gaze_y)
-    mad_x = np.median(np.abs(gaze_x - median_x))
-    mad_y = np.median(np.abs(gaze_y - median_y))
-    mad_dispersion = np.sqrt(mad_x**2 + mad_y**2)
 
-    return {
-        'k_coefficient': k_coefficient,
-        'k_coefficient_mad': mad_dispersion,
-        'std_x': std_x,
-        'std_y': std_y,
-        'mean_x': mean_x,
-        'mean_y': mean_y,
-        'median_x': median_x,
-        'median_y': median_y,
-        'dispersion': dispersion,
-        'mad_dispersion': mad_dispersion,
-        'n_samples': len(gaze_x)
-    }
+def match_timestamps_to_fixations_and_saccades(
+    time_references: np.ndarray,
+    fixations: List[Fixation],
+    saccades: List[Saccade],
+    window_size: int = 10,
+    k1: float = 0.5,
+    k2: float = 1.5
+) -> List[Dict]:
+    """
+    Match camera timestamps to fixation IDs and saccade data, and calculate K coefficient
+    using three different methods: Rolling Z-score, EWMA Z-score, and MAD.
+
+    For each camera timestamp, find if it falls within any fixation or saccade period
+    and record the fixation ID and/or saccade ID and amplitude.
+
+    Calculate K coefficient using three methods:
+    1. Rolling Z-score: Standard z-score using mean and std from rolling window
+    2. EWMA Z-score: Z-score using exponentially weighted moving average and std
+    3. MAD: Median Absolute Deviation based score
+
+    Also classify attention level (1-5) based on EWMA K coefficient:
+    1 = Strong Ambient Attention, 2 = Weak Ambient, 3 = Neutral, 4 = Weak Focal, 5 = Strong Focal
+
+    Args:
+        time_references: Array of camera timestamps in seconds
+        fixations: List of Fixation objects
+        saccades: List of Saccade objects
+        window_size: Number of past timestamps to consider for K calculation
+        k1: First threshold for attention level classification (default: 0.5)
+        k2: Second threshold for attention level classification (default: 1.5)
+
+    Returns:
+        List of dictionaries with timestamp, fixation_id, saccade_id, saccade_amplitude_deg,
+        k_coefficient_rolling, k_coefficient_ewma, k_coefficient_mad, attention_level
+    """
+    # Create fixation and saccade lookup dictionaries
+    fixation_dict = {f.fixation_id: f for f in fixations}
+
+    results = []
+
+    for i, timestamp_sec in enumerate(time_references):
+        # Convert timestamp from seconds to nanoseconds
+        timestamp_ns = int(timestamp_sec * 1e9)
+
+        # Find matching fixation
+        matched_fixation_id = None
+        for fixation in fixations:
+            if fixation.start_timestamp_ns <= timestamp_ns <= fixation.end_timestamp_ns:
+                matched_fixation_id = fixation.fixation_id
+                break
+
+        # Find matching saccade
+        matched_saccade_id = None
+        matched_saccade_amplitude = None
+        for saccade in saccades:
+            if saccade.start_timestamp_ns <= timestamp_ns <= saccade.end_timestamp_ns:
+                matched_saccade_id = saccade.saccade_id
+                matched_saccade_amplitude = saccade.amplitude_deg
+                break
+
+        results.append({
+            'timestamp': timestamp_sec,
+            'fixation_id': matched_fixation_id if matched_fixation_id is not None else '',
+            'saccade_id': matched_saccade_id if matched_saccade_id is not None else '',
+            'saccade_amplitude_deg': matched_saccade_amplitude if matched_saccade_amplitude is not None else ''
+        })
+
+    # Calculate fixation duration and saccade amplitude for each window
+    fixation_durations_mean = []
+    fixation_durations_std = []
+    saccade_amplitudes_mean = []
+    saccade_amplitudes_std = []
+
+    for i in range(len(results)):
+        # Get window indices (current timestamp and past window_size-1 timestamps)
+        window_start = max(0, i - window_size + 1)
+        window_end = i + 1
+        window_results = results[window_start:window_end]
+
+        if len(window_results) < window_size:
+            # Not enough data, set to 0
+            fixation_durations_mean.append(0.0)
+            fixation_durations_std.append(0.0)
+            saccade_amplitudes_mean.append(0.0)
+            saccade_amplitudes_std.append(0.0)
+        else:
+            # Calculate fixation duration: total duration divided by number of segments
+            unique_fixation_ids = set()
+            for r in window_results:
+                if r['fixation_id'] != '':
+                    unique_fixation_ids.add(r['fixation_id'])
+
+            if unique_fixation_ids:
+                # Sum all fixation durations and divide by the number of segments
+                total_duration = sum(fixation_dict[fid].duration_ms / 1000.0 for fid in unique_fixation_ids)
+                num_segments = len(unique_fixation_ids)
+                fixation_duration = total_duration / num_segments
+
+                # Store the calculated fixation duration (total/segments)
+                fixation_durations_mean.append(fixation_duration)
+
+                # Calculate std deviation based on individual fixation durations
+                fixation_durs = [fixation_dict[fid].duration_ms / 1000.0 for fid in unique_fixation_ids]
+                fixation_durations_std.append(np.std(fixation_durs) if len(fixation_durs) > 1 else 0.0)
+            else:
+                fixation_durations_mean.append(0.0)
+                fixation_durations_std.append(0.0)
+
+            # Calculate saccade amplitude: mean and std of amplitudes in window
+            saccade_amps = [
+                r['saccade_amplitude_deg']
+                for r in window_results
+                if r['saccade_amplitude_deg'] != ''
+            ]
+            if saccade_amps:
+                saccade_amplitudes_mean.append(np.mean(saccade_amps))
+                # Calculate std deviation of saccade amplitudes
+                saccade_amplitudes_std.append(np.std(saccade_amps) if len(saccade_amps) > 1 else 0.0)
+            else:
+                saccade_amplitudes_mean.append(0.0)
+                saccade_amplitudes_std.append(0.0)
+
+    # Convert to numpy arrays for calculations
+    fixation_durations_arr = np.array(fixation_durations_mean)
+    saccade_amplitudes_arr = np.array(saccade_amplitudes_mean)
+
+    # Initialize K coefficient arrays for three methods
+    k_coefficients_rolling = np.zeros(len(results))
+    k_coefficients_ewma = np.zeros(len(results))
+    k_coefficients_mad = np.zeros(len(results))
+
+    # ============================================================
+    # Method 1: Rolling Z-score
+    # ============================================================
+    fixation_zscores_rolling = np.zeros(len(results))
+    saccade_zscores_rolling = np.zeros(len(results))
+
+    for i in range(len(results)):
+        if fixation_durations_arr[i] > 0:
+            # Get non-zero values in the current window
+            non_zero_fix = fixation_durations_arr[max(0, i - window_size + 1):i + 1]
+            non_zero_fix = non_zero_fix[non_zero_fix > 0]
+
+            non_zero_sac = saccade_amplitudes_arr[max(0, i - window_size + 1):i + 1]
+            non_zero_sac = non_zero_sac[non_zero_sac > 0]
+
+            if len(non_zero_fix) > 1:
+                fix_mean = np.mean(non_zero_fix)
+                fix_std = np.std(non_zero_fix)
+                if fix_std > 0:
+                    fixation_zscores_rolling[i] = (fixation_durations_arr[i] - fix_mean) / fix_std
+
+            if len(non_zero_sac) > 1:
+                sac_mean = np.mean(non_zero_sac)
+                sac_std = np.std(non_zero_sac)
+                if sac_std > 0:
+                    saccade_zscores_rolling[i] = (saccade_amplitudes_arr[i] - sac_mean) / sac_std
+
+    k_coefficients_rolling = fixation_zscores_rolling - saccade_zscores_rolling
+
+    # ============================================================
+    # Method 2: EWMA Z-score (Exponentially Weighted Moving Average)
+    # ============================================================
+    # Using span parameter for decay (span = 2/(alpha+1) - 1, so alpha = 2/(span+1))
+    span = min(window_size, 10)  # Use smaller span for more responsiveness
+    alpha = 2.0 / (span + 1)
+
+    fixation_zscores_ewma = np.zeros(len(results))
+    saccade_zscores_ewma = np.zeros(len(results))
+
+    # Initialize EWMA values
+    ewma_fix_mean = 0.0
+    ewma_fix_var = 0.0
+    ewma_sac_mean = 0.0
+    ewma_sac_var = 0.0
+    initialized_fix = False
+    initialized_sac = False
+
+    for i in range(len(results)):
+        current_fix = fixation_durations_arr[i]
+        current_sac = saccade_amplitudes_arr[i]
+
+        # Update EWMA for fixation
+        if current_fix > 0:
+            if not initialized_fix:
+                ewma_fix_mean = current_fix
+                ewma_fix_var = 0.0
+                initialized_fix = True
+            else:
+                delta = current_fix - ewma_fix_mean
+                ewma_fix_mean = alpha * current_fix + (1 - alpha) * ewma_fix_mean
+                ewma_fix_var = (1 - alpha) * (ewma_fix_var + alpha * delta * delta)
+
+                ewma_fix_std = np.sqrt(ewma_fix_var)
+                if ewma_fix_std > 0:
+                    fixation_zscores_ewma[i] = (current_fix - ewma_fix_mean) / ewma_fix_std
+
+        # Update EWMA for saccade
+        if current_sac > 0:
+            if not initialized_sac:
+                ewma_sac_mean = current_sac
+                ewma_sac_var = 0.0
+                initialized_sac = True
+            else:
+                delta = current_sac - ewma_sac_mean
+                ewma_sac_mean = alpha * current_sac + (1 - alpha) * ewma_sac_mean
+                ewma_sac_var = (1 - alpha) * (ewma_sac_var + alpha * delta * delta)
+
+                ewma_sac_std = np.sqrt(ewma_sac_var)
+                if ewma_sac_std > 0:
+                    saccade_zscores_ewma[i] = (current_sac - ewma_sac_mean) / ewma_sac_std
+
+    k_coefficients_ewma = fixation_zscores_ewma - saccade_zscores_ewma
+
+    # ============================================================
+    # Method 3: MAD (Median Absolute Deviation)
+    # ============================================================
+    fixation_zscores_mad = np.zeros(len(results))
+    saccade_zscores_mad = np.zeros(len(results))
+
+    # MAD constant for normal distribution
+    MAD_CONSTANT = 1.4826
+
+    for i in range(len(results)):
+        if fixation_durations_arr[i] > 0:
+            # Get non-zero values in the current window
+            non_zero_fix = fixation_durations_arr[max(0, i - window_size + 1):i + 1]
+            non_zero_fix = non_zero_fix[non_zero_fix > 0]
+
+            non_zero_sac = saccade_amplitudes_arr[max(0, i - window_size + 1):i + 1]
+            non_zero_sac = non_zero_sac[non_zero_sac > 0]
+
+            if len(non_zero_fix) > 1:
+                fix_median = np.median(non_zero_fix)
+                fix_mad = np.median(np.abs(non_zero_fix - fix_median))
+                if fix_mad > 0:
+                    fixation_zscores_mad[i] = (fixation_durations_arr[i] - fix_median) / (fix_mad * MAD_CONSTANT)
+
+            if len(non_zero_sac) > 1:
+                sac_median = np.median(non_zero_sac)
+                sac_mad = np.median(np.abs(non_zero_sac - sac_median))
+                if sac_mad > 0:
+                    saccade_zscores_mad[i] = (saccade_amplitudes_arr[i] - sac_median) / (sac_mad * MAD_CONSTANT)
+
+    k_coefficients_mad = fixation_zscores_mad - saccade_zscores_mad
+
+    # ============================================================
+    # Add calculated values to results
+    # ============================================================
+    for i, result in enumerate(results):
+        # Add K coefficients for all three methods
+        # K coefficients are based on window data, so they can exist even without current fixation_id
+        if fixation_durations_arr[i] > 0:
+            result['k_coefficient_rolling'] = k_coefficients_rolling[i]
+            result['k_coefficient_ewma'] = k_coefficients_ewma[i]
+            result['k_coefficient_mad'] = k_coefficients_mad[i]
+
+            # Classify attention level based on EWMA K coefficient
+            result['attention_level'] = classify_attention_level(k_coefficients_ewma[i], k1, k2)
+        else:
+            result['k_coefficient_rolling'] = ''
+            result['k_coefficient_ewma'] = ''
+            result['k_coefficient_mad'] = ''
+            # Fill missing attention level with 3 (Neutral)
+            result['attention_level'] = 3
+
+    return results
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Calculate K coefficient from eye tracker data'
+        description='Map camera timestamps to eye tracker fixation IDs and saccade amplitudes'
     )
     parser.add_argument(
         '--path',
@@ -213,6 +490,30 @@ def main():
         default=0,
         help='Time reference ID: 0 = use camera/timestamp_0.csv, 2 = use camera/timestamp_2.csv, etc.'
     )
+    parser.add_argument(
+        '--output',
+        type=str,
+        default='eyetrack_attention.csv',
+        help='Output CSV filename (default: eyetrack_attention.csv)'
+    )
+    parser.add_argument(
+        '--window-size',
+        type=int,
+        default=10,
+        help='Number of past timestamps to consider for K coefficient calculation (default: 10)'
+    )
+    parser.add_argument(
+        '--k1',
+        type=float,
+        default=0.5,
+        help='First threshold for attention level classification (weak attention boundary, default: 0.5)'
+    )
+    parser.add_argument(
+        '--k2',
+        type=float,
+        default=1.5,
+        help='Second threshold for attention level classification (strong attention boundary, default: 1.5)'
+    )
 
     args = parser.parse_args()
 
@@ -225,53 +526,119 @@ def main():
     try:
         # Load time reference
         print(f"Loading time reference from timestamp_{args.time_reference}.csv...")
-        start_time_sec, end_time_sec = load_time_reference(base_path, args.time_reference)
-        print(f"Time reference from camera/timestamp_{args.time_reference}.csv: {start_time_sec:.3f}s - {end_time_sec:.3f}s")
+        time_references = load_time_reference(base_path, args.time_reference)
+        print(f"Loaded {len(time_references)} timestamps from camera/timestamp_{args.time_reference}.csv")
+        print(f"Time range: {time_references.min():.3f}s - {time_references.max():.3f}s")
 
         # Find eyetracker data directory
         print(f"Finding eyetracker data directory...")
         data_dir = find_eyetracker_data_dir(base_path)
         print(f"Found eyetracker data in: {data_dir}")
 
-        # Load gaze data
-        print(f"Loading gaze data...")
-        timestamps_ns, gaze_x, gaze_y = load_gaze_data(data_dir)
-        print(f"Loaded {len(timestamps_ns)} gaze samples")
+        # Load fixation data
+        print(f"Loading fixation data...")
+        fixations = load_fixations(data_dir)
+        print(f"Loaded {len(fixations)} fixation segments")
 
-        # Filter data by time range
-        print(f"Filtering data by time range...")
-        timestamps_filtered, gaze_x_filtered, gaze_y_filtered = filter_data_by_time_range(
-            timestamps_ns, gaze_x, gaze_y, start_time_sec, end_time_sec
+        if len(fixations) == 0:
+            print("Warning: No fixations found in fixations.csv")
+            sys.exit(1)
+
+        # Load saccade data
+        print(f"Loading saccade data...")
+        saccades = load_saccades(data_dir)
+        print(f"Loaded {len(saccades)} saccade segments")
+
+        if len(saccades) == 0:
+            print("Warning: No saccades found in saccades.csv")
+            sys.exit(1)
+
+        # Match timestamps to fixations and saccades, and calculate K coefficient
+        print(f"\nMatching camera timestamps to fixations and saccades...")
+        print(f"Calculating K coefficients with window size: {args.window_size}")
+        print(f"Using three methods: Rolling Z-score, EWMA Z-score, MAD")
+        print(f"Attention level thresholds: k1={args.k1}, k2={args.k2}")
+        results = match_timestamps_to_fixations_and_saccades(
+            time_references, fixations, saccades, args.window_size, args.k1, args.k2
         )
-        print(f"Filtered to {len(timestamps_filtered)} samples within time range")
 
-        # Calculate K coefficient
-        print(f"\nCalculating K coefficient...")
-        results = calculate_k_coefficient(gaze_x_filtered, gaze_y_filtered)
+        # Count matches
+        fixation_matched_count = sum(1 for r in results if r['fixation_id'] != '')
+        saccade_matched_count = sum(1 for r in results if r['saccade_amplitude_deg'] != '')
+        k_calculated_count = sum(1 for r in results if r['k_coefficient_rolling'] != '')
+        print(f"Matched {fixation_matched_count}/{len(results)} timestamps to fixations")
+        print(f"Matched {saccade_matched_count}/{len(results)} timestamps to saccades")
+        print(f"Calculated {k_calculated_count}/{len(results)} K coefficients")
 
-        # Print results
+        # Save results to CSV
+        output_path = base_path / args.output
+        print(f"\nSaving results to {output_path}...")
+
+        with open(output_path, 'w', newline='') as f:
+            fieldnames = ['timestamp', 'fixation_id', 'saccade_id', 'saccade_amplitude_deg',
+                         'k_coefficient_rolling', 'k_coefficient_ewma', 'k_coefficient_mad',
+                         'attention_level']
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+
+            writer.writeheader()
+            for result in results:
+                writer.writerow(result)
+
+        print(f"Successfully saved results to {output_path}")
+
+        # Print summary statistics
+        k_coeffs_rolling = [r['k_coefficient_rolling'] for r in results if r['k_coefficient_rolling'] != '']
+        k_coeffs_ewma = [r['k_coefficient_ewma'] for r in results if r['k_coefficient_ewma'] != '']
+        k_coeffs_mad = [r['k_coefficient_mad'] for r in results if r['k_coefficient_mad'] != '']
+        attention_levels = [r['attention_level'] for r in results if r['attention_level'] != '']
+
         print("\n" + "="*60)
-        print("K COEFFICIENT RESULTS")
+        print("SUMMARY STATISTICS")
         print("="*60)
-        print(f"Number of samples:        {results['n_samples']}")
-        print(f"Mean gaze position:       ({results['mean_x']:.2f}, {results['mean_y']:.2f}) px")
-        print(f"Median gaze position:     ({results['median_x']:.2f}, {results['median_y']:.2f}) px")
-        print(f"Std deviation (X, Y):     ({results['std_x']:.2f}, {results['std_y']:.2f}) px")
-        print(f"Dispersion:               {results['dispersion']:.2f} px")
-        print(f"MAD Dispersion:           {results['mad_dispersion']:.2f} px")
-        print(f"\nK Coefficient (CV):       {results['k_coefficient']:.4f}")
-        print(f"K Coefficient (MAD):      {results['k_coefficient_mad']:.4f}")
-        print("="*60)
+        print(f"Total timestamps:              {len(results)}")
+        print(f"Fixation matched timestamps:   {fixation_matched_count} ({fixation_matched_count/len(results)*100:.1f}%)")
+        print(f"Saccade matched timestamps:    {saccade_matched_count} ({saccade_matched_count/len(results)*100:.1f}%)")
+        print(f"K coefficients calculated:     {k_calculated_count} ({k_calculated_count/len(results)*100:.1f}%)")
+        print(f"\nTotal fixations:               {len(fixations)}")
+        print(f"Mean fixation duration:        {np.mean([f.duration_ms for f in fixations]):.2f}ms")
+        print(f"\nTotal saccades:                {len(saccades)}")
+        print(f"Mean saccade amplitude:        {np.mean([s.amplitude_deg for s in saccades]):.2f}°")
 
-        # Interpretation
-        print("\nInterpretation:")
-        if results['k_coefficient'] is not None:
-            if results['k_coefficient'] < 0.1:
-                print("  - Very stable gaze (likely fixation)")
-            elif results['k_coefficient'] < 0.3:
-                print("  - Moderately stable gaze")
-            else:
-                print("  - Unstable gaze (likely saccades or pursuit)")
+        # Attention level distribution
+        if attention_levels:
+            print(f"\nAttention Level Distribution (k1={args.k1}, k2={args.k2}):")
+            level_counts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+            for level in attention_levels:
+                level_counts[level] = level_counts.get(level, 0) + 1
+
+            total_with_level = len(attention_levels)
+            print(f"  Level 1 (Strong Ambient):    {level_counts[1]:4d} ({level_counts[1]/total_with_level*100:5.1f}%)")
+            print(f"  Level 2 (Weak Ambient):      {level_counts[2]:4d} ({level_counts[2]/total_with_level*100:5.1f}%)")
+            print(f"  Level 3 (Neutral):           {level_counts[3]:4d} ({level_counts[3]/total_with_level*100:5.1f}%)")
+            print(f"  Level 4 (Weak Focal):        {level_counts[4]:4d} ({level_counts[4]/total_with_level*100:5.1f}%)")
+            print(f"  Level 5 (Strong Focal):      {level_counts[5]:4d} ({level_counts[5]/total_with_level*100:5.1f}%)")
+
+        if k_coeffs_rolling:
+            print(f"\nK coefficient statistics (Rolling Z-score):")
+            print(f"  Mean:                        {np.mean(k_coeffs_rolling):.4f}")
+            print(f"  Std:                         {np.std(k_coeffs_rolling):.4f}")
+            print(f"  Min:                         {np.min(k_coeffs_rolling):.4f}")
+            print(f"  Max:                         {np.max(k_coeffs_rolling):.4f}")
+
+        if k_coeffs_ewma:
+            print(f"\nK coefficient statistics (EWMA Z-score):")
+            print(f"  Mean:                        {np.mean(k_coeffs_ewma):.4f}")
+            print(f"  Std:                         {np.std(k_coeffs_ewma):.4f}")
+            print(f"  Min:                         {np.min(k_coeffs_ewma):.4f}")
+            print(f"  Max:                         {np.max(k_coeffs_ewma):.4f}")
+
+        if k_coeffs_mad:
+            print(f"\nK coefficient statistics (MAD):")
+            print(f"  Mean:                        {np.mean(k_coeffs_mad):.4f}")
+            print(f"  Std:                         {np.std(k_coeffs_mad):.4f}")
+            print(f"  Min:                         {np.min(k_coeffs_mad):.4f}")
+            print(f"  Max:                         {np.max(k_coeffs_mad):.4f}")
+        print("="*60)
 
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
