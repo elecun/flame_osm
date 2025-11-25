@@ -82,7 +82,7 @@ def train_epoch(model, train_loader, criterion, optimizer, device):
     return avg_loss, accuracy
 
 
-def validate_epoch(model, val_loader, criterion, device, debug=False):
+def validate_epoch(model, val_loader, criterion, device, show_metrics=False):
     """Validate for one epoch"""
     model.eval()
     total_loss = 0.0
@@ -92,7 +92,7 @@ def validate_epoch(model, val_loader, criterion, device, debug=False):
     targets = []
 
     with torch.no_grad():
-        for batch_idx, batch in enumerate(tqdm(val_loader, desc='Validation')):
+        for batch in tqdm(val_loader, desc='Validation'):
             body_kps = batch['body_kps'].to(device)
             face_kps_2d = batch['face_kps_2d'].to(device)
             head_pose = batch['head_pose'].to(device)
@@ -114,46 +114,29 @@ def validate_epoch(model, val_loader, criterion, device, debug=False):
             predictions.extend(predicted.cpu().numpy())
             targets.extend(attention.cpu().numpy())
 
-            # Debug: print first batch info
-            if debug and batch_idx == 0:
-                print(f"\n[DEBUG] First validation batch:")
-                print(f"  Body kps shape: {body_kps.shape}")
-                print(f"  Body kps stats: min={body_kps.min():.4f}, max={body_kps.max():.4f}, mean={body_kps.mean():.4f}")
-                print(f"  Face kps shape: {face_kps_2d.shape}")
-                print(f"  Face kps stats: min={face_kps_2d.min():.4f}, max={face_kps_2d.max():.4f}, mean={face_kps_2d.mean():.4f}")
-                print(f"  Head pose shape: {head_pose.shape}")
-                print(f"  Head pose stats: min={head_pose.min():.4f}, max={head_pose.max():.4f}, mean={head_pose.mean():.4f}")
-                print(f"  Outputs (logits) shape: {outputs.shape}")
-                print(f"  Outputs stats: min={outputs.min():.4f}, max={outputs.max():.4f}, mean={outputs.mean():.4f}")
-                print(f"  First 5 predictions: {predicted[:5].cpu().numpy()}")
-                print(f"  First 5 targets: {attention[:5].cpu().numpy()}")
-                print(f"  Unique predictions in batch: {torch.unique(predicted).cpu().numpy()}")
-                print(f"  Unique targets in batch: {torch.unique(attention).cpu().numpy()}")
-
     avg_loss = total_loss / len(val_loader)
     accuracy = 100 * correct / total
     predictions = np.array(predictions)
     targets = np.array(targets)
 
-    # Debug: print overall distribution
-    if debug:
-        print(f"\n[DEBUG] Validation set distribution:")
-        unique_preds, pred_counts = np.unique(predictions, return_counts=True)
-        unique_targs, targ_counts = np.unique(targets, return_counts=True)
-        print(f"  Unique predictions: {unique_preds}")
-        print(f"  Prediction counts: {pred_counts}")
-        print(f"  Unique targets: {unique_targs}")
-        print(f"  Target counts: {targ_counts}")
-        print(f"  Prediction distribution:")
-        for cls in unique_preds:
-            count = (predictions == cls).sum()
-            pct = 100 * count / len(predictions)
-            print(f"    Class {cls}: {count:6d} ({pct:5.2f}%)")
-        print(f"  Target distribution:")
-        for cls in unique_targs:
-            count = (targets == cls).sum()
-            pct = 100 * count / len(targets)
-            print(f"    Class {cls}: {count:6d} ({pct:5.2f}%)")
+    # Print simple metrics per class
+    if show_metrics:
+        unique_classes = np.unique(np.concatenate([predictions, targets]))
+        print(f"\n  Per-class metrics:")
+        print(f"  {'Class':<6} {'TP':>6} {'TN':>6} {'FP':>6} {'FN':>6} {'Precision':>10} {'Recall':>10}")
+        print(f"  " + "-" * 60)
+
+        cm = confusion_matrix(targets, predictions, labels=unique_classes)
+        for i, cls in enumerate(unique_classes):
+            tp = cm[i, i]
+            fp = cm[:, i].sum() - tp
+            fn = cm[i, :].sum() - tp
+            tn = cm.sum() - tp - fp - fn
+
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+            recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+
+            print(f"  {cls+1:<6} {tp:6d} {tn:6d} {fp:6d} {fn:6d} {precision:10.4f} {recall:10.4f}")
 
     return avg_loss, accuracy, predictions, targets
 
