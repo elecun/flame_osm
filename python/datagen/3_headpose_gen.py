@@ -236,13 +236,32 @@ def get_camera_matrix(image_shape):
     return camera_matrix
 
 
-def estimate_head_pose(landmarks_2d: np.ndarray, image_shape: Tuple[int, int]) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
+def validate_and_clip_translation(translation_vector: np.ndarray, max_translation: float = 5000.0) -> np.ndarray:
     """
-    Estimate head pose from 2D facial landmarks.
+    Validate and clip translation vector to reasonable physical ranges.
+
+    Args:
+        translation_vector: Translation vector from PnP (in mm)
+        max_translation: Maximum allowed translation value (default: 5000mm = 5m)
+
+    Returns:
+        Clipped translation vector
+    """
+    # Clip each component to reasonable range
+    clipped = np.clip(translation_vector, -max_translation, max_translation)
+    return clipped
+
+
+def estimate_head_pose(landmarks_2d: np.ndarray, image_shape: Tuple[int, int],
+                      max_translation: float = 5000.0, use_ransac: bool = True) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
+    """
+    Estimate head pose from 2D facial landmarks with robust RANSAC method.
 
     Args:
         landmarks_2d: 2D facial landmarks (68 points expected)
         image_shape: Image shape (height, width)
+        max_translation: Maximum allowed translation value in mm (default: 5000mm = 5m)
+        use_ransac: Whether to use RANSAC for robust estimation (default: True)
 
     Returns:
         Tuple of (rotation_vector, translation_vector, euler_angles)
@@ -267,17 +286,33 @@ def estimate_head_pose(landmarks_2d: np.ndarray, image_shape: Tuple[int, int]) -
     camera_matrix = get_camera_matrix(image_shape)
     dist_coeffs = np.zeros((4, 1))  # Assuming no lens distortion
 
-    # Solve PnP
-    success, rotation_vector, translation_vector = cv2.solvePnP(
-        model_points,
-        image_points,
-        camera_matrix,
-        dist_coeffs,
-        flags=cv2.SOLVEPNP_ITERATIVE
-    )
+    # Solve PnP with RANSAC for robustness against outliers
+    if use_ransac:
+        success, rotation_vector, translation_vector, inliers = cv2.solvePnPRansac(
+            model_points,
+            image_points,
+            camera_matrix,
+            dist_coeffs,
+            iterationsCount=100,
+            reprojectionError=8.0,
+            confidence=0.99,
+            flags=cv2.SOLVEPNP_ITERATIVE
+        )
+    else:
+        # Fallback to standard iterative method
+        success, rotation_vector, translation_vector = cv2.solvePnP(
+            model_points,
+            image_points,
+            camera_matrix,
+            dist_coeffs,
+            flags=cv2.SOLVEPNP_ITERATIVE
+        )
 
     if not success:
         return None, None, None
+
+    # Validate and clip translation vector to reasonable physical ranges
+    translation_vector = validate_and_clip_translation(translation_vector, max_translation)
 
     # Convert rotation vector to Euler angles
     rotation_mat, _ = cv2.Rodrigues(rotation_vector)
@@ -397,7 +432,9 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
                                  timestamps: List[float], csv_file,
                                  should_rotate: bool = False,
                                  check_mode: bool = False,
-                                 check_output_path: Optional[Path] = None):
+                                 check_output_path: Optional[Path] = None,
+                                 max_translation: float = 5000.0,
+                                 use_ransac: bool = True):
     """
     Process landmarks and estimate head pose for each frame.
     Video is only used for visualization when check_mode is enabled.
@@ -410,10 +447,15 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
         should_rotate: Whether to rotate frames
         check_mode: Whether to save first frame visualization
         check_output_path: Path to save check visualization
+        max_translation: Maximum allowed translation value in mm
+        use_ransac: Whether to use RANSAC for robust estimation
     """
     print(f"Processing landmarks from: {video_path.name}")
     if should_rotate:
         print(f"  [INFO] Frames will be rotated 90 degrees clockwise for visualization")
+    if use_ransac:
+        print(f"  [INFO] Using RANSAC for robust head pose estimation")
+    print(f"  [INFO] Translation values will be clipped to ±{max_translation}mm")
 
     # Get image shape from video for camera matrix calculation
     cap = cv2.VideoCapture(str(video_path))
@@ -439,6 +481,9 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
     # Inference time tracking
     inference_times = []
 
+    # Failed estimation tracking
+    failed_count = 0
+
     # Batch processing time tracking
     batch_start_time = time.time()
 
@@ -449,7 +494,9 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
 
         # Estimate head pose with timing
         start_time = time.time()
-        rotation_vec, translation_vec, euler_angles = estimate_head_pose(landmarks_2d, image_shape)
+        rotation_vec, translation_vec, euler_angles = estimate_head_pose(
+            landmarks_2d, image_shape, max_translation, use_ransac
+        )
         inference_time = time.time() - start_time
         inference_times.append(inference_time)
 
@@ -470,6 +517,7 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
         else:
             # Write NaN for failed estimation
             row.extend([np.nan] * 9)  # 3 rotation + 3 translation + 3 euler angles
+            failed_count += 1
 
         csv_writer.writerow(row)
         csv_file.flush()
@@ -480,6 +528,8 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
             batch_start_time = time.time()
 
     print(f"  [SUCCESS] Processed all {num_frames} frames")
+    if failed_count > 0:
+        print(f"  [WARNING] {failed_count} frames failed head pose estimation ({100*failed_count/num_frames:.2f}%)")
 
     # Print inference time statistics
     if inference_times:
@@ -496,7 +546,9 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
 def process_single_file(face_kps_csv: Path, output_path: Path,
                        video_path: Optional[Path] = None,
                        should_rotate: bool = False,
-                       check_mode: bool = False) -> None:
+                       check_mode: bool = False,
+                       max_translation: float = 5000.0,
+                       use_ransac: bool = True) -> None:
     """
     Process a single face landmarks CSV file and estimate head pose.
 
@@ -506,6 +558,8 @@ def process_single_file(face_kps_csv: Path, output_path: Path,
         video_path: Optional path to video file (for visualization and image size)
         should_rotate: Whether to rotate frames
         check_mode: Whether to save first frame visualization
+        max_translation: Maximum allowed translation value in mm
+        use_ransac: Whether to use RANSAC for robust estimation
     """
     print(f"Processing single file: {face_kps_csv.name}")
     print(f"Output: {output_path}")
@@ -543,6 +597,9 @@ def process_single_file(face_kps_csv: Path, output_path: Path,
 
     # Create CSV file and write header
     print(f"\nCreating output file: {output_path}")
+    if use_ransac:
+        print(f"  [INFO] Using RANSAC for robust head pose estimation")
+    print(f"  [INFO] Translation values will be clipped to ±{max_translation}mm")
     header = generate_csv_header()
 
     with open(output_path, 'w', newline='', encoding='utf-8') as csv_file:
@@ -553,6 +610,9 @@ def process_single_file(face_kps_csv: Path, output_path: Path,
 
         # Inference time tracking
         inference_times = []
+
+        # Failed estimation tracking
+        failed_count = 0
 
         # Batch processing time tracking
         batch_start_time = time.time()
@@ -565,7 +625,9 @@ def process_single_file(face_kps_csv: Path, output_path: Path,
 
             # Estimate head pose with timing
             start_time = time.time()
-            rotation_vec, translation_vec, euler_angles = estimate_head_pose(landmarks_2d, image_shape)
+            rotation_vec, translation_vec, euler_angles = estimate_head_pose(
+                landmarks_2d, image_shape, max_translation, use_ransac
+            )
             inference_time = time.time() - start_time
             inference_times.append(inference_time)
 
@@ -586,6 +648,7 @@ def process_single_file(face_kps_csv: Path, output_path: Path,
             else:
                 # Write NaN for failed estimation
                 row.extend([np.nan] * 9)  # 3 rotation + 3 translation + 3 euler angles
+                failed_count += 1
 
             csv_writer.writerow(row)
             csv_file.flush()
@@ -596,6 +659,8 @@ def process_single_file(face_kps_csv: Path, output_path: Path,
                 batch_start_time = time.time()
 
         print(f"  [SUCCESS] Processed all {num_frames} frames")
+        if failed_count > 0:
+            print(f"  [WARNING] {failed_count} frames failed head pose estimation ({100*failed_count/num_frames:.2f}%)")
 
         # Print inference time statistics
         if inference_times:
@@ -659,6 +724,17 @@ def main():
         action='store_true',
         help='Save first frame with head pose visualization as JPG'
     )
+    parser.add_argument(
+        '--max-translation',
+        type=float,
+        default=5000.0,
+        help='Maximum allowed translation value in mm (default: 5000mm = 5m)'
+    )
+    parser.add_argument(
+        '--no-ransac',
+        action='store_true',
+        help='Disable RANSAC (use standard iterative PnP instead)'
+    )
 
     args = parser.parse_args()
 
@@ -701,7 +777,9 @@ def main():
                 output_path=output_path,
                 video_path=file_path,
                 should_rotate=should_rotate,
-                check_mode=args.check
+                check_mode=args.check,
+                max_translation=args.max_translation,
+                use_ransac=not args.no_ransac
             )
         except Exception as e:
             print(f"\nError processing file: {e}")
@@ -788,7 +866,9 @@ def main():
                 files['avi'], landmarks_array, timestamps, csv_file,
                 should_rotate=should_rotate,
                 check_mode=args.check,
-                check_output_path=check_output_path
+                check_output_path=check_output_path,
+                max_translation=args.max_translation,
+                use_ransac=not args.no_ransac
             )
 
         print(f"  [SUCCESS] Output saved to: {output_path}\n")
