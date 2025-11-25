@@ -410,7 +410,10 @@ def train_model(config, csv_file, device='cuda', fold_idx=None, rank=None, world
 
     # Class weights for imbalanced dataset (Class 1, 3, 5)
     # Based on inverse frequency: Class 1: 20.41%, Class 3: 58.37%, Class 5: 21.22%
-    class_weights = torch.tensor([1.6332, 0.5711, 1.5707])
+    # The model outputs 5 classes (0-4). The weight tensor must have 5 elements.
+    # Classes 1, 3, 5 correspond to indices 0, 2, 4.
+    # We set weights for non-appearing classes (1, 3) to 0.
+    class_weights = torch.tensor([1.6332, 0.0, 0.5711, 0.0, 1.5707])
     if use_ddp:
         class_weights = class_weights.to(rank)
     else:
