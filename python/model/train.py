@@ -12,6 +12,7 @@ import pickle
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
+from sklearn.metrics import confusion_matrix, classification_report
 
 from model import AttentionSTGCN
 from dataset import create_data_loaders
@@ -119,6 +120,93 @@ def validate_epoch(model, val_loader, criterion, device):
     targets = np.array(targets)
 
     return avg_loss, accuracy, predictions, targets
+
+
+def print_classification_metrics(predictions, targets, class_names=None):
+    """
+    Print detailed classification metrics including TP, TN, FP, FN for each class
+
+    Args:
+        predictions: Predicted labels
+        targets: True labels
+        class_names: Names of classes (default: 1, 2, 3, 4, 5)
+    """
+    if class_names is None:
+        class_names = ['1', '2', '3', '4', '5']
+
+    # Confusion matrix
+    cm = confusion_matrix(targets, predictions)
+
+    print("\n" + "="*80)
+    print("DETAILED CLASSIFICATION METRICS")
+    print("="*80)
+
+    # Print confusion matrix
+    print("\nConfusion Matrix:")
+    print("(Rows: True labels, Columns: Predicted labels)")
+    print("\n       ", end="")
+    for name in class_names:
+        print(f"Pred-{name:3s}", end=" ")
+    print()
+    print("       " + "-" * (8 * len(class_names)))
+    for i, name in enumerate(class_names):
+        print(f"True-{name:3s}|", end=" ")
+        for j in range(len(class_names)):
+            print(f"{cm[i, j]:6d}", end=" ")
+        print()
+
+    # Calculate metrics for each class
+    print("\n" + "-"*80)
+    print("Per-Class Metrics:")
+    print("-"*80)
+    print(f"{'Class':<8} {'TP':>8} {'TN':>8} {'FP':>8} {'FN':>8} {'Precision':>10} {'Recall':>10} {'F1-Score':>10}")
+    print("-"*80)
+
+    total_tp = 0
+    total_tn = 0
+    total_fp = 0
+    total_fn = 0
+
+    for i, name in enumerate(class_names):
+        # Calculate TP, TN, FP, FN for class i
+        tp = cm[i, i]
+        fp = cm[:, i].sum() - tp
+        fn = cm[i, :].sum() - tp
+        tn = cm.sum() - tp - fp - fn
+
+        total_tp += tp
+        total_tn += tn
+        total_fp += fp
+        total_fn += fn
+
+        # Calculate precision, recall, F1
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+
+        print(f"Class {name:<3} {tp:8d} {tn:8d} {fp:8d} {fn:8d} {precision:10.4f} {recall:10.4f} {f1:10.4f}")
+
+    print("-"*80)
+
+    # Overall metrics
+    print(f"\nOverall Statistics:")
+    print(f"  Total samples: {len(targets)}")
+    print(f"  Correct predictions (TP for all classes): {(predictions == targets).sum()}")
+    print(f"  Incorrect predictions (FP+FN): {len(targets) - (predictions == targets).sum()}")
+    print(f"  Overall Accuracy: (TP+TN)/(TP+TN+FP+FN) = {100 * (predictions == targets).sum() / len(targets):.2f}%")
+    print(f"\n  Note: For multi-class classification,")
+    print(f"    - Total TP across all classes: {total_tp}")
+    print(f"    - Total FP across all classes: {total_fp}")
+    print(f"    - Total FN across all classes: {total_fn}")
+    print(f"    - Total TN across all classes: {total_tn}")
+
+    # Sklearn classification report
+    print("\n" + "-"*80)
+    print("Classification Report (sklearn):")
+    print("-"*80)
+    print(classification_report(targets, predictions, target_names=class_names, digits=4))
+
+    print("="*80 + "\n")
 
 
 def plot_training_curves(history, save_path):
@@ -313,6 +401,10 @@ def train_model(config, csv_file, device='cuda'):
     )
 
     print(f"Test Loss: {test_loss:.4f}, Accuracy: {test_acc:.2f}%")
+
+    # Print detailed classification metrics
+    class_names = ['Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5']
+    print_classification_metrics(test_preds, test_targets, class_names=class_names)
 
     # Plot training curves
     print("\nGenerating training curves...")
