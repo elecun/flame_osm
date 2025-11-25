@@ -207,12 +207,16 @@ def classify_attention_level(k_coefficient: float, k1: float, k2: float) -> int:
 
 def apply_minimum_dwell_time(results: List[Dict], min_dwell_sec: float) -> None:
     """
-    Apply minimum dwell time filtering for focal attention transitions.
+    Apply minimum dwell time filtering for all attention level transitions.
 
-    This prevents rapid transitions to focal attention (levels 4, 5) by requiring
-    that focal attention segments must persist for at least min_dwell_sec seconds.
-    If a focal attention segment is shorter than min_dwell_sec, the attention level
-    is reverted to the previous state.
+    This prevents rapid transitions between attention levels by requiring that each
+    attention level must persist for at least min_dwell_sec seconds. If a segment
+    is shorter than min_dwell_sec, the attention level is reverted to the previous state.
+
+    This applies to:
+    - Transitions to focal attention (4, 5) from non-focal states (1, 2, 3)
+    - Transitions between focal states (4 ↔ 5)
+    - Any other attention level changes
 
     Args:
         results: List of result dictionaries with 'timestamp' and 'attention_level'
@@ -225,39 +229,53 @@ def apply_minimum_dwell_time(results: List[Dict], min_dwell_sec: float) -> None:
     attention_levels = [r['attention_level'] for r in results]
     timestamps = [r['timestamp'] for r in results]
 
-    i = 0
-    while i < len(attention_levels):
-        current_level = attention_levels[i]
+    # Iteratively filter short segments until no more changes occur
+    max_iterations = 10  # Prevent infinite loops
+    for iteration in range(max_iterations):
+        changed = False
+        i = 0
 
-        # Check if this is a transition to focal attention (4 or 5)
-        if current_level in [4, 5]:
-            # Get previous level (before this focal segment)
-            prev_level = attention_levels[i - 1] if i > 0 else 3  # Default to neutral
+        while i < len(attention_levels):
+            current_level = attention_levels[i]
 
-            # Find the end of this focal attention segment
-            segment_start = i
-            segment_end = i
+            # Get previous level (skip if at the beginning)
+            if i == 0:
+                i += 1
+                continue
 
-            # Extend segment while attention level is focal (4 or 5)
-            while segment_end < len(attention_levels) and attention_levels[segment_end] in [4, 5]:
-                segment_end += 1
+            prev_level = attention_levels[i - 1]
 
-            # Calculate segment duration
-            if segment_end < len(timestamps):
-                segment_duration = timestamps[segment_end - 1] - timestamps[segment_start]
+            # Check if there's a transition (level changed)
+            if current_level != prev_level:
+                # Find the end of this segment (same level)
+                segment_start = i
+                segment_end = i
+
+                # Extend segment while attention level is the same
+                while segment_end < len(attention_levels) and attention_levels[segment_end] == current_level:
+                    segment_end += 1
+
+                # Calculate segment duration
+                if segment_end < len(timestamps):
+                    segment_duration = timestamps[segment_end - 1] - timestamps[segment_start]
+                else:
+                    # Last segment goes to the end
+                    segment_duration = timestamps[-1] - timestamps[segment_start]
+
+                # If segment is shorter than min_dwell, revert to previous level
+                if segment_duration < min_dwell_sec:
+                    for j in range(segment_start, segment_end):
+                        attention_levels[j] = prev_level
+                    changed = True
+
+                # Move to the end of this segment
+                i = segment_end
             else:
-                # Last segment goes to the end
-                segment_duration = timestamps[-1] - timestamps[segment_start]
+                i += 1
 
-            # If segment is shorter than min_dwell, revert to previous level
-            if segment_duration < min_dwell_sec:
-                for j in range(segment_start, segment_end):
-                    attention_levels[j] = prev_level
-
-            # Move to the end of this segment
-            i = segment_end
-        else:
-            i += 1
+        # If no changes were made, we're done
+        if not changed:
+            break
 
     # Update results with filtered attention levels
     for i, result in enumerate(results):
