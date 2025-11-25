@@ -1,5 +1,6 @@
 import torch
 from torch.utils.data import Dataset, DataLoader
+from torch.utils.data.distributed import DistributedSampler
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
@@ -10,22 +11,41 @@ class AttentionDataset(Dataset):
     """
     Dataset for attention prediction from body/face keypoints and head pose
     """
-    def __init__(self, csv_files, sequence_length=30, normalize=True, train=True, scaler=None, feature_config=None):
+    def __init__(self, csv_files, sequence_length=30, normalize=True, train=True, scaler=None, feature_config=None, dataframe=None):
         """
         Args:
-            csv_files: List of CSV file paths or single CSV file path
+            csv_files: List of CSV file paths or single CSV file path (ignored if dataframe is provided)
             sequence_length: Length of temporal sequences
             normalize: Whether to normalize features
             train: Whether this is training data (for scaler fitting)
             scaler: Pre-fitted scaler (for validation/test data)
             feature_config: Dictionary with feature selection configuration
+            dataframe: Optional DataFrame to use instead of loading from CSV files
         """
         self.sequence_length = sequence_length
         self.normalize = normalize
 
-        # Handle single file or list of files
-        if isinstance(csv_files, str):
-            csv_files = [csv_files]
+        # Use dataframe if provided, otherwise load from CSV files
+        if dataframe is not None:
+            combined_df = dataframe
+            file_boundaries = [0, len(dataframe)]
+        else:
+            # Handle single file or list of files
+            if isinstance(csv_files, str):
+                csv_files = [csv_files]
+
+            # Load and concatenate all CSV files
+            df_list = []
+            file_boundaries = [0]  # Track where each file starts/ends
+
+            for csv_file in csv_files:
+                df = pd.read_csv(csv_file)
+                df_list.append(df)
+                file_boundaries.append(file_boundaries[-1] + len(df))
+
+            combined_df = pd.concat(df_list, ignore_index=True)
+
+        self.file_boundaries = file_boundaries
 
         # Default feature config
         if feature_config is None:
@@ -41,18 +61,6 @@ class AttentionDataset(Dataset):
             }
 
         self.feature_config = feature_config
-
-        # Load and concatenate all CSV files
-        df_list = []
-        file_boundaries = [0]  # Track where each file starts/ends
-
-        for csv_file in csv_files:
-            df = pd.read_csv(csv_file)
-            df_list.append(df)
-            file_boundaries.append(file_boundaries[-1] + len(df))
-
-        combined_df = pd.concat(df_list, ignore_index=True)
-        self.file_boundaries = file_boundaries
 
         # Extract column indices based on feature config
         self.use_body = feature_config['use_body_kps']
@@ -178,7 +186,11 @@ class AttentionDataset(Dataset):
 
                 self.sequences.append(abs_idx)
 
-        print(f"Loaded {len(csv_files)} CSV file(s) with {len(combined_df)} total frames")
+        # Print summary
+        if dataframe is not None:
+            print(f"Loaded DataFrame with {len(combined_df)} total frames")
+        else:
+            print(f"Loaded {len(csv_files)} CSV file(s) with {len(combined_df)} total frames")
         print(f"Created dataset with {len(self.sequences)} valid sequences")
         print(f"  Skipped {skipped_count} sequences with invalid face detection")
         print(f"  Skipped {skipped_boundary} sequences crossing file boundaries")
@@ -236,7 +248,7 @@ class AttentionDataset(Dataset):
         return dims
 
 
-def create_data_loaders(config, csv_path, fold_idx=None):
+def create_data_loaders(config, csv_path, fold_idx=None, rank=None, world_size=None):
     """
     Create train, validation, and test data loaders with k-fold cross validation support
 
@@ -244,6 +256,8 @@ def create_data_loaders(config, csv_path, fold_idx=None):
         config: Configuration dictionary
         csv_path: Path to CSV file or directory containing CSV files
         fold_idx: Index of current fold (0 to n_folds-1). If None, uses config value.
+        rank: Rank of current process for DDP (None for single GPU)
+        world_size: Total number of processes for DDP (None for single GPU)
     """
     import os
     import glob
@@ -301,100 +315,125 @@ def create_data_loaders(config, csv_path, fold_idx=None):
     else:
         test_df = combined_df.iloc[test_start:].copy()
 
-    # Save temporary files for each split
-    temp_dir = os.path.dirname(csv_files[0]) if os.path.dirname(csv_files[0]) else '.'
-
-    train_file = os.path.join(temp_dir, f'temp_train_fold{fold_idx}.csv')
-    val_file = os.path.join(temp_dir, f'temp_val_fold{fold_idx}.csv')
-    test_file = os.path.join(temp_dir, f'temp_test_fold{fold_idx}.csv')
-
-    train_df.to_csv(train_file, index=False)
-    val_df.to_csv(val_file, index=False)
-    test_df.to_csv(test_file, index=False)
-
-    train_files = [train_file]
-    val_files = [val_file]
-    test_files = [test_file]
-
-    current_samples = total_samples
-
     # Feature configuration
     feature_config = config['data'].get('features', None)
 
-    # Create datasets
+    # Create datasets using DataFrames directly (preserves original frame indices)
     sequence_length = config['training']['sequence_length']
     normalize = config['data']['normalize']
 
     train_dataset = AttentionDataset(
-        train_files,
+        csv_files=None,
         sequence_length=sequence_length,
         normalize=normalize,
         train=True,
-        feature_config=feature_config
+        feature_config=feature_config,
+        dataframe=train_df
     )
 
     scaler = train_dataset.get_scaler()
     feature_dims = train_dataset.get_feature_dims()
 
     val_dataset = AttentionDataset(
-        val_files,
+        csv_files=None,
         sequence_length=sequence_length,
         normalize=normalize,
         train=False,
         scaler=scaler,
-        feature_config=feature_config
+        feature_config=feature_config,
+        dataframe=val_df
     )
 
     test_dataset = AttentionDataset(
-        test_files,
+        csv_files=None,
         sequence_length=sequence_length,
         normalize=normalize,
         train=False,
         scaler=scaler,
-        feature_config=feature_config
+        feature_config=feature_config,
+        dataframe=test_df
     )
 
     # Create data loaders
     batch_size = config['training']['batch_size']
     num_workers = config['data']['num_workers']
 
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=config['data']['shuffle'],
-        num_workers=num_workers,
-        pin_memory=True
-    )
+    # Use DistributedSampler if using DDP
+    use_ddp = rank is not None and world_size is not None
 
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        pin_memory=True
-    )
+    if use_ddp:
+        train_sampler = DistributedSampler(
+            train_dataset,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=config['data']['shuffle']
+        )
+        val_sampler = DistributedSampler(
+            val_dataset,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=False
+        )
+        test_sampler = DistributedSampler(
+            test_dataset,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=False
+        )
 
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        pin_memory=True
-    )
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            sampler=train_sampler,
+            num_workers=num_workers,
+            pin_memory=True
+        )
+
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=batch_size,
+            sampler=val_sampler,
+            num_workers=num_workers,
+            pin_memory=True
+        )
+
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=batch_size,
+            sampler=test_sampler,
+            num_workers=num_workers,
+            pin_memory=True
+        )
+    else:
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=config['data']['shuffle'],
+            num_workers=num_workers,
+            pin_memory=True
+        )
+
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=True
+        )
+
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=True
+        )
 
     print(f"\nDataset splits (Fold {fold_idx}/{n_folds-1}):")
     print(f"  Train: {len(train_dataset)} sequences ({len(train_df)} frames)")
     print(f"  Validation: {len(val_dataset)} sequences ({len(val_df)} frames)")
     print(f"  Test: {len(test_dataset)} sequences ({len(test_df)} frames)")
     print(f"  Total frames: {total_samples}")
-
-    # Clean up temporary files
-    for f in train_files + val_files + test_files:
-        if 'temp_' in os.path.basename(f):
-            try:
-                os.remove(f)
-            except:
-                pass
 
     return train_loader, val_loader, test_loader, scaler, feature_dims
 

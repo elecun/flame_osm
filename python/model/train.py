@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
+import torch.distributed as dist
+import torch.multiprocessing as mp
+from torch.nn.parallel import DistributedDataParallel as DDP
 import json
 import os
 import numpy as np
@@ -16,6 +19,26 @@ from sklearn.metrics import confusion_matrix, classification_report
 
 from model import AttentionSTGCN
 from dataset import create_data_loaders
+
+
+def setup_ddp(rank, world_size):
+    """Initialize DDP environment"""
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+
+    # Initialize process group
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    torch.cuda.set_device(rank)
+
+
+def cleanup_ddp():
+    """Clean up DDP environment"""
+    dist.destroy_process_group()
+
+
+def is_main_process(rank):
+    """Check if current process is the main process"""
+    return rank == 0
 
 
 class EarlyStopping:
@@ -282,64 +305,92 @@ def plot_training_curves(history, save_path):
     plt.close()
 
 
-def train_model(config, csv_file, device='cuda', fold_idx=None):
-    """Main training function with k-fold cross validation support
+def train_model(config, csv_file, device='cuda', fold_idx=None, rank=None, world_size=None):
+    """Main training function with k-fold cross validation support and DDP
 
     Args:
         config: Configuration dictionary
         csv_file: Path to CSV file
         device: Device to use for training
         fold_idx: Current fold index (0 to n_folds-1). If None, uses config value.
+        rank: Rank of current process for DDP (None for single GPU)
+        world_size: Total number of processes for DDP (None for single GPU)
     """
     # Get fold information
     n_folds = config['training'].get('n_folds', 5)
     if fold_idx is None:
         fold_idx = config['training'].get('current_fold', 0)
 
-    # Create output directories
-    fold_save_path = os.path.join(config['output']['model_save_path'], f'fold_{fold_idx}')
-    os.makedirs(fold_save_path, exist_ok=True)
-    os.makedirs(config['output']['log_dir'], exist_ok=True)
+    # Check if this is the main process (for logging and saving)
+    is_main = rank is None or rank == 0
+    use_ddp = rank is not None and world_size is not None
 
-    # Create timestamp for this run
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_dir = os.path.join(config['output']['log_dir'], f'fold_{fold_idx}_{timestamp}')
-    writer = SummaryWriter(log_dir)
+    # Create output directories (only main process)
+    if is_main:
+        fold_save_path = os.path.join(config['output']['model_save_path'], f'fold_{fold_idx}')
+        os.makedirs(fold_save_path, exist_ok=True)
+        os.makedirs(config['output']['log_dir'], exist_ok=True)
 
-    print(f"\n{'='*80}")
-    print(f"Training Fold {fold_idx}/{n_folds-1}")
-    print(f"{'='*80}")
+        # Create timestamp for this run
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        log_dir = os.path.join(config['output']['log_dir'], f'fold_{fold_idx}_{timestamp}')
+        writer = SummaryWriter(log_dir)
+
+        print(f"\n{'='*80}")
+        print(f"Training Fold {fold_idx}/{n_folds-1}")
+        if use_ddp:
+            print(f"Using DDP with {world_size} GPUs")
+        print(f"{'='*80}")
+    else:
+        fold_save_path = os.path.join(config['output']['model_save_path'], f'fold_{fold_idx}')
+        writer = None
 
     # Create data loaders
-    print("Creating data loaders...")
-    train_loader, val_loader, test_loader, scaler, feature_dims = create_data_loaders(config, csv_file, fold_idx)
+    if is_main:
+        print("Creating data loaders...")
+    train_loader, val_loader, test_loader, scaler, feature_dims = create_data_loaders(
+        config, csv_file, fold_idx, rank, world_size
+    )
 
-    # Save scaler
-    scaler_path = os.path.join(fold_save_path, 'scaler.pkl')
-    with open(scaler_path, 'wb') as f:
-        pickle.dump(scaler, f)
-    print(f"Saved scaler to {scaler_path}")
+    # Save scaler and feature dims (only main process)
+    if is_main:
+        scaler_path = os.path.join(fold_save_path, 'scaler.pkl')
+        with open(scaler_path, 'wb') as f:
+            pickle.dump(scaler, f)
+        print(f"Saved scaler to {scaler_path}")
 
-    # Save feature dimensions
-    feature_dims_path = os.path.join(fold_save_path, 'feature_dims.pkl')
-    with open(feature_dims_path, 'wb') as f:
-        pickle.dump(feature_dims, f)
-    print(f"Saved feature dimensions to {feature_dims_path}")
+        feature_dims_path = os.path.join(fold_save_path, 'feature_dims.pkl')
+        with open(feature_dims_path, 'wb') as f:
+            pickle.dump(feature_dims, f)
+        print(f"Saved feature dimensions to {feature_dims_path}")
 
     # Create model
-    print("\nCreating model...")
-    model = AttentionSTGCN(config, feature_dims).to(device)
+    if is_main:
+        print("\nCreating model...")
 
-    # Count parameters
-    total_params = sum(p.numel() for p in model.parameters())
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Total parameters: {total_params:,}")
-    print(f"Trainable parameters: {trainable_params:,}")
+    # Set device
+    if use_ddp:
+        device = rank  # Use GPU corresponding to rank
+        model = AttentionSTGCN(config, feature_dims).to(device)
+        # Wrap model with DDP
+        model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
+    else:
+        model = AttentionSTGCN(config, feature_dims).to(device)
+
+    # Count parameters (only main process)
+    if is_main:
+        # Access the underlying model if using DDP
+        model_for_counting = model.module if use_ddp else model
+        total_params = sum(p.numel() for p in model_for_counting.parameters())
+        trainable_params = sum(p.numel() for p in model_for_counting.parameters() if p.requires_grad)
+        print(f"Total parameters: {total_params:,}")
+        print(f"Trainable parameters: {trainable_params:,}")
 
     # Loss and optimizer (CrossEntropyLoss with label smoothing for classification)
     label_smoothing = config['training'].get('label_smoothing', 0.0)
     criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
-    print(f"Using CrossEntropyLoss with label_smoothing={label_smoothing}")
+    if is_main:
+        print(f"Using CrossEntropyLoss with label_smoothing={label_smoothing}")
 
     optimizer = optim.Adam(
         model.parameters(),
@@ -374,13 +425,19 @@ def train_model(config, csv_file, device='cuda', fold_idx=None):
         'learning_rate': []
     }
 
-    print(f"\nStarting training for {num_epochs} epochs...")
-    print(f"Device: {device}")
-    print()
+    if is_main:
+        print(f"\nStarting training for {num_epochs} epochs...")
+        print(f"Device: {device}")
+        print()
 
     for epoch in range(num_epochs):
-        print(f"Epoch {epoch + 1}/{num_epochs}")
-        print("-" * 50)
+        # Set epoch for distributed sampler (ensures different shuffling each epoch)
+        if use_ddp:
+            train_loader.sampler.set_epoch(epoch)
+
+        if is_main:
+            print(f"Epoch {epoch + 1}/{num_epochs}")
+            print("-" * 50)
 
         # Train
         train_loss, train_acc = train_epoch(
@@ -398,32 +455,35 @@ def train_model(config, csv_file, device='cuda', fold_idx=None):
         # Get current learning rate
         current_lr = optimizer.param_groups[0]['lr']
 
-        # Record history (convert to Python native types for JSON serialization)
-        history['train_loss'].append(float(train_loss))
-        history['val_loss'].append(float(val_loss))
-        history['train_acc'].append(float(train_acc))
-        history['val_acc'].append(float(val_acc))
-        history['learning_rate'].append(float(current_lr))
+        # Record history and log (only main process)
+        if is_main:
+            history['train_loss'].append(float(train_loss))
+            history['val_loss'].append(float(val_loss))
+            history['train_acc'].append(float(train_acc))
+            history['val_acc'].append(float(val_acc))
+            history['learning_rate'].append(float(current_lr))
 
-        # Log metrics
-        writer.add_scalar('Loss/train', train_loss, epoch)
-        writer.add_scalar('Loss/val', val_loss, epoch)
-        writer.add_scalar('Accuracy/train', train_acc, epoch)
-        writer.add_scalar('Accuracy/val', val_acc, epoch)
-        writer.add_scalar('LR', current_lr, epoch)
+            # Log metrics
+            writer.add_scalar('Loss/train', train_loss, epoch)
+            writer.add_scalar('Loss/val', val_loss, epoch)
+            writer.add_scalar('Accuracy/train', train_acc, epoch)
+            writer.add_scalar('Accuracy/val', val_acc, epoch)
+            writer.add_scalar('LR', current_lr, epoch)
 
-        print(f"Train Loss: {train_loss:.4f}, Accuracy: {train_acc:.2f}%")
-        print(f"Val   Loss: {val_loss:.4f}, Accuracy: {val_acc:.2f}%")
-        print()
+            print(f"Train Loss: {train_loss:.4f}, Accuracy: {train_acc:.2f}%")
+            print(f"Val   Loss: {val_loss:.4f}, Accuracy: {val_acc:.2f}%")
+            print()
 
-        # Save best model
-        if val_loss < best_val_loss:
+        # Save best model (only main process)
+        if is_main and val_loss < best_val_loss:
             best_val_loss = val_loss
             if config['output']['save_best_only']:
+                # Save the underlying model if using DDP
+                model_to_save = model.module if use_ddp else model
                 checkpoint = {
                     'epoch': epoch,
                     'fold_idx': fold_idx,
-                    'model_state_dict': model.state_dict(),
+                    'model_state_dict': model_to_save.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                     'val_loss': float(val_loss),
                     'val_acc': float(val_acc),
@@ -437,47 +497,63 @@ def train_model(config, csv_file, device='cuda', fold_idx=None):
         # Early stopping
         early_stopping(val_loss)
         if early_stopping.early_stop:
-            print("Early stopping triggered!")
+            if is_main:
+                print("Early stopping triggered!")
             break
 
-    # Test on test set
-    print("\nEvaluating on test set...")
+    # Synchronize all processes before evaluation
+    if use_ddp:
+        dist.barrier()
+
+    # Test on test set (only main process shows detailed metrics)
+    if is_main:
+        print("\nEvaluating on test set...")
     test_loss, test_acc, test_preds, test_targets = validate_epoch(
-        model, test_loader, criterion, device, show_metrics=True
+        model, test_loader, criterion, device, show_metrics=(is_main)
     )
 
-    print(f"Test Loss: {test_loss:.4f}, Accuracy: {test_acc:.2f}%")
+    if is_main:
+        print(f"Test Loss: {test_loss:.4f}, Accuracy: {test_acc:.2f}%")
 
-    # Print detailed classification metrics
-    class_names = ['Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5']
-    print_classification_metrics(test_preds, test_targets, class_names=class_names)
+        # Print detailed classification metrics
+        class_names = ['Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5']
+        print_classification_metrics(test_preds, test_targets, class_names=class_names)
 
-    # Plot training curves
-    print("\nGenerating training curves...")
-    curves_path = os.path.join(fold_save_path, 'training_curves.png')
-    plot_training_curves(history, curves_path)
+    # Plot training curves and save results (only main process)
+    if is_main:
+        print("\nGenerating training curves...")
+        curves_path = os.path.join(fold_save_path, 'training_curves.png')
+        plot_training_curves(history, curves_path)
 
-    # Save training history
-    history_path = os.path.join(fold_save_path, 'training_history.json')
-    with open(history_path, 'w') as f:
-        json.dump(history, f, indent=2)
-    print(f"Saved training history to {history_path}")
+        # Save training history
+        history_path = os.path.join(fold_save_path, 'training_history.json')
+        with open(history_path, 'w') as f:
+            json.dump(history, f, indent=2)
+        print(f"Saved training history to {history_path}")
 
-    # Save final results (convert to Python native types for JSON serialization)
-    results = {
-        'fold_idx': fold_idx,
-        'test_loss': float(test_loss),
-        'test_acc': float(test_acc),
-        'best_val_loss': float(best_val_loss)
-    }
+        # Save final results (convert to Python native types for JSON serialization)
+        results = {
+            'fold_idx': fold_idx,
+            'test_loss': float(test_loss),
+            'test_acc': float(test_acc),
+            'best_val_loss': float(best_val_loss)
+        }
 
-    results_path = os.path.join(fold_save_path, 'results.json')
-    with open(results_path, 'w') as f:
-        json.dump(results, f, indent=2)
+        results_path = os.path.join(fold_save_path, 'results.json')
+        with open(results_path, 'w') as f:
+            json.dump(results, f, indent=2)
 
-    print(f"Saved results to {results_path}")
+        print(f"Saved results to {results_path}")
 
-    writer.close()
+        writer.close()
+    else:
+        # Non-main processes still need to return results for consistency
+        results = {
+            'fold_idx': fold_idx,
+            'test_loss': float(test_loss),
+            'test_acc': float(test_acc),
+            'best_val_loss': float(best_val_loss)
+        }
 
     return model, results
 
@@ -492,14 +568,47 @@ def get_default_device():
         return 'cpu'
 
 
+def run_ddp_training(rank, world_size, config, csv_path, fold_indices):
+    """
+    Run training for a specific process in DDP setup
+
+    Args:
+        rank: Rank of current process
+        world_size: Total number of processes
+        config: Configuration dictionary
+        csv_path: Path to CSV file
+        fold_indices: List of fold indices to train
+    """
+    # Setup DDP
+    setup_ddp(rank, world_size)
+
+    # Train each fold
+    all_results = []
+    for fold_idx in fold_indices:
+        model, results = train_model(
+            config, csv_path, device='cuda', fold_idx=fold_idx,
+            rank=rank, world_size=world_size
+        )
+        # Only main process collects results
+        if rank == 0:
+            all_results.append(results)
+
+    # Cleanup DDP
+    cleanup_ddp()
+
+    return all_results
+
+
 def main():
-    parser = argparse.ArgumentParser(description='Train STGCN for attention prediction with k-fold cross validation')
+    parser = argparse.ArgumentParser(description='Train STGCN for attention prediction with k-fold cross validation and DDP')
     parser.add_argument('--config', type=str, default='config.json', help='Path to config file')
     parser.add_argument('--csv', type=str, default='merge_0.csv', help='Path to CSV file')
     parser.add_argument('--device', type=str, default=get_default_device(),
                         help='Device to use for training (cuda/mps/cpu)')
     parser.add_argument('--fold', type=int, default=None,
                         help='Specific fold to train (0 to n_folds-1). If not specified, trains all folds.')
+    parser.add_argument('--num_gpus', type=int, default=1,
+                        help='Number of GPUs to use for DDP training (default: 1, single GPU)')
 
     args = parser.parse_args()
 
@@ -519,11 +628,42 @@ def main():
         # Train all folds
         fold_indices = list(range(n_folds))
 
-    # Train each fold
-    all_results = []
-    for fold_idx in fold_indices:
-        model, results = train_model(config, args.csv, device=args.device, fold_idx=fold_idx)
-        all_results.append(results)
+    # Validate GPU count
+    if args.num_gpus > 1:
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA is not available. Cannot use multiple GPUs.")
+        available_gpus = torch.cuda.device_count()
+        if args.num_gpus > available_gpus:
+            raise ValueError(f"Requested {args.num_gpus} GPUs but only {available_gpus} are available.")
+        print(f"\nUsing DDP with {args.num_gpus} GPUs")
+    elif args.num_gpus == 1:
+        print(f"\nUsing single GPU training")
+    else:
+        raise ValueError("num_gpus must be >= 1")
+
+    # Train with DDP or single GPU
+    if args.num_gpus > 1:
+        # Multi-GPU training with DDP
+        mp.spawn(
+            run_ddp_training,
+            args=(args.num_gpus, config, args.csv, fold_indices),
+            nprocs=args.num_gpus,
+            join=True
+        )
+        # Load results from saved files (since only rank 0 saves)
+        all_results = []
+        for fold_idx in fold_indices:
+            results_path = os.path.join(config['output']['model_save_path'], f'fold_{fold_idx}', 'results.json')
+            if os.path.exists(results_path):
+                with open(results_path, 'r') as f:
+                    results = json.load(f)
+                    all_results.append(results)
+    else:
+        # Single GPU training
+        all_results = []
+        for fold_idx in fold_indices:
+            _, results = train_model(config, args.csv, device=args.device, fold_idx=fold_idx)
+            all_results.append(results)
 
     # Print summary
     print("\n" + "="*80)
