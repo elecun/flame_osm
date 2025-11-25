@@ -367,7 +367,7 @@ def train_model(config, csv_file, device='cuda', fold_idx=None, rank=None, world
     # Create data loaders
     if is_main:
         print("Creating data loaders...")
-    train_loader, val_loader, test_loader, scaler, feature_dims = create_data_loaders(
+    train_loader, val_loader, test_loader, scaler, feature_dims, class_weights = create_data_loaders(
         config, csv_file, fold_idx, rank, world_size
     )
 
@@ -408,12 +408,6 @@ def train_model(config, csv_file, device='cuda', fold_idx=None, rank=None, world
     # Loss and optimizer (CrossEntropyLoss with label smoothing and class weights)
     label_smoothing = config['training'].get('label_smoothing', 0.0)
 
-    # Class weights for imbalanced dataset (Class 1, 3, 5)
-    # Based on inverse frequency: Class 1: 20.41%, Class 3: 58.37%, Class 5: 21.22%
-    # The model outputs 5 classes (0-4). The weight tensor must have 5 elements.
-    # Classes 1, 3, 5 correspond to indices 0, 2, 4.
-    # We set weights for non-appearing classes (1, 3) to 0.
-    class_weights = torch.tensor([1.6332, 0.0, 0.5711, 0.0, 1.5707])
     if use_ddp:
         class_weights = class_weights.to(rank)
     else:
@@ -422,7 +416,7 @@ def train_model(config, csv_file, device='cuda', fold_idx=None, rank=None, world
     criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=label_smoothing)
     if is_main:
         print(f"Using CrossEntropyLoss with label_smoothing={label_smoothing}")
-        print(f"Class weights: {class_weights.cpu().numpy()}")
+        print(f"Using dynamic class weights: {np.round(class_weights.cpu().numpy(), 4)}")
 
     optimizer = optim.Adam(
         model.parameters(),
@@ -603,12 +597,12 @@ def get_default_device():
         return 'cpu'
 
 
-def run_ddp_training(rank, world_size, config, csv_path, fold_indices):
+def run_ddp_training(rank, world_size, config, csv_path, fold_indices, class_weights):
     """
     Run training for a specific process in DDP setup
 
     Args:
-        rank: Rank of current process
+        rank: Rank of current process 
         world_size: Total number of processes
         config: Configuration dictionary
         csv_path: Path to CSV file
@@ -681,7 +675,7 @@ def main():
         # Multi-GPU training with DDP
         mp.spawn(
             run_ddp_training,
-            args=(args.num_gpus, config, args.csv, fold_indices),
+            args=(args.num_gpus, config, args.csv, fold_indices, None),  # class_weights will be loaded inside
             nprocs=args.num_gpus,
             join=True
         )

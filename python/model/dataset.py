@@ -261,6 +261,7 @@ def create_data_loaders(config, csv_path, fold_idx=None, rank=None, world_size=N
     """
     import os
     import glob
+    from collections import Counter
 
     # Get CSV files
     if config['data'].get('is_directory', False):
@@ -306,6 +307,27 @@ def create_data_loaders(config, csv_path, fold_idx=None, rank=None, world_size=N
         combined_df.iloc[:val_start],
         combined_df.iloc[val_end:]
     ], ignore_index=True)
+
+    # Calculate class weights dynamically from the training data
+    # Use inverse frequency to give more weight to less frequent classes
+    attention_levels = train_df['attention_level'].values
+    class_counts = Counter(attention_levels)
+    num_classes = config['model'].get('num_classes', 5)  # Default to 5 classes
+    total_train_samples = len(train_df)
+
+    weights = []
+    # Classes are 1-based (1, 2, 3, 4, 5) in the CSV
+    for i in range(1, num_classes + 1):
+        count = class_counts.get(i, 0)
+        if count == 0:
+            # If a class is not in the training data, its weight is 0.
+            weights.append(0.0)
+        else:
+            # Inverse frequency weighting formula
+            weight = total_train_samples / (num_classes * count)
+            weights.append(weight)
+
+    class_weights = torch.tensor(weights, dtype=torch.float32)
 
     # Test: use last fold as test set (if not already used as validation)
     test_start = (n_folds - 1) * fold_size
@@ -435,7 +457,7 @@ def create_data_loaders(config, csv_path, fold_idx=None, rank=None, world_size=N
     print(f"  Test: {len(test_dataset)} sequences ({len(test_df)} frames)")
     print(f"  Total frames: {total_samples}")
 
-    return train_loader, val_loader, test_loader, scaler, feature_dims
+    return train_loader, val_loader, test_loader, scaler, feature_dims, class_weights
 
 
 if __name__ == '__main__':
