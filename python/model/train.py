@@ -65,12 +65,14 @@ class EarlyStopping:
             self.counter = 0
 
 
-def train_epoch(model, train_loader, criterion, optimizer, device):
-    """Train for one epoch"""
+def train_epoch(model, train_loader, criterion, optimizer, device, max_grad_norm=1.0):
+    """Train for one epoch with gradient clipping"""
     model.train()
     total_loss = 0.0
     correct = 0
     total = 0
+    total_grad_norm = 0.0
+    num_batches = 0
 
     pbar = tqdm(train_loader, desc='Training')
     for batch in pbar:
@@ -88,6 +90,12 @@ def train_epoch(model, train_loader, criterion, optimizer, device):
 
         # Backward pass
         loss.backward()
+
+        # Gradient clipping
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+        total_grad_norm += grad_norm.item()
+        num_batches += 1
+
         optimizer.step()
 
         total_loss += loss.item()
@@ -97,12 +105,17 @@ def train_epoch(model, train_loader, criterion, optimizer, device):
         total += attention.size(0)
         correct += (predicted == attention).sum().item()
 
-        pbar.set_postfix({'loss': f'{loss.item():.4f}', 'acc': f'{100 * correct / total:.2f}%'})
+        pbar.set_postfix({
+            'loss': f'{loss.item():.4f}',
+            'acc': f'{100 * correct / total:.2f}%',
+            'grad': f'{grad_norm.item():.3f}'
+        })
 
     avg_loss = total_loss / len(train_loader)
     accuracy = 100 * correct / total
+    avg_grad_norm = total_grad_norm / num_batches
 
-    return avg_loss, accuracy
+    return avg_loss, accuracy, avg_grad_norm
 
 
 def validate_epoch(model, val_loader, criterion, device, show_metrics=False):
@@ -296,8 +309,14 @@ def plot_training_curves(history, save_path):
     axes[1, 0].set_yscale('log')
     axes[1, 0].grid(True, alpha=0.3)
 
-    # Plot 4: Empty (reserved for future use)
-    axes[1, 1].axis('off')
+    # Plot 4: Gradient Norm
+    axes[1, 1].plot(epochs, history['grad_norm'], 'm-', linewidth=2, label='Gradient Norm')
+    axes[1, 1].set_xlabel('Epoch', fontsize=12)
+    axes[1, 1].set_ylabel('Gradient Norm', fontsize=12)
+    axes[1, 1].set_title('Gradient Norm (Clipped at 1.0)', fontsize=14, fontweight='bold')
+    axes[1, 1].grid(True, alpha=0.3)
+    axes[1, 1].axhline(y=1.0, color='r', linestyle='--', alpha=0.5, label='Clip threshold')
+    axes[1, 1].legend(fontsize=10)
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
@@ -386,11 +405,21 @@ def train_model(config, csv_file, device='cuda', fold_idx=None, rank=None, world
         print(f"Total parameters: {total_params:,}")
         print(f"Trainable parameters: {trainable_params:,}")
 
-    # Loss and optimizer (CrossEntropyLoss with label smoothing for classification)
+    # Loss and optimizer (CrossEntropyLoss with label smoothing and class weights)
     label_smoothing = config['training'].get('label_smoothing', 0.0)
-    criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
+
+    # Class weights for imbalanced dataset (Class 1, 3, 5)
+    # Based on inverse frequency: Class 1: 20.41%, Class 3: 58.37%, Class 5: 21.22%
+    class_weights = torch.tensor([1.6332, 0.5711, 1.5707])
+    if use_ddp:
+        class_weights = class_weights.to(rank)
+    else:
+        class_weights = class_weights.to(device)
+
+    criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=label_smoothing)
     if is_main:
         print(f"Using CrossEntropyLoss with label_smoothing={label_smoothing}")
+        print(f"Class weights: {class_weights.cpu().numpy()}")
 
     optimizer = optim.Adam(
         model.parameters(),
@@ -422,7 +451,8 @@ def train_model(config, csv_file, device='cuda', fold_idx=None, rank=None, world
         'val_loss': [],
         'train_acc': [],
         'val_acc': [],
-        'learning_rate': []
+        'learning_rate': [],
+        'grad_norm': []
     }
 
     if is_main:
@@ -440,7 +470,7 @@ def train_model(config, csv_file, device='cuda', fold_idx=None, rank=None, world
             print("-" * 50)
 
         # Train
-        train_loss, train_acc = train_epoch(
+        train_loss, train_acc, grad_norm = train_epoch(
             model, train_loader, criterion, optimizer, device
         )
 
@@ -462,6 +492,7 @@ def train_model(config, csv_file, device='cuda', fold_idx=None, rank=None, world
             history['train_acc'].append(float(train_acc))
             history['val_acc'].append(float(val_acc))
             history['learning_rate'].append(float(current_lr))
+            history['grad_norm'].append(float(grad_norm))
 
             # Log metrics
             writer.add_scalar('Loss/train', train_loss, epoch)
@@ -469,8 +500,9 @@ def train_model(config, csv_file, device='cuda', fold_idx=None, rank=None, world
             writer.add_scalar('Accuracy/train', train_acc, epoch)
             writer.add_scalar('Accuracy/val', val_acc, epoch)
             writer.add_scalar('LR', current_lr, epoch)
+            writer.add_scalar('GradNorm/train', grad_norm, epoch)
 
-            print(f"Train Loss: {train_loss:.4f}, Accuracy: {train_acc:.2f}%")
+            print(f"Train Loss: {train_loss:.4f}, Accuracy: {train_acc:.2f}%, Grad Norm: {grad_norm:.3f}")
             print(f"Val   Loss: {val_loss:.4f}, Accuracy: {val_acc:.2f}%")
             print()
 

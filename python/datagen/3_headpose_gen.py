@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 import cv2
 import numpy as np
+import pandas as pd
 
 
 def detect_csv_encoding(file_path: Path) -> str:
@@ -676,6 +677,62 @@ def process_single_file(face_kps_csv: Path, output_path: Path,
     print(f"[SUCCESS] Output saved to: {output_path}")
 
 
+def autofill_missing_values(csv_path: Path) -> int:
+    """
+    Fill missing (NaN) values in CSV with linear interpolation from neighboring values.
+
+    Args:
+        csv_path: Path to CSV file to process
+
+    Returns:
+        Number of NaN values that were filled
+    """
+    print(f"\n  [AUTOFILL] Processing {csv_path.name}...")
+
+    # Read CSV
+    df = pd.read_csv(csv_path)
+
+    # Count initial NaN values
+    initial_nan_count = df.isnull().sum().sum()
+
+    if initial_nan_count == 0:
+        print(f"  [AUTOFILL] No missing values found")
+        return 0
+
+    print(f"  [AUTOFILL] Found {initial_nan_count} missing values")
+
+    # Get head pose columns (exclude timestamp)
+    head_pose_cols = [col for col in df.columns if col != 'timestamp']
+
+    # Interpolate missing values using linear interpolation
+    # This fills NaN values with the average of neighboring values
+    df[head_pose_cols] = df[head_pose_cols].interpolate(
+        method='linear',
+        limit_direction='both',  # Fill in both directions
+        axis=0  # Interpolate along rows (time axis)
+    )
+
+    # For any remaining NaN at the edges, use forward/backward fill
+    df[head_pose_cols] = df[head_pose_cols].fillna(method='bfill')  # Backward fill
+    df[head_pose_cols] = df[head_pose_cols].fillna(method='ffill')  # Forward fill
+
+    # If still any NaN (shouldn't happen), fill with 0
+    df[head_pose_cols] = df[head_pose_cols].fillna(0)
+
+    # Count remaining NaN values
+    final_nan_count = df.isnull().sum().sum()
+    filled_count = initial_nan_count - final_nan_count
+
+    # Save back to CSV
+    df.to_csv(csv_path, index=False)
+
+    print(f"  [AUTOFILL] Filled {filled_count} missing values using interpolation")
+    if final_nan_count > 0:
+        print(f"  [AUTOFILL] Warning: {final_nan_count} values could not be filled")
+
+    return filled_count
+
+
 def generate_csv_header() -> List[str]:
     """
     Generate CSV header for head pose data.
@@ -735,6 +792,11 @@ def main():
         action='store_true',
         help='Disable RANSAC (use standard iterative PnP instead)'
     )
+    parser.add_argument(
+        '--autofill',
+        action='store_true',
+        help='Automatically fill missing (NaN) values with interpolation from neighboring values'
+    )
 
     args = parser.parse_args()
 
@@ -781,6 +843,11 @@ def main():
                 max_translation=args.max_translation,
                 use_ransac=not args.no_ransac
             )
+
+            # Autofill missing values if requested
+            if args.autofill:
+                autofill_missing_values(output_path)
+
         except Exception as e:
             print(f"\nError processing file: {e}")
             import traceback
@@ -870,6 +937,10 @@ def main():
                 max_translation=args.max_translation,
                 use_ransac=not args.no_ransac
             )
+
+        # Autofill missing values if requested
+        if args.autofill:
+            autofill_missing_values(output_path)
 
         print(f"  [SUCCESS] Output saved to: {output_path}\n")
 
