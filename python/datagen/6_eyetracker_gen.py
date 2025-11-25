@@ -205,13 +205,73 @@ def classify_attention_level(k_coefficient: float, k1: float, k2: float) -> int:
         return 1  # Strong Ambient Attention
 
 
+def apply_minimum_dwell_time(results: List[Dict], min_dwell_sec: float) -> None:
+    """
+    Apply minimum dwell time filtering for focal attention transitions.
+
+    This prevents rapid transitions to focal attention (levels 4, 5) by requiring
+    that focal attention segments must persist for at least min_dwell_sec seconds.
+    If a focal attention segment is shorter than min_dwell_sec, the attention level
+    is reverted to the previous state.
+
+    Args:
+        results: List of result dictionaries with 'timestamp' and 'attention_level'
+        min_dwell_sec: Minimum dwell time in seconds
+    """
+    if len(results) == 0:
+        return
+
+    # Create a copy of attention levels to modify
+    attention_levels = [r['attention_level'] for r in results]
+    timestamps = [r['timestamp'] for r in results]
+
+    i = 0
+    while i < len(attention_levels):
+        current_level = attention_levels[i]
+
+        # Check if this is a transition to focal attention (4 or 5)
+        if current_level in [4, 5]:
+            # Get previous level (before this focal segment)
+            prev_level = attention_levels[i - 1] if i > 0 else 3  # Default to neutral
+
+            # Find the end of this focal attention segment
+            segment_start = i
+            segment_end = i
+
+            # Extend segment while attention level is focal (4 or 5)
+            while segment_end < len(attention_levels) and attention_levels[segment_end] in [4, 5]:
+                segment_end += 1
+
+            # Calculate segment duration
+            if segment_end < len(timestamps):
+                segment_duration = timestamps[segment_end - 1] - timestamps[segment_start]
+            else:
+                # Last segment goes to the end
+                segment_duration = timestamps[-1] - timestamps[segment_start]
+
+            # If segment is shorter than min_dwell, revert to previous level
+            if segment_duration < min_dwell_sec:
+                for j in range(segment_start, segment_end):
+                    attention_levels[j] = prev_level
+
+            # Move to the end of this segment
+            i = segment_end
+        else:
+            i += 1
+
+    # Update results with filtered attention levels
+    for i, result in enumerate(results):
+        result['attention_level'] = attention_levels[i]
+
+
 def match_timestamps_to_fixations_and_saccades(
     time_references: np.ndarray,
     fixations: List[Fixation],
     saccades: List[Saccade],
     window_size: int = 10,
     k1: float = 0.5,
-    k2: float = 1.5
+    k2: float = 1.5,
+    min_dwell_sec: float = None
 ) -> List[Dict]:
     """
     Match camera timestamps to fixation IDs and saccade data, and calculate K coefficient
@@ -228,6 +288,10 @@ def match_timestamps_to_fixations_and_saccades(
     Also classify attention level (1-5) based on EWMA K coefficient:
     1 = Strong Ambient Attention, 2 = Weak Ambient, 3 = Neutral, 4 = Weak Focal, 5 = Strong Focal
 
+    If min_dwell_sec is specified, applies minimum dwell time filtering to prevent rapid
+    transitions to focal attention. Focal attention segments shorter than min_dwell_sec
+    are reverted to the previous attention state.
+
     Args:
         time_references: Array of camera timestamps in seconds
         fixations: List of Fixation objects
@@ -235,6 +299,7 @@ def match_timestamps_to_fixations_and_saccades(
         window_size: Number of past timestamps to consider for K calculation
         k1: First threshold for attention level classification (default: 0.5)
         k2: Second threshold for attention level classification (default: 1.5)
+        min_dwell_sec: Minimum dwell time in seconds for focal attention transitions (default: None)
 
     Returns:
         List of dictionaries with timestamp, fixation_id, saccade_id, saccade_amplitude_deg,
@@ -422,7 +487,7 @@ def match_timestamps_to_fixations_and_saccades(
     # ============================================================
     # Apply additional EWMA smoothing for attention level classification
     # ============================================================
-    alpha_k = 0.1  # Much slower smoothing for stable attention classification
+    alpha_k = 0.03  # Much slower smoothing for stable attention classification
     k_smooth = np.zeros(len(results))
     k_smooth_value = None
 
@@ -486,6 +551,10 @@ def match_timestamps_to_fixations_and_saccades(
             # Fill missing attention level with 3 (Neutral)
             result['attention_level'] = 3
 
+    # Apply minimum dwell time filtering if specified
+    if min_dwell_sec is not None and min_dwell_sec > 0:
+        apply_minimum_dwell_time(results, min_dwell_sec)
+
     return results
 
 
@@ -528,6 +597,12 @@ def main():
         type=float,
         default=1.5,
         help='Second threshold for attention level classification (strong attention boundary, default: 1.5)'
+    )
+    parser.add_argument(
+        '--min-dwell',
+        type=float,
+        default=None,
+        help='Minimum dwell time in seconds for focal attention transitions (default: None, no filtering)'
     )
 
     args = parser.parse_args()
@@ -573,8 +648,11 @@ def main():
         print(f"Calculating K coefficients with window size: {args.window_size}")
         print(f"Using three methods: Rolling Z-score, EWMA Z-score, MAD")
         print(f"Attention level thresholds: k1={args.k1}, k2={args.k2}")
+        if getattr(args, 'min_dwell', None) is not None:
+            print(f"Applying minimum dwell time filter: {args.min_dwell} seconds")
         results = match_timestamps_to_fixations_and_saccades(
-            time_references, fixations, saccades, args.window_size, args.k1, args.k2
+            time_references, fixations, saccades, args.window_size, args.k1, args.k2,
+            min_dwell_sec=getattr(args, 'min_dwell', None)
         )
 
         # Count matches
