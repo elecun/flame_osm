@@ -282,30 +282,46 @@ def plot_training_curves(history, save_path):
     plt.close()
 
 
-def train_model(config, csv_file, device='cuda'):
-    """Main training function"""
+def train_model(config, csv_file, device='cuda', fold_idx=None):
+    """Main training function with k-fold cross validation support
+
+    Args:
+        config: Configuration dictionary
+        csv_file: Path to CSV file
+        device: Device to use for training
+        fold_idx: Current fold index (0 to n_folds-1). If None, uses config value.
+    """
+    # Get fold information
+    n_folds = config['training'].get('n_folds', 5)
+    if fold_idx is None:
+        fold_idx = config['training'].get('current_fold', 0)
 
     # Create output directories
-    os.makedirs(config['output']['model_save_path'], exist_ok=True)
+    fold_save_path = os.path.join(config['output']['model_save_path'], f'fold_{fold_idx}')
+    os.makedirs(fold_save_path, exist_ok=True)
     os.makedirs(config['output']['log_dir'], exist_ok=True)
 
     # Create timestamp for this run
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_dir = os.path.join(config['output']['log_dir'], timestamp)
+    log_dir = os.path.join(config['output']['log_dir'], f'fold_{fold_idx}_{timestamp}')
     writer = SummaryWriter(log_dir)
+
+    print(f"\n{'='*80}")
+    print(f"Training Fold {fold_idx}/{n_folds-1}")
+    print(f"{'='*80}")
 
     # Create data loaders
     print("Creating data loaders...")
-    train_loader, val_loader, test_loader, scaler, feature_dims = create_data_loaders(config, csv_file)
+    train_loader, val_loader, test_loader, scaler, feature_dims = create_data_loaders(config, csv_file, fold_idx)
 
     # Save scaler
-    scaler_path = os.path.join(config['output']['model_save_path'], 'scaler.pkl')
+    scaler_path = os.path.join(fold_save_path, 'scaler.pkl')
     with open(scaler_path, 'wb') as f:
         pickle.dump(scaler, f)
     print(f"Saved scaler to {scaler_path}")
 
     # Save feature dimensions
-    feature_dims_path = os.path.join(config['output']['model_save_path'], 'feature_dims.pkl')
+    feature_dims_path = os.path.join(fold_save_path, 'feature_dims.pkl')
     with open(feature_dims_path, 'wb') as f:
         pickle.dump(feature_dims, f)
     print(f"Saved feature dimensions to {feature_dims_path}")
@@ -320,8 +336,11 @@ def train_model(config, csv_file, device='cuda'):
     print(f"Total parameters: {total_params:,}")
     print(f"Trainable parameters: {trainable_params:,}")
 
-    # Loss and optimizer (CrossEntropyLoss for classification)
-    criterion = nn.CrossEntropyLoss()
+    # Loss and optimizer (CrossEntropyLoss with label smoothing for classification)
+    label_smoothing = config['training'].get('label_smoothing', 0.0)
+    criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
+    print(f"Using CrossEntropyLoss with label_smoothing={label_smoothing}")
+
     optimizer = optim.Adam(
         model.parameters(),
         lr=config['training']['learning_rate'],
@@ -368,9 +387,9 @@ def train_model(config, csv_file, device='cuda'):
             model, train_loader, criterion, optimizer, device
         )
 
-        # Validate (enable debug for first 3 epochs)
+        # Validate
         val_loss, val_acc, val_preds, val_targets = validate_epoch(
-            model, val_loader, criterion, device, debug=(epoch < 3)
+            model, val_loader, criterion, device, show_metrics=False
         )
 
         # Learning rate scheduling
@@ -403,13 +422,14 @@ def train_model(config, csv_file, device='cuda'):
             if config['output']['save_best_only']:
                 checkpoint = {
                     'epoch': epoch,
+                    'fold_idx': fold_idx,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                     'val_loss': float(val_loss),
                     'val_acc': float(val_acc),
                     'config': config
                 }
-                model_path = os.path.join(config['output']['model_save_path'], 'best_model.pth')
+                model_path = os.path.join(fold_save_path, 'best_model.pth')
                 torch.save(checkpoint, model_path)
                 print(f"✓ Saved best model to {model_path}")
                 print()
@@ -423,7 +443,7 @@ def train_model(config, csv_file, device='cuda'):
     # Test on test set
     print("\nEvaluating on test set...")
     test_loss, test_acc, test_preds, test_targets = validate_epoch(
-        model, test_loader, criterion, device, debug=True
+        model, test_loader, criterion, device, show_metrics=True
     )
 
     print(f"Test Loss: {test_loss:.4f}, Accuracy: {test_acc:.2f}%")
@@ -434,23 +454,24 @@ def train_model(config, csv_file, device='cuda'):
 
     # Plot training curves
     print("\nGenerating training curves...")
-    curves_path = os.path.join(config['output']['model_save_path'], 'training_curves.png')
+    curves_path = os.path.join(fold_save_path, 'training_curves.png')
     plot_training_curves(history, curves_path)
 
     # Save training history
-    history_path = os.path.join(config['output']['model_save_path'], 'training_history.json')
+    history_path = os.path.join(fold_save_path, 'training_history.json')
     with open(history_path, 'w') as f:
         json.dump(history, f, indent=2)
     print(f"Saved training history to {history_path}")
 
     # Save final results (convert to Python native types for JSON serialization)
     results = {
+        'fold_idx': fold_idx,
         'test_loss': float(test_loss),
         'test_acc': float(test_acc),
         'best_val_loss': float(best_val_loss)
     }
 
-    results_path = os.path.join(config['output']['model_save_path'], 'results.json')
+    results_path = os.path.join(fold_save_path, 'results.json')
     with open(results_path, 'w') as f:
         json.dump(results, f, indent=2)
 
@@ -472,11 +493,13 @@ def get_default_device():
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Train STGCN for attention prediction')
+    parser = argparse.ArgumentParser(description='Train STGCN for attention prediction with k-fold cross validation')
     parser.add_argument('--config', type=str, default='config.json', help='Path to config file')
     parser.add_argument('--csv', type=str, default='merge_0.csv', help='Path to CSV file')
     parser.add_argument('--device', type=str, default=get_default_device(),
                         help='Device to use for training (cuda/mps/cpu)')
+    parser.add_argument('--fold', type=int, default=None,
+                        help='Specific fold to train (0 to n_folds-1). If not specified, trains all folds.')
 
     args = parser.parse_args()
 
@@ -484,12 +507,75 @@ def main():
     with open(args.config, 'r') as f:
         config = json.load(f)
 
-    # Train model
-    model, results = train_model(config, args.csv, device=args.device)
+    n_folds = config['training'].get('n_folds', 5)
 
-    print("\nTraining completed!")
-    print(f"Best validation loss: {results['best_val_loss']:.4f}")
-    print(f"Test Accuracy: {results['test_acc']:.2f}%")
+    # Determine which folds to train
+    if args.fold is not None:
+        # Train specific fold
+        if args.fold < 0 or args.fold >= n_folds:
+            raise ValueError(f"Fold index must be between 0 and {n_folds-1}")
+        fold_indices = [args.fold]
+    else:
+        # Train all folds
+        fold_indices = list(range(n_folds))
+
+    # Train each fold
+    all_results = []
+    for fold_idx in fold_indices:
+        model, results = train_model(config, args.csv, device=args.device, fold_idx=fold_idx)
+        all_results.append(results)
+
+    # Print summary
+    print("\n" + "="*80)
+    print("CROSS VALIDATION SUMMARY")
+    print("="*80)
+
+    if len(all_results) > 1:
+        # Multiple folds trained
+        print(f"\nResults for {len(all_results)} folds:")
+        print(f"{'Fold':<6} {'Val Loss':>12} {'Test Acc':>12}")
+        print("-" * 32)
+
+        val_losses = []
+        test_accs = []
+
+        for result in all_results:
+            fold_idx = result['fold_idx']
+            val_loss = result['best_val_loss']
+            test_acc = result['test_acc']
+
+            val_losses.append(val_loss)
+            test_accs.append(test_acc)
+
+            print(f"{fold_idx:<6} {val_loss:12.4f} {test_acc:11.2f}%")
+
+        print("-" * 32)
+        print(f"{'Mean':<6} {np.mean(val_losses):12.4f} {np.mean(test_accs):11.2f}%")
+        print(f"{'Std':<6} {np.std(val_losses):12.4f} {np.std(test_accs):11.2f}%")
+
+        # Save overall summary
+        summary = {
+            'n_folds': len(all_results),
+            'mean_val_loss': float(np.mean(val_losses)),
+            'std_val_loss': float(np.std(val_losses)),
+            'mean_test_acc': float(np.mean(test_accs)),
+            'std_test_acc': float(np.std(test_accs)),
+            'fold_results': all_results
+        }
+
+        summary_path = os.path.join(config['output']['model_save_path'], 'cv_summary.json')
+        with open(summary_path, 'w') as f:
+            json.dump(summary, f, indent=2)
+        print(f"\nSaved cross-validation summary to {summary_path}")
+
+    else:
+        # Single fold trained
+        result = all_results[0]
+        print(f"\nFold {result['fold_idx']} completed!")
+        print(f"Best validation loss: {result['best_val_loss']:.4f}")
+        print(f"Test Accuracy: {result['test_acc']:.2f}%")
+
+    print("="*80)
 
 
 if __name__ == '__main__':

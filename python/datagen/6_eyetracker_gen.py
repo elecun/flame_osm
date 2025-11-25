@@ -524,7 +524,7 @@ def match_timestamps_to_fixations_and_saccades(
     # ============================================================
     # Apply additional EWMA smoothing for attention level classification
     # ============================================================
-    alpha_k = 0.03  # Much slower smoothing for stable attention classification
+    alpha_k = 0.02  # Much slower smoothing for stable attention classification
     k_smooth = np.zeros(len(results))
     k_smooth_value = None
 

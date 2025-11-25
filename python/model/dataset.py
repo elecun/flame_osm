@@ -236,13 +236,14 @@ class AttentionDataset(Dataset):
         return dims
 
 
-def create_data_loaders(config, csv_path):
+def create_data_loaders(config, csv_path, fold_idx=None):
     """
-    Create train, validation, and test data loaders
+    Create train, validation, and test data loaders with k-fold cross validation support
 
     Args:
         config: Configuration dictionary
         csv_path: Path to CSV file or directory containing CSV files
+        fold_idx: Index of current fold (0 to n_folds-1). If None, uses config value.
     """
     import os
     import glob
@@ -264,88 +265,58 @@ def create_data_loaders(config, csv_path):
         df = pd.read_csv(csv_file)
         df_list.append(df)
 
-    total_samples = sum(len(df) for df in df_list)
+    # Concatenate all dataframes for k-fold splitting
+    combined_df = pd.concat(df_list, ignore_index=True)
+    total_samples = len(combined_df)
 
-    # Calculate split indices
-    train_split = config['training']['train_split']
-    val_split = config['training']['validation_split']
+    # Get k-fold configuration
+    n_folds = config['training'].get('n_folds', 5)
+    if fold_idx is None:
+        fold_idx = config['training'].get('current_fold', 0)
 
-    train_size = int(total_samples * train_split)
-    val_size = int(total_samples * val_split)
+    print(f"\nUsing {n_folds}-fold cross validation, current fold: {fold_idx}")
 
-    # Split files into train/val/test
-    train_files = []
-    val_files = []
-    test_files = []
+    # Calculate fold size (divide data into n_folds equal parts)
+    fold_size = total_samples // n_folds
 
-    current_samples = 0
-    for csv_file, df in zip(csv_files, df_list):
-        file_samples = len(df)
+    # Calculate indices for each fold
+    val_start = fold_idx * fold_size
+    val_end = val_start + fold_size if fold_idx < n_folds - 1 else total_samples
 
-        if current_samples < train_size:
-            # File belongs to training set
-            if current_samples + file_samples <= train_size:
-                train_files.append(csv_file)
-            else:
-                # File spans train and val/test - need to split it
-                # For simplicity, create temporary files
-                split_idx = train_size - current_samples
-                train_df = df[:split_idx]
-                remaining_df = df[split_idx:]
+    # Split data maintaining temporal order (no shuffling)
+    # Validation: current fold
+    val_df = combined_df.iloc[val_start:val_end].copy()
 
-                temp_dir = os.path.dirname(csv_file) if os.path.dirname(csv_file) else '.'
-                temp_train = os.path.join(temp_dir, f'temp_train_{os.path.basename(csv_file)}')
-                temp_remain = os.path.join(temp_dir, f'temp_remain_{os.path.basename(csv_file)}')
+    # Train: all folds except current fold
+    train_df = pd.concat([
+        combined_df.iloc[:val_start],
+        combined_df.iloc[val_end:]
+    ], ignore_index=True)
 
-                train_df.to_csv(temp_train, index=False)
-                remaining_df.to_csv(temp_remain, index=False)
+    # Test: use last fold as test set (if not already used as validation)
+    test_start = (n_folds - 1) * fold_size
+    if fold_idx == n_folds - 1:
+        # If last fold is validation, use first fold as test
+        test_df = combined_df.iloc[:fold_size].copy()
+    else:
+        test_df = combined_df.iloc[test_start:].copy()
 
-                train_files.append(temp_train)
+    # Save temporary files for each split
+    temp_dir = os.path.dirname(csv_files[0]) if os.path.dirname(csv_files[0]) else '.'
 
-                # Process remaining part
-                if current_samples + split_idx < train_size + val_size:
-                    if current_samples + file_samples <= train_size + val_size:
-                        val_files.append(temp_remain)
-                    else:
-                        # Remaining spans val and test
-                        val_split_idx = train_size + val_size - current_samples - split_idx
-                        val_df = remaining_df[:val_split_idx]
-                        test_df = remaining_df[val_split_idx:]
+    train_file = os.path.join(temp_dir, f'temp_train_fold{fold_idx}.csv')
+    val_file = os.path.join(temp_dir, f'temp_val_fold{fold_idx}.csv')
+    test_file = os.path.join(temp_dir, f'temp_test_fold{fold_idx}.csv')
 
-                        temp_val = os.path.join(temp_dir, f'temp_val_{os.path.basename(csv_file)}')
-                        temp_test = os.path.join(temp_dir, f'temp_test_{os.path.basename(csv_file)}')
+    train_df.to_csv(train_file, index=False)
+    val_df.to_csv(val_file, index=False)
+    test_df.to_csv(test_file, index=False)
 
-                        val_df.to_csv(temp_val, index=False)
-                        test_df.to_csv(temp_test, index=False)
+    train_files = [train_file]
+    val_files = [val_file]
+    test_files = [test_file]
 
-                        val_files.append(temp_val)
-                        test_files.append(temp_test)
-                else:
-                    test_files.append(temp_remain)
-        elif current_samples < train_size + val_size:
-            # File belongs to validation set
-            if current_samples + file_samples <= train_size + val_size:
-                val_files.append(csv_file)
-            else:
-                # File spans val and test
-                split_idx = train_size + val_size - current_samples
-                val_df = df[:split_idx]
-                test_df = df[split_idx:]
-
-                temp_dir = os.path.dirname(csv_file) if os.path.dirname(csv_file) else '.'
-                temp_val = os.path.join(temp_dir, f'temp_val_{os.path.basename(csv_file)}')
-                temp_test = os.path.join(temp_dir, f'temp_test_{os.path.basename(csv_file)}')
-
-                val_df.to_csv(temp_val, index=False)
-                test_df.to_csv(temp_test, index=False)
-
-                val_files.append(temp_val)
-                test_files.append(temp_test)
-        else:
-            # File belongs to test set
-            test_files.append(csv_file)
-
-        current_samples += file_samples
+    current_samples = total_samples
 
     # Feature configuration
     feature_config = config['data'].get('features', None)
@@ -411,10 +382,11 @@ def create_data_loaders(config, csv_path):
         pin_memory=True
     )
 
-    print(f"\nDataset splits:")
-    print(f"  Train: {len(train_dataset)} sequences from {len(train_files)} file(s)")
-    print(f"  Validation: {len(val_dataset)} sequences from {len(val_files)} file(s)")
-    print(f"  Test: {len(test_dataset)} sequences from {len(test_files)} file(s)")
+    print(f"\nDataset splits (Fold {fold_idx}/{n_folds-1}):")
+    print(f"  Train: {len(train_dataset)} sequences ({len(train_df)} frames)")
+    print(f"  Validation: {len(val_dataset)} sequences ({len(val_df)} frames)")
+    print(f"  Test: {len(test_dataset)} sequences ({len(test_df)} frames)")
+    print(f"  Total frames: {total_samples}")
 
     # Clean up temporary files
     for f in train_files + val_files + test_files:
