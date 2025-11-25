@@ -82,7 +82,7 @@ def train_epoch(model, train_loader, criterion, optimizer, device):
     return avg_loss, accuracy
 
 
-def validate_epoch(model, val_loader, criterion, device):
+def validate_epoch(model, val_loader, criterion, device, debug=False):
     """Validate for one epoch"""
     model.eval()
     total_loss = 0.0
@@ -92,7 +92,7 @@ def validate_epoch(model, val_loader, criterion, device):
     targets = []
 
     with torch.no_grad():
-        for batch in tqdm(val_loader, desc='Validation'):
+        for batch_idx, batch in enumerate(tqdm(val_loader, desc='Validation')):
             body_kps = batch['body_kps'].to(device)
             face_kps_2d = batch['face_kps_2d'].to(device)
             head_pose = batch['head_pose'].to(device)
@@ -114,10 +114,46 @@ def validate_epoch(model, val_loader, criterion, device):
             predictions.extend(predicted.cpu().numpy())
             targets.extend(attention.cpu().numpy())
 
+            # Debug: print first batch info
+            if debug and batch_idx == 0:
+                print(f"\n[DEBUG] First validation batch:")
+                print(f"  Body kps shape: {body_kps.shape}")
+                print(f"  Body kps stats: min={body_kps.min():.4f}, max={body_kps.max():.4f}, mean={body_kps.mean():.4f}")
+                print(f"  Face kps shape: {face_kps_2d.shape}")
+                print(f"  Face kps stats: min={face_kps_2d.min():.4f}, max={face_kps_2d.max():.4f}, mean={face_kps_2d.mean():.4f}")
+                print(f"  Head pose shape: {head_pose.shape}")
+                print(f"  Head pose stats: min={head_pose.min():.4f}, max={head_pose.max():.4f}, mean={head_pose.mean():.4f}")
+                print(f"  Outputs (logits) shape: {outputs.shape}")
+                print(f"  Outputs stats: min={outputs.min():.4f}, max={outputs.max():.4f}, mean={outputs.mean():.4f}")
+                print(f"  First 5 predictions: {predicted[:5].cpu().numpy()}")
+                print(f"  First 5 targets: {attention[:5].cpu().numpy()}")
+                print(f"  Unique predictions in batch: {torch.unique(predicted).cpu().numpy()}")
+                print(f"  Unique targets in batch: {torch.unique(attention).cpu().numpy()}")
+
     avg_loss = total_loss / len(val_loader)
     accuracy = 100 * correct / total
     predictions = np.array(predictions)
     targets = np.array(targets)
+
+    # Debug: print overall distribution
+    if debug:
+        print(f"\n[DEBUG] Validation set distribution:")
+        unique_preds, pred_counts = np.unique(predictions, return_counts=True)
+        unique_targs, targ_counts = np.unique(targets, return_counts=True)
+        print(f"  Unique predictions: {unique_preds}")
+        print(f"  Prediction counts: {pred_counts}")
+        print(f"  Unique targets: {unique_targs}")
+        print(f"  Target counts: {targ_counts}")
+        print(f"  Prediction distribution:")
+        for cls in unique_preds:
+            count = (predictions == cls).sum()
+            pct = 100 * count / len(predictions)
+            print(f"    Class {cls}: {count:6d} ({pct:5.2f}%)")
+        print(f"  Target distribution:")
+        for cls in unique_targs:
+            count = (targets == cls).sum()
+            pct = 100 * count / len(targets)
+            print(f"    Class {cls}: {count:6d} ({pct:5.2f}%)")
 
     return avg_loss, accuracy, predictions, targets
 
@@ -129,13 +165,20 @@ def print_classification_metrics(predictions, targets, class_names=None):
     Args:
         predictions: Predicted labels
         targets: True labels
-        class_names: Names of classes (default: 1, 2, 3, 4, 5)
+        class_names: Names of classes (default: auto-detect from data)
     """
-    if class_names is None:
-        class_names = ['1', '2', '3', '4', '5']
+    # Get unique classes from the data
+    unique_classes = np.unique(np.concatenate([predictions, targets]))
 
-    # Confusion matrix
-    cm = confusion_matrix(targets, predictions)
+    # Create class names based on actual classes present
+    if class_names is None:
+        class_names = [str(c + 1) for c in unique_classes]  # Convert 0-indexed to 1-indexed
+    else:
+        # Filter class_names to only include present classes
+        class_names = [class_names[i] for i in range(len(class_names)) if i in unique_classes]
+
+    # Confusion matrix with explicit labels
+    cm = confusion_matrix(targets, predictions, labels=unique_classes)
 
     print("\n" + "="*80)
     print("DETAILED CLASSIFICATION METRICS")
@@ -149,9 +192,9 @@ def print_classification_metrics(predictions, targets, class_names=None):
         print(f"Pred-{name:3s}", end=" ")
     print()
     print("       " + "-" * (8 * len(class_names)))
-    for i, name in enumerate(class_names):
-        print(f"True-{name:3s}|", end=" ")
-        for j in range(len(class_names)):
+    for i in range(len(unique_classes)):
+        print(f"True-{class_names[i]:3s}|", end=" ")
+        for j in range(len(unique_classes)):
             print(f"{cm[i, j]:6d}", end=" ")
         print()
 
@@ -167,7 +210,7 @@ def print_classification_metrics(predictions, targets, class_names=None):
     total_fp = 0
     total_fn = 0
 
-    for i, name in enumerate(class_names):
+    for i in range(len(unique_classes)):
         # Calculate TP, TN, FP, FN for class i
         tp = cm[i, i]
         fp = cm[:, i].sum() - tp
@@ -184,7 +227,7 @@ def print_classification_metrics(predictions, targets, class_names=None):
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0
         f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
 
-        print(f"Class {name:<3} {tp:8d} {tn:8d} {fp:8d} {fn:8d} {precision:10.4f} {recall:10.4f} {f1:10.4f}")
+        print(f"Class {class_names[i]:<3} {tp:8d} {tn:8d} {fp:8d} {fn:8d} {precision:10.4f} {recall:10.4f} {f1:10.4f}")
 
     print("-"*80)
 
@@ -204,7 +247,7 @@ def print_classification_metrics(predictions, targets, class_names=None):
     print("\n" + "-"*80)
     print("Classification Report (sklearn):")
     print("-"*80)
-    print(classification_report(targets, predictions, target_names=class_names, digits=4))
+    print(classification_report(targets, predictions, labels=unique_classes, target_names=class_names, digits=4))
 
     print("="*80 + "\n")
 
@@ -342,9 +385,9 @@ def train_model(config, csv_file, device='cuda'):
             model, train_loader, criterion, optimizer, device
         )
 
-        # Validate
+        # Validate (enable debug for first 3 epochs)
         val_loss, val_acc, val_preds, val_targets = validate_epoch(
-            model, val_loader, criterion, device
+            model, val_loader, criterion, device, debug=(epoch < 3)
         )
 
         # Learning rate scheduling
@@ -397,7 +440,7 @@ def train_model(config, csv_file, device='cuda'):
     # Test on test set
     print("\nEvaluating on test set...")
     test_loss, test_acc, test_preds, test_targets = validate_epoch(
-        model, test_loader, criterion, device
+        model, test_loader, criterion, device, debug=True
     )
 
     print(f"Test Loss: {test_loss:.4f}, Accuracy: {test_acc:.2f}%")
