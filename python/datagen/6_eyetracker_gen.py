@@ -176,33 +176,49 @@ def load_saccades(data_dir: Path) -> List[Saccade]:
     return saccades
 
 
-def classify_attention_level(k_coefficient: float, k1: float, k2: float) -> int:
+def classify_attention_level(k_coefficient: float, k1: float, k2: float, num_classes: int = 5) -> int:
     """
-    Classify K coefficient into attention level (1-5)
+    Classify K coefficient into attention level
 
     Args:
         k_coefficient: K coefficient value (EWMA)
-        k1: First threshold (weak attention boundary)
-        k2: Second threshold (strong attention boundary)
+        k1: First threshold (neutral boundary)
+        k2: Second threshold (strong attention boundary, only used for 5-class)
+        num_classes: Number of classes (3 or 5, default: 5)
 
     Returns:
-        Attention level:
-        1 = Strong Ambient Attention (k <= -k2)
-        2 = Weak Ambient Attention (-k2 < k <= -k1)
-        3 = Neutral (-k1 < k < +k1)
-        4 = Weak Focal Attention (+k1 <= k < +k2)
-        5 = Strong Focal Attention (k >= +k2)
+        For 5-class classification:
+            1 = Strong Ambient Attention (k <= -k2)
+            2 = Weak Ambient Attention (-k2 < k <= -k1)
+            3 = Neutral (-k1 < k < +k1)
+            4 = Weak Focal Attention (+k1 <= k < +k2)
+            5 = Strong Focal Attention (k >= +k2)
+
+        For 3-class classification (uses only k1, returns 1, 3, 5):
+            1 = Strong Ambient Attention (k <= -k1)
+            3 = Neutral (-k1 < k < +k1)
+            5 = Strong Focal Attention (k >= +k1)
     """
-    if k_coefficient >= k2:
-        return 5  # Strong Focal Attention
-    elif k_coefficient >= k1:
-        return 4  # Weak Focal Attention
-    elif k_coefficient > -k1:
-        return 3  # Neutral
-    elif k_coefficient > -k2:
-        return 2  # Weak Ambient Attention
+    if num_classes == 3:
+        # 3-class classification using only k1, returns 1, 3, 5
+        if k_coefficient >= k1:
+            return 5  # Strong Focal Attention
+        elif k_coefficient > -k1:
+            return 3  # Neutral
+        else:
+            return 1  # Strong Ambient Attention
     else:
-        return 1  # Strong Ambient Attention
+        # 5-class classification using k1 and k2
+        if k_coefficient >= k2:
+            return 5  # Strong Focal Attention
+        elif k_coefficient >= k1:
+            return 4  # Weak Focal Attention
+        elif k_coefficient > -k1:
+            return 3  # Neutral
+        elif k_coefficient > -k2:
+            return 2  # Weak Ambient Attention
+        else:
+            return 1  # Strong Ambient Attention
 
 
 def apply_minimum_dwell_time(results: List[Dict], min_dwell_sec: float) -> None:
@@ -289,7 +305,8 @@ def match_timestamps_to_fixations_and_saccades(
     window_size: int = 10,
     k1: float = 0.5,
     k2: float = 1.5,
-    min_dwell_sec: float = None
+    min_dwell_sec: float = None,
+    num_classes: int = 5
 ) -> List[Dict]:
     """
     Match camera timestamps to fixation IDs and saccade data, and calculate K coefficient
@@ -303,11 +320,12 @@ def match_timestamps_to_fixations_and_saccades(
     2. EWMA Z-score: Z-score using exponentially weighted moving average and std
     3. MAD: Median Absolute Deviation based score
 
-    Also classify attention level (1-5) based on EWMA K coefficient:
-    1 = Strong Ambient Attention, 2 = Weak Ambient, 3 = Neutral, 4 = Weak Focal, 5 = Strong Focal
+    Classify attention level based on EWMA K coefficient:
+    - For 5-class: 1=Strong Ambient, 2=Weak Ambient, 3=Neutral, 4=Weak Focal, 5=Strong Focal
+    - For 3-class: 1=Strong Ambient, 3=Neutral, 5=Strong Focal
 
     If min_dwell_sec is specified, applies minimum dwell time filtering to prevent rapid
-    transitions to focal attention. Focal attention segments shorter than min_dwell_sec
+    transitions between attention levels. Attention segments shorter than min_dwell_sec
     are reverted to the previous attention state.
 
     Args:
@@ -315,9 +333,10 @@ def match_timestamps_to_fixations_and_saccades(
         fixations: List of Fixation objects
         saccades: List of Saccade objects
         window_size: Number of past timestamps to consider for K calculation
-        k1: First threshold for attention level classification (default: 0.5)
-        k2: Second threshold for attention level classification (default: 1.5)
-        min_dwell_sec: Minimum dwell time in seconds for focal attention transitions (default: None)
+        k1: First threshold for attention level classification (neutral boundary, default: 0.5)
+        k2: Second threshold for attention level classification (strong boundary, default: 1.5)
+        min_dwell_sec: Minimum dwell time in seconds for attention transitions (default: None)
+        num_classes: Number of attention classes, 3 or 5 (default: 5)
 
     Returns:
         List of dictionaries with timestamp, fixation_id, saccade_id, saccade_amplitude_deg,
@@ -561,12 +580,12 @@ def match_timestamps_to_fixations_and_saccades(
             result['k_coefficient_mad'] = k_coefficients_mad[i]
 
             # Classify attention level based on smoothed K coefficient (k_smooth)
-            result['attention_level'] = classify_attention_level(k_smooth[i], k1, k2)
+            result['attention_level'] = classify_attention_level(k_smooth[i], k1, k2, num_classes)
         else:
             result['k_coefficient_rolling'] = ''
             result['k_coefficient_ewma'] = ''
             result['k_coefficient_mad'] = ''
-            # Fill missing attention level with 3 (Neutral)
+            # Fill missing attention level with Neutral (always 3)
             result['attention_level'] = 3
 
     # Apply minimum dwell time filtering if specified
@@ -622,6 +641,14 @@ def main():
         default=None,
         help='Minimum dwell time in seconds for focal attention transitions (default: None, no filtering)'
     )
+    parser.add_argument(
+        '--class',
+        type=int,
+        default=5,
+        choices=[3, 5],
+        dest='num_classes',
+        help='Number of attention classes: 3 (levels 1,3,5: Strong Ambient/Neutral/Strong Focal) or 5 (levels 1,2,3,4,5: Strong Ambient/Weak Ambient/Neutral/Weak Focal/Strong Focal, default: 5)'
+    )
 
     args = parser.parse_args()
 
@@ -665,12 +692,19 @@ def main():
         print(f"\nMatching camera timestamps to fixations and saccades...")
         print(f"Calculating K coefficients with window size: {args.window_size}")
         print(f"Using three methods: Rolling Z-score, EWMA Z-score, MAD")
-        print(f"Attention level thresholds: k1={args.k1}, k2={args.k2}")
+        print(f"Number of attention classes: {args.num_classes}")
+        if args.num_classes == 3:
+            print(f"Attention level thresholds: k1={args.k1} (3-class: levels 1,3,5)")
+            print(f"  1=Strong Ambient, 3=Neutral, 5=Strong Focal")
+        else:
+            print(f"Attention level thresholds: k1={args.k1}, k2={args.k2} (5-class)")
+            print(f"  1=Strong Ambient, 2=Weak Ambient, 3=Neutral, 4=Weak Focal, 5=Strong Focal")
         if getattr(args, 'min_dwell', None) is not None:
             print(f"Applying minimum dwell time filter: {args.min_dwell} seconds")
         results = match_timestamps_to_fixations_and_saccades(
             time_references, fixations, saccades, args.window_size, args.k1, args.k2,
-            min_dwell_sec=getattr(args, 'min_dwell', None)
+            min_dwell_sec=getattr(args, 'min_dwell', None),
+            num_classes=args.num_classes
         )
 
         # Count matches
