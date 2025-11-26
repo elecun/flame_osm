@@ -78,12 +78,13 @@ def extract_id_from_filename(filename: str) -> Optional[int]:
     return None
 
 
-def find_file_pairs(directory: Path) -> Dict[int, Dict[str, Path]]:
+def find_file_pairs(directory: Path, selected_ids: Optional[List[int]] = None) -> Dict[int, Dict[str, Path]]:
     """
     Find and pair AVI and CSV files by their ID suffix.
 
     Args:
         directory: Directory to search for files
+        selected_ids: Optional list of IDs to filter (only return pairs with these IDs)
 
     Returns:
         Dictionary mapping ID to {'avi': Path, 'csv': Path}
@@ -140,6 +141,11 @@ def find_file_pairs(directory: Path) -> Dict[int, Dict[str, Path]]:
     print(f"{'=' * 40}")
 
     for file_id in avi_files.keys():
+        # Skip if selected_ids is provided and this ID is not in the list
+        if selected_ids is not None and file_id not in selected_ids:
+            print(f"  [SKIPPED] ID {file_id}: Not in selected IDs")
+            continue
+
         if file_id in csv_files:
             pairs[file_id] = {
                 'avi': avi_files[file_id],
@@ -360,7 +366,7 @@ def visualize_first_frame(frame: np.ndarray, keypoints: np.ndarray, output_path:
 
 def process_video_with_pose(video_path: Path, model: YOLO, csv_file, timestamps: List[float],
                            should_rotate: bool = False, check_mode: bool = False,
-                           check_output_path: Optional[Path] = None) -> np.ndarray:
+                           check_output_path: Optional[Path] = None, video_out_path: Optional[Path] = None) -> np.ndarray:
     """
     Process video and extract pose keypoints using YOLO.
     Writes results to CSV file in real-time for each frame.
@@ -373,6 +379,7 @@ def process_video_with_pose(video_path: Path, model: YOLO, csv_file, timestamps:
         should_rotate: Whether to rotate frames 90 degrees clockwise
         check_mode: Whether to save first frame with keypoints visualization
         check_output_path: Path to save check visualization image
+        video_out_path: Optional path to save visualization video (AVI format)
 
     Returns:
         Array of shape (num_frames, 17, 2) containing keypoint coordinates
@@ -383,11 +390,30 @@ def process_video_with_pose(video_path: Path, model: YOLO, csv_file, timestamps:
 
     cap = cv2.VideoCapture(str(video_path))
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps == 0:
+        fps = 30.0
 
     # Initialize array to store keypoints for autofill later: (num_frames, 17 keypoints, 2 coords)
     all_keypoints = np.full((frame_count, 17, 2), np.nan)
 
     csv_writer = csv.writer(csv_file)
+
+    # Initialize VideoWriter if video output is requested
+    video_writer = None
+    if video_out_path is not None:
+        # Get first frame to determine dimensions after rotation
+        ret, first_frame = cap.read()
+        if ret:
+            if should_rotate:
+                first_frame = cv2.rotate(first_frame, cv2.ROTATE_90_CLOCKWISE)
+            frame_height, frame_width = first_frame.shape[:2]
+            fourcc = cv2.VideoWriter_fourcc(*'XVID')
+            video_writer = cv2.VideoWriter(str(video_out_path), fourcc, fps, (frame_width, frame_height))
+            print(f"  [INFO] Video output will be saved to: {video_out_path}")
+            print(f"  [INFO] Video properties - FPS: {fps:.2f}, Resolution: {frame_width}x{frame_height}")
+        # Reset to beginning
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
     # Batch processing time tracking
     batch_start_time = time.time()
@@ -419,6 +445,47 @@ def process_video_with_pose(video_path: Path, model: YOLO, csv_file, timestamps:
         if check_mode and frame_idx == 0 and check_output_path is not None:
             visualize_first_frame(frame, kps, check_output_path)
 
+        # Write visualization frame to video if requested
+        if video_writer is not None:
+            vis_frame = frame.copy()
+
+            # Define skeleton connections (COCO format)
+            skeleton = [
+                (0, 1), (0, 2),  # nose to eyes
+                (1, 3), (2, 4),  # eyes to ears
+                (0, 5), (0, 6),  # nose to shoulders
+                (5, 7), (7, 9),  # left arm
+                (6, 8), (8, 10), # right arm
+                (5, 11), (6, 12), # shoulders to hips
+                (11, 13), (13, 15), # left leg
+                (12, 14), (14, 16)  # right leg
+            ]
+
+            # Draw skeleton connections
+            for start_idx, end_idx in skeleton:
+                start_point = kps[start_idx]
+                end_point = kps[end_idx]
+                if not (np.isnan(start_point[0]) or np.isnan(end_point[0])):
+                    start_pt = (int(start_point[0]), int(start_point[1]))
+                    end_pt = (int(end_point[0]), int(end_point[1]))
+                    cv2.line(vis_frame, start_pt, end_pt, (0, 255, 0), 2)
+
+            # Draw keypoints
+            for idx, (x, y) in enumerate(kps):
+                if not np.isnan(x):
+                    point = (int(x), int(y))
+                    if idx == 0:  # nose
+                        color = (255, 0, 0)
+                    elif idx in [1, 2, 3, 4]:  # face
+                        color = (0, 255, 255)
+                    elif idx in [5, 6, 7, 8, 9, 10]:  # upper body
+                        color = (0, 255, 0)
+                    else:  # lower body
+                        color = (255, 0, 255)
+                    cv2.circle(vis_frame, point, 5, color, -1)
+
+            video_writer.write(vis_frame)
+
         # Write to CSV immediately
         row = [timestamps[frame_idx]]
         for kp_idx in range(17):
@@ -437,6 +504,9 @@ def process_video_with_pose(video_path: Path, model: YOLO, csv_file, timestamps:
         frame_idx += 1
 
     cap.release()
+    if video_writer is not None:
+        video_writer.release()
+        print(f"  [SUCCESS] Video output saved to: {video_out_path}")
     print(f"  [SUCCESS] Processed all {frame_count} frames\n")
 
     return all_keypoints
@@ -444,7 +514,7 @@ def process_video_with_pose(video_path: Path, model: YOLO, csv_file, timestamps:
 
 def process_single_file(file_path: Path, model: YOLO, output_path: Path,
                        should_rotate: bool = False, check_mode: bool = False,
-                       autofill: bool = False) -> None:
+                       autofill: bool = False, video_out_path: Optional[Path] = None) -> None:
     """
     Process a single image or video file.
 
@@ -455,6 +525,7 @@ def process_single_file(file_path: Path, model: YOLO, output_path: Path,
         should_rotate: Whether to rotate frames 90 degrees clockwise
         check_mode: Whether to save first frame with keypoints visualization
         autofill: Whether to autofill missing values
+        video_out_path: Optional path to save visualization video (AVI format)
     """
     print(f"Processing single file: {file_path.name}")
     print(f"Output: {output_path}")
@@ -546,6 +617,22 @@ def process_single_file(file_path: Path, model: YOLO, output_path: Path,
             all_keypoints = np.full((frame_count, 17, 2), np.nan)
             cap = cv2.VideoCapture(str(file_path))
 
+            # Initialize VideoWriter if video output is requested
+            video_writer = None
+            if video_out_path is not None:
+                # Get first frame to determine dimensions after rotation
+                ret_first, first_frame = cap.read()
+                if ret_first:
+                    if should_rotate:
+                        first_frame = cv2.rotate(first_frame, cv2.ROTATE_90_CLOCKWISE)
+                    frame_height, frame_width = first_frame.shape[:2]
+                    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+                    video_writer = cv2.VideoWriter(str(video_out_path), fourcc, fps, (frame_width, frame_height))
+                    print(f"  [INFO] Video output will be saved to: {video_out_path}")
+                    print(f"  [INFO] Video properties - FPS: {fps:.2f}, Resolution: {frame_width}x{frame_height}\n")
+                # Reset to beginning
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+
             # Inference time tracking
             inference_times = []
 
@@ -580,6 +667,47 @@ def process_single_file(file_path: Path, model: YOLO, output_path: Path,
                 if check_mode and frame_idx == 0 and check_output_path is not None:
                     visualize_first_frame(frame, kps, check_output_path)
 
+                # Write visualization frame to video if requested
+                if video_writer is not None:
+                    vis_frame = frame.copy()
+
+                    # Define skeleton connections (COCO format)
+                    skeleton = [
+                        (0, 1), (0, 2),  # nose to eyes
+                        (1, 3), (2, 4),  # eyes to ears
+                        (0, 5), (0, 6),  # nose to shoulders
+                        (5, 7), (7, 9),  # left arm
+                        (6, 8), (8, 10), # right arm
+                        (5, 11), (6, 12), # shoulders to hips
+                        (11, 13), (13, 15), # left leg
+                        (12, 14), (14, 16)  # right leg
+                    ]
+
+                    # Draw skeleton connections
+                    for start_idx, end_idx in skeleton:
+                        start_point = kps[start_idx]
+                        end_point = kps[end_idx]
+                        if not (np.isnan(start_point[0]) or np.isnan(end_point[0])):
+                            start_pt = (int(start_point[0]), int(start_point[1]))
+                            end_pt = (int(end_point[0]), int(end_point[1]))
+                            cv2.line(vis_frame, start_pt, end_pt, (0, 255, 0), 2)
+
+                    # Draw keypoints
+                    for idx, (x, y) in enumerate(kps):
+                        if not np.isnan(x):
+                            point = (int(x), int(y))
+                            if idx == 0:  # nose
+                                color = (255, 0, 0)
+                            elif idx in [1, 2, 3, 4]:  # face
+                                color = (0, 255, 255)
+                            elif idx in [5, 6, 7, 8, 9, 10]:  # upper body
+                                color = (0, 255, 0)
+                            else:  # lower body
+                                color = (255, 0, 255)
+                            cv2.circle(vis_frame, point, 5, color, -1)
+
+                    video_writer.write(vis_frame)
+
                 # Write to CSV immediately
                 row = [timestamps[frame_idx]]
                 for kp_idx in range(17):
@@ -596,6 +724,9 @@ def process_single_file(file_path: Path, model: YOLO, output_path: Path,
                 frame_idx += 1
 
             cap.release()
+            if video_writer is not None:
+                video_writer.release()
+                print(f"  [SUCCESS] Video output saved to: {video_out_path}\n")
 
             # Print inference time statistics
             if inference_times:
@@ -687,6 +818,17 @@ def main():
         action='store_true',
         help='Save first frame with keypoints visualization as JPG'
     )
+    parser.add_argument(
+        '--select',
+        type=str,
+        default=None,
+        help='Comma-separated list of camera IDs to process (e.g., "0,2,4,6")'
+    )
+    parser.add_argument(
+        '--video-out',
+        action='store_true',
+        help='Save visualization as video file (AVI format with same fps and resolution as input)'
+    )
 
     args = parser.parse_args()
 
@@ -718,6 +860,11 @@ def main():
         # Check if rotation is requested (--rotate flag present means rotate)
         should_rotate = args.rotate is not None
 
+        # Prepare video output path if requested
+        video_out_path = None
+        if args.video_out:
+            video_out_path = output_dir / f"body_kps_{file_path.stem}_visualization.avi"
+
         try:
             process_single_file(
                 file_path=file_path,
@@ -725,7 +872,8 @@ def main():
                 output_path=output_path,
                 should_rotate=should_rotate,
                 check_mode=args.check,
-                autofill=args.autofill
+                autofill=args.autofill,
+                video_out_path=video_out_path
             )
         except Exception as e:
             print(f"\nError processing file: {e}")
@@ -763,10 +911,22 @@ def main():
     print(f"Autofill: {args.autofill}")
     print(f"Rotate IDs: {args.rotate if args.rotate is not None else 'None'}")
     print(f"Check mode: {args.check}")
+    print(f"Video output: {args.video_out}")
+
+    # Parse selected IDs if provided
+    selected_ids = None
+    if args.select:
+        try:
+            selected_ids = [int(x.strip()) for x in args.select.split(',')]
+            print(f"Selected IDs: {selected_ids}")
+        except ValueError:
+            print(f"Error: Invalid format for --select. Use comma-separated integers (e.g., '0,2,4,6')")
+            return 1
+
     print(f"{'=' * 80}\n")
 
     # Find file pairs in camera directory
-    pairs = find_file_pairs(input_directory)
+    pairs = find_file_pairs(input_directory, selected_ids=selected_ids)
 
     if not pairs:
         print("No file pairs found. Exiting.")
@@ -813,6 +973,11 @@ def main():
         if args.check:
             check_output_path = output_directory / f"check_frame_{file_id}.jpg"
 
+        # Prepare video output path if requested
+        video_out_path = None
+        if args.video_out:
+            video_out_path = output_directory / f"body_kps_{file_id}_visualization.avi"
+
         # Create CSV file and write header immediately
         print(f"Creating output file: {output_path}")
         header = generate_csv_header()
@@ -827,7 +992,8 @@ def main():
                 files['avi'], model, csv_file, timestamps,
                 should_rotate=should_rotate,
                 check_mode=args.check,
-                check_output_path=check_output_path
+                check_output_path=check_output_path,
+                video_out_path=video_out_path
             )
 
         print(f"  [SUCCESS] Output saved to: {output_path}\n")

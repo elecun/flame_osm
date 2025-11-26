@@ -64,12 +64,13 @@ def extract_id_from_filename(filename: str) -> Optional[int]:
     return None
 
 
-def find_file_pairs(directory: Path) -> Dict[int, Dict[str, Path]]:
+def find_file_pairs(directory: Path, selected_ids: Optional[List[int]] = None) -> Dict[int, Dict[str, Path]]:
     """
     Find and pair AVI and CSV files by their ID suffix.
 
     Args:
         directory: Directory to search for files
+        selected_ids: Optional list of IDs to filter (only return pairs with these IDs)
 
     Returns:
         Dictionary mapping ID to {'avi': Path, 'csv': Path}
@@ -120,6 +121,11 @@ def find_file_pairs(directory: Path) -> Dict[int, Dict[str, Path]]:
     print(f"\nPairing files...")
     pairs = {}
     for file_id in avi_files:
+        # Skip if selected_ids is provided and this ID is not in the list
+        if selected_ids is not None and file_id not in selected_ids:
+            print(f"  [SKIPPED] ID {file_id}: Not in selected IDs")
+            continue
+
         if file_id in csv_files:
             pairs[file_id] = {
                 'avi': avi_files[file_id],
@@ -311,7 +317,7 @@ def visualize_first_frame(frame: np.ndarray, landmarks: np.ndarray, output_path:
 
 def process_video_with_mediapipe(video_path: Path, face_mesh, yolo_model, csv_file, timestamps: List[float],
                                   should_rotate: bool = False, check_mode: bool = False,
-                                  check_output_path: Optional[Path] = None) -> Tuple[np.ndarray, int]:
+                                  check_output_path: Optional[Path] = None, video_out_path: Optional[Path] = None) -> Tuple[np.ndarray, int]:
     """
     Process video with YOLO face detection + MediaPipe FaceMesh and write results to CSV immediately.
 
@@ -324,6 +330,7 @@ def process_video_with_mediapipe(video_path: Path, face_mesh, yolo_model, csv_fi
         should_rotate: Whether to rotate frames 90 degrees clockwise
         check_mode: Whether to save first frame with landmarks visualization
         check_output_path: Path to save check visualization image
+        video_out_path: Optional path to save visualization video (AVI format)
 
     Returns:
         Tuple of (landmarks, num_landmarks)
@@ -336,12 +343,31 @@ def process_video_with_mediapipe(video_path: Path, face_mesh, yolo_model, csv_fi
 
     cap = cv2.VideoCapture(str(video_path))
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps == 0:
+        fps = 30.0
 
     # MediaPipe FaceMesh has 468 landmarks
     num_landmarks = 468
     all_landmarks = np.full((frame_count, num_landmarks, 3), -1.0)
 
     csv_writer = csv.writer(csv_file)
+
+    # Initialize VideoWriter if video output is requested
+    video_writer = None
+    if video_out_path is not None:
+        # Get first frame to determine dimensions after rotation
+        ret, first_frame = cap.read()
+        if ret:
+            if should_rotate:
+                first_frame = cv2.rotate(first_frame, cv2.ROTATE_90_CLOCKWISE)
+            frame_height, frame_width = first_frame.shape[:2]
+            fourcc = cv2.VideoWriter_fourcc(*'XVID')
+            video_writer = cv2.VideoWriter(str(video_out_path), fourcc, fps, (frame_width, frame_height))
+            print(f"  [INFO] Video output will be saved to: {video_out_path}")
+            print(f"  [INFO] Video properties - FPS: {fps:.2f}, Resolution: {frame_width}x{frame_height}")
+        # Reset to beginning
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
     # Inference time tracking
     yolo_times = []
@@ -437,6 +463,22 @@ def process_video_with_mediapipe(video_path: Path, face_mesh, yolo_model, csv_fi
                 visualize_first_frame(frame, lms, check_output_path, bbox=bbox)
                 check_image_saved = True
 
+        # Write visualization frame to video if requested
+        if video_writer is not None:
+            vis_frame = frame.copy()
+
+            # Draw bounding box if available
+            if bbox is not None:
+                x1, y1, x2, y2 = bbox
+                cv2.rectangle(vis_frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+
+            # Draw landmark points
+            for idx, (x, y, z) in enumerate(lms):
+                if x != -1.0:
+                    cv2.circle(vis_frame, (int(x), int(y)), 2, (0, 255, 0), -1)
+
+            video_writer.write(vis_frame)
+
         # Write to CSV immediately
         row = [timestamps[frame_idx]]
 
@@ -460,6 +502,9 @@ def process_video_with_mediapipe(video_path: Path, face_mesh, yolo_model, csv_fi
         frame_idx += 1
 
     cap.release()
+    if video_writer is not None:
+        video_writer.release()
+        print(f"  [SUCCESS] Video output saved to: {video_out_path}")
 
     # Check if check image was saved
     if check_mode and not check_image_saved and check_output_path is not None:
@@ -506,7 +551,7 @@ def generate_csv_header(num_landmarks: int) -> List[str]:
 
 def process_single_file(file_path: Path, face_mesh, yolo_model, output_path: Path,
                         should_rotate: bool = False, check_mode: bool = False,
-                        autofill: bool = False) -> None:
+                        autofill: bool = False, video_out_path: Optional[Path] = None) -> None:
     """
     Process a single image or video file for face landmarks.
 
@@ -518,6 +563,7 @@ def process_single_file(file_path: Path, face_mesh, yolo_model, output_path: Pat
         should_rotate: Whether to rotate frames 90 degrees clockwise
         check_mode: Whether to save first frame with landmarks visualization
         autofill: Whether to autofill missing values
+        video_out_path: Optional path to save visualization video (AVI format)
     """
     print(f"Processing single file: {file_path.name}")
     print(f"Output: {output_path}")
@@ -571,7 +617,8 @@ def process_single_file(file_path: Path, face_mesh, yolo_model, output_path: Pat
         if is_video:
             landmarks, num_landmarks = process_video_with_mediapipe(
                 file_path, face_mesh, yolo_model, csv_file, timestamps,
-                should_rotate=should_rotate, check_mode=check_mode, check_output_path=check_output_path
+                should_rotate=should_rotate, check_mode=check_mode, check_output_path=check_output_path,
+                video_out_path=video_out_path
             )
 
             # Autofill if requested
@@ -754,6 +801,17 @@ def main():
     # YOLO face detector option
     parser.add_argument('--face-detector', type=str, default=None,
                         help='Path to YOLO face detector model (e.g., yolo11n-face.pt). If not provided, uses full frame.')
+    parser.add_argument(
+        '--select',
+        type=str,
+        default=None,
+        help='Comma-separated list of camera IDs to process (e.g., "0,2,4,6")'
+    )
+    parser.add_argument(
+        '--video-out',
+        action='store_true',
+        help='Save visualization as video file (AVI format with same fps and resolution as input)'
+    )
 
     args = parser.parse_args()
 
@@ -775,6 +833,11 @@ def main():
 
         # Check if rotation is requested (--rotate flag present means rotate)
         should_rotate = args.rotate is not None
+
+        # Prepare video output path if requested
+        video_out_path = None
+        if args.video_out:
+            video_out_path = output_dir / f"face_kps_dense_{file_path.stem}_visualization.avi"
 
         print(f"\n{'=' * 80}")
         print(f"Dense Face Keypoints Generator (MediaPipe)")
@@ -810,7 +873,8 @@ def main():
                 output_path=output_path,
                 should_rotate=should_rotate,
                 check_mode=args.check,
-                autofill=args.autofill
+                autofill=args.autofill,
+                video_out_path=video_out_path
             )
         except Exception as e:
             print(f"\nError processing file: {e}")
@@ -850,10 +914,22 @@ def main():
     print(f"Mode: Batch")
     print(f"Input directory: {input_directory}")
     print(f"Output directory: {output_directory}")
+    print(f"Video output: {args.video_out}")
+
+    # Parse selected IDs if provided
+    selected_ids = None
+    if args.select:
+        try:
+            selected_ids = [int(x.strip()) for x in args.select.split(',')]
+            print(f"Selected IDs: {selected_ids}")
+        except ValueError:
+            print(f"Error: Invalid format for --select. Use comma-separated integers (e.g., '0,2,4,6')")
+            return 1
+
     print(f"{'=' * 80}\n")
 
     # Find file pairs
-    pairs = find_file_pairs(input_directory)
+    pairs = find_file_pairs(input_directory, selected_ids=selected_ids)
 
     if not pairs:
         print("[ERROR] No valid file pairs found!")
@@ -903,6 +979,11 @@ def main():
         if args.check:
             check_output_path = output_directory / f"check_face_dense_{file_id}.jpg"
 
+        # Prepare video output path if requested
+        video_out_path = None
+        if args.video_out:
+            video_out_path = output_directory / f"face_kps_dense_{file_id}_visualization.avi"
+
         # Generate output filename in base directory
         output_path = output_directory / f"face_kps_dense_{file_id}.csv"
 
@@ -923,7 +1004,8 @@ def main():
             # Process video
             landmarks, num_landmarks = process_video_with_mediapipe(
                 files['avi'], face_mesh, yolo_model, csv_file, timestamps,
-                should_rotate=should_rotate, check_mode=args.check, check_output_path=check_output_path
+                should_rotate=should_rotate, check_mode=args.check, check_output_path=check_output_path,
+                video_out_path=video_out_path
             )
 
         if landmarks is None:

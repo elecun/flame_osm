@@ -63,12 +63,13 @@ def extract_id_from_filename(filename: str) -> Optional[int]:
     return None
 
 
-def find_file_pairs(directory: Path) -> Dict[int, Dict[str, Path]]:
+def find_file_pairs(directory: Path, selected_ids: Optional[List[int]] = None) -> Dict[int, Dict[str, Path]]:
     """
     Find and pair AVI and CSV files by their ID suffix.
 
     Args:
         directory: Directory to search for files
+        selected_ids: Optional list of IDs to filter (only return pairs with these IDs)
 
     Returns:
         Dictionary mapping ID to {'avi': Path, 'csv': Path}
@@ -125,6 +126,11 @@ def find_file_pairs(directory: Path) -> Dict[int, Dict[str, Path]]:
     print(f"{'=' * 40}")
 
     for file_id in avi_files.keys():
+        # Skip if selected_ids is provided and this ID is not in the list
+        if selected_ids is not None and file_id not in selected_ids:
+            print(f"  [SKIPPED] ID {file_id}: Not in selected IDs")
+            continue
+
         if file_id in csv_files:
             pairs[file_id] = {
                 'avi': avi_files[file_id],
@@ -429,7 +435,7 @@ def process_video_with_face_alignment(video_path: Path, fa_model_2d: Optional[fa
                                      fa_model_3d: Optional[face_alignment.FaceAlignment],
                                      csv_file, timestamps: List[float], landmark_type: str,
                                      should_rotate: bool = False, check_mode: bool = False,
-                                     check_output_path: Optional[Path] = None) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], int, int]:
+                                     check_output_path: Optional[Path] = None, video_out_path: Optional[Path] = None) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], int, int]:
     """
     Process video and extract face landmarks using Face Alignment Network.
     Writes results to CSV file in real-time for each frame.
@@ -444,6 +450,7 @@ def process_video_with_face_alignment(video_path: Path, fa_model_2d: Optional[fa
         should_rotate: Whether to rotate frames 90 degrees clockwise
         check_mode: Whether to save first frame with landmarks visualization
         check_output_path: Path to save check visualization image
+        video_out_path: Optional path to save visualization video (AVI format)
 
     Returns:
         Tuple of (landmarks_2d, landmarks_3d, num_landmarks_2d, num_landmarks_3d)
@@ -454,6 +461,9 @@ def process_video_with_face_alignment(video_path: Path, fa_model_2d: Optional[fa
 
     cap = cv2.VideoCapture(str(video_path))
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps == 0:
+        fps = 30.0
 
     # Search for first valid face detection to determine number of landmarks
     num_landmarks_2d = 0
@@ -505,6 +515,22 @@ def process_video_with_face_alignment(video_path: Path, fa_model_2d: Optional[fa
 
     # Reset video to beginning
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+
+    # Initialize VideoWriter if video output is requested
+    video_writer = None
+    if video_out_path is not None:
+        # Get first frame to determine dimensions after rotation
+        ret, first_frame = cap.read()
+        if ret:
+            if should_rotate:
+                first_frame = cv2.rotate(first_frame, cv2.ROTATE_90_CLOCKWISE)
+            frame_height, frame_width = first_frame.shape[:2]
+            fourcc = cv2.VideoWriter_fourcc(*'XVID')
+            video_writer = cv2.VideoWriter(str(video_out_path), fourcc, fps, (frame_width, frame_height))
+            print(f"  [INFO] Video output will be saved to: {video_out_path}")
+            print(f"  [INFO] Video properties - FPS: {fps:.2f}, Resolution: {frame_width}x{frame_height}")
+        # Reset to beginning
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
     csv_writer = csv.writer(csv_file)
 
@@ -558,6 +584,57 @@ def process_video_with_face_alignment(video_path: Path, fa_model_2d: Optional[fa
             elif lms_3d is not None:
                 visualize_first_frame(frame, lms_3d[:, :2], check_output_path)  # Use x, y only
 
+        # Write visualization frame to video if requested
+        if video_writer is not None:
+            vis_frame = frame.copy()
+
+            # Visualize 2D landmarks if available
+            if lms_2d is not None:
+                # Define landmark connections for 68-point model
+                if num_landmarks_2d >= 68:
+                    connections = {
+                        'jaw': list(range(0, 17)),
+                        'left_eyebrow': list(range(17, 22)),
+                        'right_eyebrow': list(range(22, 27)),
+                        'nose_bridge': list(range(27, 31)),
+                        'nose_bottom': list(range(31, 36)),
+                        'left_eye': list(range(36, 42)) + [36],
+                        'right_eye': list(range(42, 48)) + [42],
+                        'outer_lip': list(range(48, 60)) + [48],
+                        'inner_lip': list(range(60, 68)) + [60],
+                    }
+                    # Draw connections
+                    for indices in connections.values():
+                        for i in range(len(indices) - 1):
+                            idx1, idx2 = indices[i], indices[i + 1]
+                            if idx1 < num_landmarks_2d and idx2 < num_landmarks_2d:
+                                pt1, pt2 = lms_2d[idx1], lms_2d[idx2]
+                                if not (pt1[0] == -1.0 or pt2[0] == -1.0):
+                                    cv2.line(vis_frame, (int(pt1[0]), int(pt1[1])), (int(pt2[0]), int(pt2[1])), (255, 255, 255), 1)
+
+                # Draw landmark points
+                for idx, (x, y) in enumerate(lms_2d):
+                    if x != -1.0:
+                        if idx < 17:
+                            color = (255, 0, 0)
+                        elif idx < 27:
+                            color = (0, 255, 0)
+                        elif idx < 36:
+                            color = (0, 255, 255)
+                        elif idx < 48:
+                            color = (255, 0, 255)
+                        else:
+                            color = (0, 165, 255)
+                        cv2.circle(vis_frame, (int(x), int(y)), 2, color, -1)
+
+            elif lms_3d is not None:
+                # Use 3D landmarks if 2D not available
+                for idx, (x, y, z) in enumerate(lms_3d):
+                    if x != -1.0:
+                        cv2.circle(vis_frame, (int(x), int(y)), 2, (0, 255, 0), -1)
+
+            video_writer.write(vis_frame)
+
         # Write to CSV immediately
         row = [timestamps[frame_idx]]
 
@@ -597,6 +674,9 @@ def process_video_with_face_alignment(video_path: Path, fa_model_2d: Optional[fa
         frame_idx += 1
 
     cap.release()
+    if video_writer is not None:
+        video_writer.release()
+        print(f"  [SUCCESS] Video output saved to: {video_out_path}")
     print(f"  [SUCCESS] Processed all {frame_count} frames")
 
     # Print inference time statistics
@@ -663,7 +743,7 @@ def process_single_file(file_path: Path, fa_model_2d: Optional[face_alignment.Fa
                        fa_model_3d: Optional[face_alignment.FaceAlignment],
                        output_path: Path, landmark_type: str,
                        should_rotate: bool = False, check_mode: bool = False,
-                       autofill: bool = False) -> None:
+                       autofill: bool = False, video_out_path: Optional[Path] = None) -> None:
     """
     Process a single image or video file for face landmarks.
 
@@ -676,6 +756,7 @@ def process_single_file(file_path: Path, fa_model_2d: Optional[face_alignment.Fa
         should_rotate: Whether to rotate frames 90 degrees clockwise
         check_mode: Whether to save first frame with landmarks visualization
         autofill: Whether to autofill missing values
+        video_out_path: Optional path to save visualization video (AVI format)
     """
     print(f"Processing single file: {file_path.name}")
     print(f"Output: {output_path}")
@@ -794,7 +875,8 @@ def process_single_file(file_path: Path, fa_model_2d: Optional[face_alignment.Fa
             # Process video (timing is handled inside the function)
             landmarks_2d, landmarks_3d, num_landmarks_2d, num_landmarks_3d = process_video_with_face_alignment(
                 file_path, fa_model_2d, fa_model_3d, csv_file, timestamps, landmark_type,
-                should_rotate=should_rotate, check_mode=check_mode, check_output_path=check_output_path
+                should_rotate=should_rotate, check_mode=check_mode, check_output_path=check_output_path,
+                video_out_path=video_out_path
             )
 
             # Autofill if requested
@@ -886,6 +968,17 @@ def main():
         default=None,
         help='Directory containing pre-downloaded model files (sets TORCH_HOME)'
     )
+    parser.add_argument(
+        '--select',
+        type=str,
+        default=None,
+        help='Comma-separated list of camera IDs to process (e.g., "0,2,4,6")'
+    )
+    parser.add_argument(
+        '--video-out',
+        action='store_true',
+        help='Save visualization as video file (AVI format with same fps and resolution as input)'
+    )
 
     args = parser.parse_args()
 
@@ -950,6 +1043,11 @@ def main():
         # Check if rotation is requested (--rotate flag present means rotate)
         should_rotate = args.rotate is not None
 
+        # Prepare video output path if requested
+        video_out_path = None
+        if args.video_out:
+            video_out_path = output_dir / f"face_kps_{file_path.stem}_visualization.avi"
+
         try:
             process_single_file(
                 file_path=file_path,
@@ -959,7 +1057,8 @@ def main():
                 landmark_type=args.type,
                 should_rotate=should_rotate,
                 check_mode=args.check,
-                autofill=args.autofill
+                autofill=args.autofill,
+                video_out_path=video_out_path
             )
         except Exception as e:
             print(f"\nError processing file: {e}")
@@ -1001,10 +1100,22 @@ def main():
     print(f"Landmark Type: {args.type}")
     print(f"Rotate IDs: {args.rotate if args.rotate is not None else 'None'}")
     print(f"Check mode: {args.check}")
+    print(f"Video output: {args.video_out}")
+
+    # Parse selected IDs if provided
+    selected_ids = None
+    if args.select:
+        try:
+            selected_ids = [int(x.strip()) for x in args.select.split(',')]
+            print(f"Selected IDs: {selected_ids}")
+        except ValueError:
+            print(f"Error: Invalid format for --select. Use comma-separated integers (e.g., '0,2,4,6')")
+            return 1
+
     print(f"{'=' * 80}\n")
 
     # Find file pairs in camera directory
-    pairs = find_file_pairs(input_directory)
+    pairs = find_file_pairs(input_directory, selected_ids=selected_ids)
 
     if not pairs:
         print("No file pairs found. Exiting.")
@@ -1078,6 +1189,11 @@ def main():
         if args.check:
             check_output_path = output_directory / f"check_face_{file_id}.jpg"
 
+        # Prepare video output path if requested
+        video_out_path = None
+        if args.video_out:
+            video_out_path = output_directory / f"face_kps_{file_id}_visualization.avi"
+
         # Detect number of landmarks from first frames (search up to 100 frames)
         print(f"Detecting number of landmarks...")
         cap = cv2.VideoCapture(str(files['avi']))
@@ -1143,7 +1259,8 @@ def main():
                 files['avi'], fa_model_2d, fa_model_3d, csv_file, timestamps, args.type,
                 should_rotate=should_rotate,
                 check_mode=args.check,
-                check_output_path=check_output_path
+                check_output_path=check_output_path,
+                video_out_path=video_out_path
             )
 
         if (fa_model_2d is not None and landmarks_2d is None) or (fa_model_3d is not None and landmarks_3d is None):
