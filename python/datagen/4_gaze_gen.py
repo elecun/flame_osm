@@ -75,12 +75,13 @@ def extract_id_from_filename(filename: str) -> Optional[int]:
     return None
 
 
-def find_file_pairs(directory: Path) -> Dict[int, Dict[str, Path]]:
+def find_file_pairs(directory: Path, selected_ids: Optional[List[int]] = None) -> Dict[int, Dict[str, Path]]:
     """
     Find and pair AVI and timestamp CSV files by their ID suffix.
 
     Args:
         directory: Directory to search for files
+        selected_ids: Optional list of camera IDs to filter (e.g., [0, 2, 4, 6])
 
     Returns:
         Dictionary mapping ID to {'avi': Path, 'csv': Path}
@@ -100,6 +101,9 @@ def find_file_pairs(directory: Path) -> Dict[int, Dict[str, Path]]:
             continue
         file_id = extract_id_from_filename(avi_file.name)
         if file_id is not None:
+            # Filter by selected IDs if provided
+            if selected_ids is not None and file_id not in selected_ids:
+                continue
             avi_files[file_id] = avi_file
             print(f"  Found AVI file: {avi_file.name} (ID: {file_id})")
 
@@ -114,6 +118,9 @@ def find_file_pairs(directory: Path) -> Dict[int, Dict[str, Path]]:
             continue
         file_id = extract_id_from_filename(csv_file.name)
         if file_id is not None:
+            # Filter by selected IDs if provided
+            if selected_ids is not None and file_id not in selected_ids:
+                continue
             csv_files[file_id] = csv_file
             print(f"  Found CSV file: {csv_file.name} (ID: {file_id})")
 
@@ -432,7 +439,8 @@ def process_video_with_gaze(video_path: Path, timestamps: List[float], csv_file,
                             model_type: str = 'simple',
                             should_rotate: bool = False,
                             check_mode: bool = False,
-                            check_output_path: Optional[Path] = None):
+                            check_output_path: Optional[Path] = None,
+                            video_out_path: Optional[Path] = None):
     """
     Process video and estimate gaze for each frame.
     Frames are converted from BGR to RGB before processing.
@@ -446,6 +454,7 @@ def process_video_with_gaze(video_path: Path, timestamps: List[float], csv_file,
         should_rotate: Whether to rotate frames
         check_mode: Whether to save first frame visualization
         check_output_path: Path to save check visualization
+        video_out_path: Optional path to save visualization video (AVI format)
     """
     print(f"Processing video: {video_path.name}")
     print(f"  [INFO] Using model: {model_type}")
@@ -454,6 +463,22 @@ def process_video_with_gaze(video_path: Path, timestamps: List[float], csv_file,
 
     cap = cv2.VideoCapture(str(video_path))
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    # Initialize VideoWriter if video output is requested
+    video_writer = None
+    if video_out_path is not None:
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        # Get frame dimensions
+        ret, first_frame = cap.read()
+        if ret:
+            if should_rotate:
+                first_frame = cv2.rotate(first_frame, cv2.ROTATE_90_CLOCKWISE)
+            frame_height, frame_width = first_frame.shape[:2]
+            fourcc = cv2.VideoWriter_fourcc(*'XVID')
+            video_writer = cv2.VideoWriter(str(video_out_path), fourcc, fps, (frame_width, frame_height))
+            print(f"  [INFO] Creating output video: {video_out_path.name} ({frame_width}x{frame_height} @ {fps:.2f} fps)")
+            # Reset capture for frame reading
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
     csv_writer = csv.writer(csv_file)
 
@@ -503,6 +528,44 @@ def process_video_with_gaze(video_path: Path, timestamps: List[float], csv_file,
             if face is not None and left_eye is not None and right_eye is not None:
                 visualize_gaze(frame, face, left_eye, right_eye, pitch, yaw, check_output_path)
 
+        # Write visualization frame to video if requested
+        if video_writer is not None:
+            # For visualization, we need face and eyes
+            if face is None or left_eye is None or right_eye is None:
+                face, left_eye, right_eye = detect_face_and_eyes(frame)
+
+            # Create visualization frame
+            vis_frame = frame.copy()
+            if face is not None and left_eye is not None and right_eye is not None:
+                # Draw face rectangle
+                x, y, w, h = face
+                cv2.rectangle(vis_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+                # Draw eye rectangles
+                ex, ey, ew, eh = left_eye
+                cv2.rectangle(vis_frame, (ex, ey), (ex + ew, ey + eh), (255, 0, 0), 2)
+                ex, ey, ew, eh = right_eye
+                cv2.rectangle(vis_frame, (ex, ey), (ex + ew, ey + eh), (255, 0, 0), 2)
+
+                # Draw gaze direction indicators
+                face_center_x = x + w // 2
+                face_center_y = y + h // 2
+
+                # Convert pitch and yaw to arrow
+                arrow_length = 100
+                # Yaw: left-right, Pitch: up-down
+                end_x = int(face_center_x + arrow_length * np.sin(np.radians(yaw)))
+                end_y = int(face_center_y - arrow_length * np.sin(np.radians(pitch)))
+                cv2.arrowedLine(vis_frame, (face_center_x, face_center_y), (end_x, end_y), (0, 0, 255), 3, tipLength=0.3)
+
+            # Add text overlay for gaze angles
+            cv2.putText(vis_frame, f"Pitch: {pitch:.1f} deg", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(vis_frame, f"Yaw: {yaw:.1f} deg", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+            # Convert RGB back to BGR for video writing
+            vis_frame_bgr = cv2.cvtColor(vis_frame, cv2.COLOR_RGB2BGR)
+            video_writer.write(vis_frame_bgr)
+
         if (frame_idx + 1) % 100 == 0:
             batch_time = (time.time() - batch_start_time) * 1000
             print(f"  Processed {frame_idx + 1}/{frame_count} frames ({batch_time:.2f}ms)")
@@ -511,6 +574,11 @@ def process_video_with_gaze(video_path: Path, timestamps: List[float], csv_file,
         frame_idx += 1
 
     cap.release()
+
+    # Release video writer if used
+    if video_writer is not None:
+        video_writer.release()
+        print(f"  [SUCCESS] Video output saved to: {video_out_path}")
 
     # Print inference time statistics
     if inference_times:
@@ -529,7 +597,8 @@ def process_single_file(video_path: Path, output_path: Path,
                        gaze_estimator,
                        model_type: str = 'simple',
                        should_rotate: bool = False,
-                       check_mode: bool = False) -> None:
+                       check_mode: bool = False,
+                       video_out_path: Optional[Path] = None) -> None:
     """
     Process a single video or image file and estimate gaze.
     Images/frames are converted from BGR to RGB before processing.
@@ -541,6 +610,7 @@ def process_single_file(video_path: Path, output_path: Path,
         model_type: Model type ('mpiigaze', 'mpiifacegaze', 'eth-xgaze', or 'simple')
         should_rotate: Whether to rotate frames
         check_mode: Whether to save first frame visualization
+        video_out_path: Optional path to save visualization video (AVI format)
     """
     print(f"\n{'=' * 80}")
     print(f"Processing single file: {video_path.name}")
@@ -653,6 +723,22 @@ def process_single_file(video_path: Path, output_path: Path,
             cap = cv2.VideoCapture(str(video_path))
             frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
+            # Initialize VideoWriter if video output is requested
+            video_writer = None
+            if video_out_path is not None:
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                # Get frame dimensions
+                ret, first_frame = cap.read()
+                if ret:
+                    if should_rotate:
+                        first_frame = cv2.rotate(first_frame, cv2.ROTATE_90_CLOCKWISE)
+                    frame_height, frame_width = first_frame.shape[:2]
+                    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+                    video_writer = cv2.VideoWriter(str(video_out_path), fourcc, fps, (frame_width, frame_height))
+                    print(f"  [INFO] Creating output video: {video_out_path.name} ({frame_width}x{frame_height} @ {fps:.2f} fps)")
+                    # Reset capture for frame reading
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+
             # Inference time tracking
             inference_times = []
 
@@ -699,6 +785,44 @@ def process_single_file(video_path: Path, output_path: Path,
                     if face is not None and left_eye is not None and right_eye is not None:
                         visualize_gaze(frame, face, left_eye, right_eye, pitch, yaw, check_output_path)
 
+                # Write visualization frame to video if requested
+                if video_writer is not None:
+                    # For visualization, we need face and eyes
+                    if face is None or left_eye is None or right_eye is None:
+                        face, left_eye, right_eye = detect_face_and_eyes(frame)
+
+                    # Create visualization frame
+                    vis_frame = frame.copy()
+                    if face is not None and left_eye is not None and right_eye is not None:
+                        # Draw face rectangle
+                        x, y, w, h = face
+                        cv2.rectangle(vis_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+                        # Draw eye rectangles
+                        ex, ey, ew, eh = left_eye
+                        cv2.rectangle(vis_frame, (ex, ey), (ex + ew, ey + eh), (255, 0, 0), 2)
+                        ex, ey, ew, eh = right_eye
+                        cv2.rectangle(vis_frame, (ex, ey), (ex + ew, ey + eh), (255, 0, 0), 2)
+
+                        # Draw gaze direction indicators
+                        face_center_x = x + w // 2
+                        face_center_y = y + h // 2
+
+                        # Convert pitch and yaw to arrow
+                        arrow_length = 100
+                        # Yaw: left-right, Pitch: up-down
+                        end_x = int(face_center_x + arrow_length * np.sin(np.radians(yaw)))
+                        end_y = int(face_center_y - arrow_length * np.sin(np.radians(pitch)))
+                        cv2.arrowedLine(vis_frame, (face_center_x, face_center_y), (end_x, end_y), (0, 0, 255), 3, tipLength=0.3)
+
+                    # Add text overlay for gaze angles
+                    cv2.putText(vis_frame, f"Pitch: {pitch:.1f} deg", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    cv2.putText(vis_frame, f"Yaw: {yaw:.1f} deg", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+                    # Convert RGB back to BGR for video writing
+                    vis_frame_bgr = cv2.cvtColor(vis_frame, cv2.COLOR_RGB2BGR)
+                    video_writer.write(vis_frame_bgr)
+
                 if (frame_idx + 1) % 100 == 0:
                     batch_time = (time.time() - batch_start_time) * 1000
                     print(f"  Processed {frame_idx + 1}/{frame_count} frames ({batch_time:.2f}ms)")
@@ -707,6 +831,11 @@ def process_single_file(video_path: Path, output_path: Path,
                 frame_idx += 1
 
             cap.release()
+
+            # Release video writer if used
+            if video_writer is not None:
+                video_writer.release()
+                print(f"  [SUCCESS] Video output saved to: {video_out_path}")
 
             # Print inference time statistics
             if inference_times:
@@ -855,6 +984,17 @@ def main():
         action='store_true',
         help='Save first frame with gaze visualization as JPG'
     )
+    parser.add_argument(
+        '--select',
+        type=str,
+        default=None,
+        help='Comma-separated list of camera IDs to process (e.g., "0,2,4,6")'
+    )
+    parser.add_argument(
+        '--video-out',
+        action='store_true',
+        help='Save visualization as video file (AVI format with same fps and resolution as input)'
+    )
 
     args = parser.parse_args()
 
@@ -907,6 +1047,15 @@ def main():
         # Check if rotation is requested (--rotate flag present means rotate)
         should_rotate = args.rotate is not None
 
+        # Determine video output path if requested
+        video_out_path = None
+        if args.video_out:
+            file_id = extract_id_from_filename(video_path.name)
+            if file_id is not None:
+                video_out_path = output_dir / f"gaze_{file_id}_visualization.avi"
+            else:
+                video_out_path = output_dir / f"gaze_{video_path.stem}_visualization.avi"
+
         try:
             process_single_file(
                 video_path=video_path,
@@ -914,7 +1063,8 @@ def main():
                 gaze_estimator=gaze_estimator,
                 model_type=args.model,
                 should_rotate=should_rotate,
-                check_mode=args.check
+                check_mode=args.check,
+                video_out_path=video_out_path
             )
         except Exception as e:
             print(f"\nError processing file: {e}")
@@ -950,10 +1100,21 @@ def main():
     print(f"Input Directory: {input_directory}")
     print(f"Output Directory: {output_directory}")
     print(f"Rotate IDs: {args.rotate if args.rotate is not None else 'None'}")
-    print(f"Check mode: {args.check}\n")
+    print(f"Check mode: {args.check}")
+    print(f"Video output: {args.video_out}\n")
+
+    # Parse selected IDs if provided
+    selected_ids = None
+    if args.select:
+        try:
+            selected_ids = [int(x.strip()) for x in args.select.split(',')]
+            print(f"Selected IDs: {selected_ids}\n")
+        except ValueError:
+            print(f"Error: Invalid format for --select. Expected comma-separated integers (e.g., '0,2,4,6')")
+            return 1
 
     # Find file pairs in camera directory
-    pairs = find_file_pairs(input_directory)
+    pairs = find_file_pairs(input_directory, selected_ids=selected_ids)
 
     if not pairs:
         print("No file pairs found. Exiting.")
@@ -983,6 +1144,11 @@ def main():
         if args.check:
             check_output_path = output_directory / f"check_gaze_{file_id}.jpg"
 
+        # Prepare video output path if requested
+        video_out_path = None
+        if args.video_out:
+            video_out_path = output_directory / f"gaze_{file_id}_visualization.avi"
+
         # Generate output filename in base directory
         output_path = output_directory / f"gaze_{file_id}.csv"
 
@@ -1002,7 +1168,8 @@ def main():
                 model_type=args.model,
                 should_rotate=should_rotate,
                 check_mode=args.check,
-                check_output_path=check_output_path
+                check_output_path=check_output_path,
+                video_out_path=video_out_path
             )
 
         print(f"  [SUCCESS] Output saved to: {output_path}\n")

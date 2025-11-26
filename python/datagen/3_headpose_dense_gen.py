@@ -54,12 +54,13 @@ def extract_id_from_filename(filename: str) -> Optional[int]:
     return None
 
 
-def find_file_pairs(directory: Path) -> Dict[int, Dict[str, Path]]:
+def find_file_pairs(directory: Path, selected_ids: Optional[List[int]] = None) -> Dict[int, Dict[str, Path]]:
     """
     Find and pair AVI and face landmarks CSV files by their ID suffix.
 
     Args:
         directory: Directory to search for files
+        selected_ids: Optional list of camera IDs to filter (e.g., [0, 2, 4, 6])
 
     Returns:
         Dictionary mapping ID to {'avi': Path, 'csv': Path}
@@ -80,6 +81,9 @@ def find_file_pairs(directory: Path) -> Dict[int, Dict[str, Path]]:
             continue
         file_id = extract_id_from_filename(avi_file.name)
         if file_id is not None:
+            # Filter by selected IDs if provided
+            if selected_ids is not None and file_id not in selected_ids:
+                continue
             avi_files[file_id] = avi_file
             print(f"  Found AVI file: {avi_file.name} (ID: {file_id})")
 
@@ -94,6 +98,9 @@ def find_file_pairs(directory: Path) -> Dict[int, Dict[str, Path]]:
             continue
         file_id = extract_id_from_filename(csv_file.name)
         if file_id is not None:
+            # Filter by selected IDs if provided
+            if selected_ids is not None and file_id not in selected_ids:
+                continue
             csv_files[file_id] = csv_file
             print(f"  Found CSV file: {csv_file.name} (ID: {file_id})")
 
@@ -305,6 +312,67 @@ def estimate_head_pose(landmarks_2d: np.ndarray, image_shape: Tuple[int, int]) -
     return rotation_vector, translation_vector, euler_angles
 
 
+def draw_head_pose_axes(frame: np.ndarray, landmarks_2d: np.ndarray,
+                       rotation_vector: np.ndarray, translation_vector: np.ndarray,
+                       image_shape: Tuple[int, int]) -> np.ndarray:
+    """
+    Draw 3D head pose axes on a frame.
+
+    Args:
+        frame: Input frame to draw on
+        landmarks_2d: 2D facial landmarks
+        rotation_vector: Rotation vector from PnP
+        translation_vector: Translation vector from PnP
+        image_shape: Image shape (height, width)
+
+    Returns:
+        Frame with head pose axes drawn
+    """
+    vis_frame = frame.copy()
+
+    # Get camera matrix
+    camera_matrix = get_camera_matrix(image_shape)
+    dist_coeffs = np.zeros((4, 1))
+
+    # Draw 3D coordinate axes
+    # Define 3D axis points (in mm)
+    axis_length = 300
+    axis_points_3d = np.array([
+        (0, 0, 0),              # Origin
+        (axis_length, 0, 0),    # X-axis (Red)
+        (0, axis_length, 0),    # Y-axis (Green)
+        (0, 0, axis_length)     # Z-axis (Blue)
+    ], dtype=np.float64)
+
+    # Project 3D points to 2D
+    axis_points_2d, _ = cv2.projectPoints(
+        axis_points_3d,
+        rotation_vector,
+        translation_vector,
+        camera_matrix,
+        dist_coeffs
+    )
+
+    # Convert to integer coordinates
+    origin = tuple(axis_points_2d[0].ravel().astype(int))
+    x_axis = tuple(axis_points_2d[1].ravel().astype(int))
+    y_axis = tuple(axis_points_2d[2].ravel().astype(int))
+    z_axis = tuple(axis_points_2d[3].ravel().astype(int))
+
+    # Draw axes
+    line_thickness = 3
+    cv2.line(vis_frame, origin, x_axis, (0, 0, 255), line_thickness)  # X-axis: Red
+    cv2.line(vis_frame, origin, y_axis, (0, 255, 0), line_thickness)  # Y-axis: Green
+    cv2.line(vis_frame, origin, z_axis, (255, 0, 0), line_thickness)  # Z-axis: Blue
+
+    # Add axis labels
+    cv2.putText(vis_frame, 'X', x_axis, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+    cv2.putText(vis_frame, 'Y', y_axis, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    cv2.putText(vis_frame, 'Z', z_axis, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+
+    return vis_frame
+
+
 def visualize_head_pose(frame: np.ndarray, landmarks_2d: np.ndarray,
                        rotation_vector: np.ndarray, translation_vector: np.ndarray,
                        euler_angles: np.ndarray, output_path: Path):
@@ -397,10 +465,11 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
                                  timestamps: List[float], csv_file,
                                  should_rotate: bool = False,
                                  check_mode: bool = False,
-                                 check_output_path: Optional[Path] = None):
+                                 check_output_path: Optional[Path] = None,
+                                 video_out_path: Optional[Path] = None):
     """
     Process landmarks and estimate head pose for each frame.
-    Video is only used for visualization when check_mode is enabled.
+    Video is only used for visualization when check_mode is enabled or video_out_path is provided.
 
     Args:
         video_path: Path to video file (used only for visualization)
@@ -410,6 +479,7 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
         should_rotate: Whether to rotate frames
         check_mode: Whether to save first frame visualization
         check_output_path: Path to save check visualization
+        video_out_path: Optional path to save visualization video (AVI format)
     """
     print(f"Processing landmarks from: {video_path.name}")
     if should_rotate:
@@ -431,7 +501,20 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
         first_frame = cv2.rotate(first_frame, cv2.ROTATE_90_CLOCKWISE)
 
     image_shape = first_frame.shape[:2]
-    cap.release()
+
+    # Initialize VideoWriter if video output is requested
+    video_writer = None
+    if video_out_path is not None:
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frame_width = image_shape[1]
+        frame_height = image_shape[0]
+        fourcc = cv2.VideoWriter_fourcc(*'XVID')
+        video_writer = cv2.VideoWriter(str(video_out_path), fourcc, fps, (frame_width, frame_height))
+        print(f"  [INFO] Creating output video: {video_out_path.name} ({frame_width}x{frame_height} @ {fps:.2f} fps)")
+        # Reset capture for frame reading
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+    else:
+        cap.release()
 
     num_frames = len(landmarks_array)
     csv_writer = csv.writer(csv_file)
@@ -446,6 +529,16 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
     for frame_idx in range(num_frames):
         # Get landmarks for this frame
         landmarks_2d = landmarks_array[frame_idx]
+
+        # Read video frame if video output is requested
+        current_frame = None
+        if video_writer is not None:
+            ret, current_frame = cap.read()
+            if ret:
+                if should_rotate:
+                    current_frame = cv2.rotate(current_frame, cv2.ROTATE_90_CLOCKWISE)
+            else:
+                print(f"  [WARNING] Could not read frame {frame_idx}")
 
         # Estimate head pose with timing
         start_time = time.time()
@@ -467,9 +560,28 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
             # Visualize first frame if check mode
             if check_mode and frame_idx == 0 and check_output_path is not None:
                 visualize_head_pose(first_frame, landmarks_2d, rotation_vec, translation_vec, euler_angles, check_output_path)
+
+            # Write visualization frame to video
+            if video_writer is not None and current_frame is not None:
+                vis_frame = draw_head_pose_axes(current_frame, landmarks_2d, rotation_vec, translation_vec, image_shape)
+
+                # Add text overlays for angles and position
+                pitch, yaw, roll = euler_angles
+                tx, ty, tz = translation_vec.ravel()
+
+                cv2.putText(vis_frame, f"Pitch: {pitch:.1f} deg", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                cv2.putText(vis_frame, f"Yaw: {yaw:.1f} deg", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                cv2.putText(vis_frame, f"Roll: {roll:.1f} deg", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                cv2.putText(vis_frame, f"Pos: ({tx:.0f}, {ty:.0f}, {tz:.0f}) mm", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+
+                video_writer.write(vis_frame)
         else:
             # Write NaN for failed estimation
             row.extend([np.nan] * 9)  # 3 rotation + 3 translation + 3 euler angles
+
+            # Write blank frame to video if output is requested
+            if video_writer is not None and current_frame is not None:
+                video_writer.write(current_frame)
 
         csv_writer.writerow(row)
         csv_file.flush()
@@ -480,6 +592,12 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
             batch_start_time = time.time()
 
     print(f"  [SUCCESS] Processed all {num_frames} frames")
+
+    # Release video resources
+    if video_writer is not None:
+        video_writer.release()
+        cap.release()
+        print(f"  [SUCCESS] Video output saved to: {video_out_path}")
 
     # Print inference time statistics
     if inference_times:
@@ -496,7 +614,8 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
 def process_single_file(face_kps_csv: Path, output_path: Path,
                        video_path: Optional[Path] = None,
                        should_rotate: bool = False,
-                       check_mode: bool = False) -> None:
+                       check_mode: bool = False,
+                       video_out_path: Optional[Path] = None) -> None:
     """
     Process a single face landmarks CSV file and estimate head pose.
 
@@ -506,6 +625,7 @@ def process_single_file(face_kps_csv: Path, output_path: Path,
         video_path: Optional path to video file (for visualization and image size)
         should_rotate: Whether to rotate frames
         check_mode: Whether to save first frame visualization
+        video_out_path: Optional path to save visualization video (AVI format)
     """
     print(f"Processing single file: {face_kps_csv.name}")
     print(f"Output: {output_path}")
@@ -519,6 +639,8 @@ def process_single_file(face_kps_csv: Path, output_path: Path,
     # Get image shape from video or use default
     image_shape = (480, 640)  # Default shape
     first_frame = None
+    cap = None
+    video_writer = None
 
     if video_path is not None and video_path.exists():
         print(f"Reading video for image dimensions: {video_path.name}")
@@ -530,7 +652,23 @@ def process_single_file(face_kps_csv: Path, output_path: Path,
                     first_frame = cv2.rotate(first_frame, cv2.ROTATE_90_CLOCKWISE)
                 image_shape = first_frame.shape[:2]
                 print(f"  Video dimensions: {image_shape[1]}x{image_shape[0]}")
-            cap.release()
+
+                # Initialize VideoWriter if video output is requested
+                if video_out_path is not None:
+                    fps = cap.get(cv2.CAP_PROP_FPS)
+                    frame_width = image_shape[1]
+                    frame_height = image_shape[0]
+                    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+                    video_writer = cv2.VideoWriter(str(video_out_path), fourcc, fps, (frame_width, frame_height))
+                    print(f"  [INFO] Creating output video: {video_out_path.name} ({frame_width}x{frame_height} @ {fps:.2f} fps)")
+                    # Reset capture for frame reading
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                else:
+                    cap.release()
+                    cap = None
+            else:
+                cap.release()
+                cap = None
         else:
             print(f"  [WARNING] Could not open video file, using default dimensions")
     else:
@@ -563,6 +701,16 @@ def process_single_file(face_kps_csv: Path, output_path: Path,
             # Get landmarks for this frame
             landmarks_2d = landmarks_array[frame_idx]
 
+            # Read video frame if video output is requested
+            current_frame = None
+            if video_writer is not None and cap is not None:
+                ret, current_frame = cap.read()
+                if ret:
+                    if should_rotate:
+                        current_frame = cv2.rotate(current_frame, cv2.ROTATE_90_CLOCKWISE)
+                else:
+                    print(f"  [WARNING] Could not read frame {frame_idx}")
+
             # Estimate head pose with timing
             start_time = time.time()
             rotation_vec, translation_vec, euler_angles = estimate_head_pose(landmarks_2d, image_shape)
@@ -583,9 +731,28 @@ def process_single_file(face_kps_csv: Path, output_path: Path,
                 # Visualize first frame if check mode
                 if check_mode and frame_idx == 0 and check_output_path is not None and first_frame is not None:
                     visualize_head_pose(first_frame, landmarks_2d, rotation_vec, translation_vec, euler_angles, check_output_path)
+
+                # Write visualization frame to video
+                if video_writer is not None and current_frame is not None:
+                    vis_frame = draw_head_pose_axes(current_frame, landmarks_2d, rotation_vec, translation_vec, image_shape)
+
+                    # Add text overlays for angles and position
+                    pitch, yaw, roll = euler_angles
+                    tx, ty, tz = translation_vec.ravel()
+
+                    cv2.putText(vis_frame, f"Pitch: {pitch:.1f} deg", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    cv2.putText(vis_frame, f"Yaw: {yaw:.1f} deg", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    cv2.putText(vis_frame, f"Roll: {roll:.1f} deg", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    cv2.putText(vis_frame, f"Pos: ({tx:.0f}, {ty:.0f}, {tz:.0f}) mm", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+
+                    video_writer.write(vis_frame)
             else:
                 # Write NaN for failed estimation
                 row.extend([np.nan] * 9)  # 3 rotation + 3 translation + 3 euler angles
+
+                # Write blank frame to video if output is requested
+                if video_writer is not None and current_frame is not None:
+                    video_writer.write(current_frame)
 
             csv_writer.writerow(row)
             csv_file.flush()
@@ -596,6 +763,13 @@ def process_single_file(face_kps_csv: Path, output_path: Path,
                 batch_start_time = time.time()
 
         print(f"  [SUCCESS] Processed all {num_frames} frames")
+
+        # Release video resources
+        if video_writer is not None:
+            video_writer.release()
+            if cap is not None:
+                cap.release()
+            print(f"  [SUCCESS] Video output saved to: {video_out_path}")
 
         # Print inference time statistics
         if inference_times:
@@ -659,6 +833,17 @@ def main():
         action='store_true',
         help='Save first frame with head pose visualization as JPG'
     )
+    parser.add_argument(
+        '--select',
+        type=str,
+        default=None,
+        help='Comma-separated list of camera IDs to process (e.g., "0,2,4,6")'
+    )
+    parser.add_argument(
+        '--video-out',
+        action='store_true',
+        help='Save visualization as video file (AVI format with same fps and resolution as input)'
+    )
 
     args = parser.parse_args()
 
@@ -695,13 +880,23 @@ def main():
         # Check if rotation is requested (--rotate flag present means rotate)
         should_rotate = args.rotate is not None
 
+        # Determine video output path if requested
+        video_out_path = None
+        if args.video_out:
+            file_id = extract_id_from_filename(file_path.name)
+            if file_id is not None:
+                video_out_path = output_dir / f"headpose_{file_id}_visualization.avi"
+            else:
+                video_out_path = output_dir / f"headpose_{file_path.stem}_visualization.avi"
+
         try:
             process_single_file(
                 face_kps_csv=face_kps_csv,
                 output_path=output_path,
                 video_path=file_path,
                 should_rotate=should_rotate,
-                check_mode=args.check
+                check_mode=args.check,
+                video_out_path=video_out_path
             )
         except Exception as e:
             print(f"\nError processing file: {e}")
@@ -737,10 +932,21 @@ def main():
     print(f"Input Directory: {input_directory}")
     print(f"Output Directory: {output_directory}")
     print(f"Rotate IDs: {args.rotate if args.rotate is not None else 'None'}")
-    print(f"Check mode: {args.check}\n")
+    print(f"Check mode: {args.check}")
+    print(f"Video output: {args.video_out}\n")
+
+    # Parse selected IDs if provided
+    selected_ids = None
+    if args.select:
+        try:
+            selected_ids = [int(x.strip()) for x in args.select.split(',')]
+            print(f"Selected IDs: {selected_ids}\n")
+        except ValueError:
+            print(f"Error: Invalid format for --select. Expected comma-separated integers (e.g., '0,2,4,6')")
+            return 1
 
     # Find file pairs
-    pairs = find_file_pairs(base_directory)
+    pairs = find_file_pairs(base_directory, selected_ids=selected_ids)
 
     if not pairs:
         print("No file pairs found. Exiting.")
@@ -771,6 +977,11 @@ def main():
         if args.check:
             check_output_path = output_directory / f"check_headpose_{file_id}.jpg"
 
+        # Prepare video output path if requested
+        video_out_path = None
+        if args.video_out:
+            video_out_path = output_directory / f"headpose_{file_id}_visualization.avi"
+
         # Generate output filename
         output_path = output_directory / f"head_pose_{file_id}.csv"
 
@@ -788,7 +999,8 @@ def main():
                 files['avi'], landmarks_array, timestamps, csv_file,
                 should_rotate=should_rotate,
                 check_mode=args.check,
-                check_output_path=check_output_path
+                check_output_path=check_output_path,
+                video_out_path=video_out_path
             )
 
         print(f"  [SUCCESS] Output saved to: {output_path}\n")
