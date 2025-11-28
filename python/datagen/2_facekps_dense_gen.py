@@ -914,6 +914,9 @@ def main():
     print(f"Mode: Batch")
     print(f"Input directory: {input_directory}")
     print(f"Output directory: {output_directory}")
+    print(f"Autofill: {args.autofill}")
+    print(f"Rotate IDs: {args.rotate if args.rotate is not None else 'None'}")
+    print(f"Check mode: {args.check}")
     print(f"Video output: {args.video_out}")
 
     # Parse selected IDs if provided
