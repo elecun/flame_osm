@@ -137,7 +137,8 @@ def find_file_pairs(directory: Path, selected_ids: Optional[List[int]] = None) -
 def read_face_landmarks_csv(csv_path: Path) -> Tuple[List[float], np.ndarray]:
     """
     Read face landmarks from CSV file.
-    Extracts only 2D landmarks (ignores 3D if present).
+    Supports MediaPipe Face Mesh format (landmark_N_x, landmark_N_y, landmark_N_z).
+    Extracts only 2D landmarks (x, y).
 
     Args:
         csv_path: Path to face_kps CSV file
@@ -154,31 +155,33 @@ def read_face_landmarks_csv(csv_path: Path) -> Tuple[List[float], np.ndarray]:
         reader = csv.reader(f)
         header = next(reader)
 
-        # Find 2D landmark column indices
-        # Header format: timestamp, landmark_0_x_2d, landmark_0_y_2d, ..., [landmark_0_x_3d, ...]
-        landmark_2d_indices = []
+        # Find landmark column indices for MediaPipe Face Mesh format
+        # Header format: timestamp, landmark_0_x, landmark_0_y, landmark_0_z, landmark_1_x, ...
+        landmark_indices = []
         col_idx = 1  # Start after timestamp
 
         while col_idx < len(header):
             col_name = header[col_idx]
-            # Check if this is a 2D x coordinate
-            if '_x_2d' in col_name or (col_idx == 1 and '_x' in col_name and '_3d' not in col_name):
-                # Found x_2d, next should be y_2d
-                landmark_2d_indices.append((col_idx, col_idx + 1))
-                col_idx += 2
-            elif '_x_3d' in col_name:
-                # Reached 3D section, stop
-                break
+            # Check if this is an x coordinate (landmark_N_x)
+            if '_x' in col_name and col_idx + 1 < len(header):
+                next_col = header[col_idx + 1]
+                # Verify next column is y coordinate
+                if '_y' in next_col:
+                    landmark_indices.append((col_idx, col_idx + 1))
+                    # Skip x, y, z columns (assuming z exists)
+                    col_idx += 3
+                else:
+                    col_idx += 1
             else:
                 col_idx += 1
 
-        num_landmarks = len(landmark_2d_indices)
+        num_landmarks = len(landmark_indices)
 
         if num_landmarks == 0:
-            # Fallback: assume all columns after timestamp are 2D landmarks (x, y pairs)
+            # Fallback: assume format is x, y, z triplets
             num_cols = len(header) - 1
-            num_landmarks = num_cols // 2
-            landmark_2d_indices = [(1 + i * 2, 1 + i * 2 + 1) for i in range(num_landmarks)]
+            num_landmarks = num_cols // 3
+            landmark_indices = [(1 + i * 3, 1 + i * 3 + 1) for i in range(num_landmarks)]
 
         for row in reader:
             if not row:
@@ -187,9 +190,9 @@ def read_face_landmarks_csv(csv_path: Path) -> Tuple[List[float], np.ndarray]:
             timestamp = float(row[0])
             timestamps.append(timestamp)
 
-            # Parse 2D landmarks only
+            # Parse 2D landmarks (x, y only)
             landmarks = []
-            for x_idx, y_idx in landmark_2d_indices:
+            for x_idx, y_idx in landmark_indices:
                 x = float(row[x_idx])
                 y = float(row[y_idx])
                 landmarks.append([x, y])
@@ -202,21 +205,21 @@ def read_face_landmarks_csv(csv_path: Path) -> Tuple[List[float], np.ndarray]:
 
 def get_3d_model_points():
     """
-    Get 3D model points for standard facial landmarks.
-    Using a generic 3D face model.
+    Get 3D model points for MediaPipe Face Mesh landmarks.
+    Coordinates are in mm, optimized for MediaPipe Face Mesh 468-point model.
 
     Returns:
         np.ndarray: 3D coordinates of facial landmarks
     """
-    # 3D model points (generic face model)
-    # Indices based on 68-point model
+    # 3D model points optimized for MediaPipe Face Mesh
+    # Order: nose_tip(4), chin(152), left_eye_outer(33), right_eye_outer(263), mouth_left(61), mouth_right(291)
     model_points = np.array([
-        (0.0, 0.0, 0.0),             # Nose tip (30)
-        (0.0, -330.0, -65.0),        # Chin (8)
-        (-225.0, 170.0, -135.0),     # Left eye left corner (36)
-        (225.0, 170.0, -135.0),      # Right eye right corner (45)
-        (-150.0, -150.0, -125.0),    # Left Mouth corner (48)
-        (150.0, -150.0, -125.0)      # Right mouth corner (54)
+        (0.0, 0.0, 0.0),             # Nose tip (4)
+        (0.0, -63.6, -12.5),         # Chin (152)
+        (-43.3, 32.7, -26.0),        # Left eye left corner (33)
+        (43.3, 32.7, -26.0),         # Right eye right corner (263)
+        (-28.9, -28.9, -24.1),       # Left mouth corner (61)
+        (28.9, -28.9, -24.1)         # Right mouth corner (291)
     ], dtype=np.float64)
 
     return model_points
@@ -243,27 +246,34 @@ def get_camera_matrix(image_shape):
     return camera_matrix
 
 
-def estimate_head_pose(landmarks_2d: np.ndarray, image_shape: Tuple[int, int]) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
+def estimate_head_pose(landmarks_2d: np.ndarray, image_shape: Tuple[int, int],
+                       prev_rvec: Optional[np.ndarray] = None,
+                       prev_tvec: Optional[np.ndarray] = None) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
     """
     Estimate head pose from 2D facial landmarks.
 
     Args:
-        landmarks_2d: 2D facial landmarks (68 points expected)
+        landmarks_2d: 2D facial landmarks (MediaPipe Face Mesh with 468 points)
         image_shape: Image shape (height, width)
+        prev_rvec: Previous rotation vector for temporal consistency (optional)
+        prev_tvec: Previous translation vector for temporal consistency (optional)
 
     Returns:
         Tuple of (rotation_vector, translation_vector, euler_angles)
         euler_angles: (pitch, yaw, roll) in degrees
     """
-    if len(landmarks_2d) < 68:
+    # MediaPipe Face Mesh has 468 landmarks
+    # We need at least 264 landmarks to access index 263
+    if len(landmarks_2d) < 292:
         return None, None, None
 
     # Get 3D model points
     model_points = get_3d_model_points()
 
     # Get corresponding 2D image points (specific landmark indices)
-    # Based on 68-point model: nose_tip=30, chin=8, left_eye_left=36, right_eye_right=45, left_mouth=48, right_mouth=54
-    landmark_indices = [30, 8, 36, 45, 48, 54]
+    # Based on MediaPipe Face Mesh 468-point model:
+    # nose_tip=4, chin=152, left_eye_left=33, right_eye_right=263, left_mouth=61, right_mouth=291
+    landmark_indices = [4, 152, 33, 263, 61, 291]
     image_points = np.array([landmarks_2d[i] for i in landmark_indices], dtype=np.float64)
 
     # Check for NaN values
@@ -274,14 +284,28 @@ def estimate_head_pose(landmarks_2d: np.ndarray, image_shape: Tuple[int, int]) -
     camera_matrix = get_camera_matrix(image_shape)
     dist_coeffs = np.zeros((4, 1))  # Assuming no lens distortion
 
-    # Solve PnP
-    success, rotation_vector, translation_vector = cv2.solvePnP(
-        model_points,
-        image_points,
-        camera_matrix,
-        dist_coeffs,
-        flags=cv2.SOLVEPNP_ITERATIVE
-    )
+    # Solve PnP with temporal consistency
+    if prev_rvec is not None and prev_tvec is not None:
+        # Use previous frame as initial guess for better stability
+        success, rotation_vector, translation_vector = cv2.solvePnP(
+            model_points,
+            image_points,
+            camera_matrix,
+            dist_coeffs,
+            rvec=prev_rvec,
+            tvec=prev_tvec,
+            useExtrinsicGuess=True,
+            flags=cv2.SOLVEPNP_ITERATIVE
+        )
+    else:
+        # First frame: use EPNP for more stable initialization
+        success, rotation_vector, translation_vector = cv2.solvePnP(
+            model_points,
+            image_points,
+            camera_matrix,
+            dist_coeffs,
+            flags=cv2.SOLVEPNP_EPNP
+        )
 
     if not success:
         return None, None, None
@@ -336,7 +360,7 @@ def draw_head_pose_axes(frame: np.ndarray, landmarks_2d: np.ndarray,
 
     # Draw 3D coordinate axes
     # Define 3D axis points (in mm)
-    axis_length = 300
+    axis_length = 100
     axis_points_3d = np.array([
         (0, 0, 0),              # Origin
         (axis_length, 0, 0),    # X-axis (Red)
@@ -395,7 +419,7 @@ def visualize_head_pose(frame: np.ndarray, landmarks_2d: np.ndarray,
 
     # Draw 3D coordinate axes
     # Define 3D axis points (in mm)
-    axis_length = 300
+    axis_length = 100
     axis_points_3d = np.array([
         (0, 0, 0),              # Origin
         (axis_length, 0, 0),    # X-axis (Red)
@@ -525,6 +549,10 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
     # Batch processing time tracking
     batch_start_time = time.time()
 
+    # Temporal consistency: track previous frame's pose
+    prev_rvec = None
+    prev_tvec = None
+
     # Process each frame's landmarks
     for frame_idx in range(num_frames):
         # Get landmarks for this frame
@@ -540,9 +568,11 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
             else:
                 print(f"  [WARNING] Could not read frame {frame_idx}")
 
-        # Estimate head pose with timing
+        # Estimate head pose with timing (using previous frame for stability)
         start_time = time.time()
-        rotation_vec, translation_vec, euler_angles = estimate_head_pose(landmarks_2d, image_shape)
+        rotation_vec, translation_vec, euler_angles = estimate_head_pose(
+            landmarks_2d, image_shape, prev_rvec, prev_tvec
+        )
         inference_time = time.time() - start_time
         inference_times.append(inference_time)
 
@@ -575,6 +605,10 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
                 cv2.putText(vis_frame, f"Pos: ({tx:.0f}, {ty:.0f}, {tz:.0f}) mm", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
 
                 video_writer.write(vis_frame)
+
+            # Update previous vectors for next frame (temporal consistency)
+            prev_rvec = rotation_vec.copy()
+            prev_tvec = translation_vec.copy()
         else:
             # Write NaN for failed estimation
             row.extend([np.nan] * 9)  # 3 rotation + 3 translation + 3 euler angles
@@ -695,6 +729,10 @@ def process_single_file(face_kps_csv: Path, output_path: Path,
         # Batch processing time tracking
         batch_start_time = time.time()
 
+        # Temporal consistency: track previous frame's pose
+        prev_rvec = None
+        prev_tvec = None
+
         # Process each frame's landmarks
         num_frames = len(landmarks_array)
         for frame_idx in range(num_frames):
@@ -711,9 +749,11 @@ def process_single_file(face_kps_csv: Path, output_path: Path,
                 else:
                     print(f"  [WARNING] Could not read frame {frame_idx}")
 
-            # Estimate head pose with timing
+            # Estimate head pose with timing (using previous frame for stability)
             start_time = time.time()
-            rotation_vec, translation_vec, euler_angles = estimate_head_pose(landmarks_2d, image_shape)
+            rotation_vec, translation_vec, euler_angles = estimate_head_pose(
+                landmarks_2d, image_shape, prev_rvec, prev_tvec
+            )
             inference_time = time.time() - start_time
             inference_times.append(inference_time)
 
@@ -746,6 +786,10 @@ def process_single_file(face_kps_csv: Path, output_path: Path,
                     cv2.putText(vis_frame, f"Pos: ({tx:.0f}, {ty:.0f}, {tz:.0f}) mm", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
 
                     video_writer.write(vis_frame)
+
+                # Update previous vectors for next frame (temporal consistency)
+                prev_rvec = rotation_vec.copy()
+                prev_tvec = translation_vec.copy()
             else:
                 # Write NaN for failed estimation
                 row.extend([np.nan] * 9)  # 3 rotation + 3 translation + 3 euler angles
@@ -968,7 +1012,7 @@ def main():
         print(f"Loaded {len(timestamps)} frames with {landmarks_array.shape[1]} landmarks\n")
 
         # Check if this ID should be rotated
-        should_rotate = file_id in args.rotate
+        should_rotate = args.rotate is not None and file_id in args.rotate
         if should_rotate:
             print(f"  [INFO] ID {file_id} will be rotated 90 degrees clockwise\n")
 
