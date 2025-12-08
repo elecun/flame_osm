@@ -317,7 +317,8 @@ def visualize_first_frame(frame: np.ndarray, landmarks: np.ndarray, output_path:
 
 def process_video_with_mediapipe(video_path: Path, face_mesh, yolo_model, csv_file, timestamps: List[float],
                                   should_rotate: bool = False, check_mode: bool = False,
-                                  check_output_path: Optional[Path] = None, video_out_path: Optional[Path] = None) -> Tuple[np.ndarray, int]:
+                                  check_output_path: Optional[Path] = None, video_out_path: Optional[Path] = None,
+                                  wider: float = 0.0) -> Tuple[np.ndarray, int]:
     """
     Process video with YOLO face detection + MediaPipe FaceMesh and write results to CSV immediately.
 
@@ -331,6 +332,7 @@ def process_video_with_mediapipe(video_path: Path, face_mesh, yolo_model, csv_fi
         check_mode: Whether to save first frame with landmarks visualization
         check_output_path: Path to save check visualization image
         video_out_path: Optional path to save visualization video (AVI format)
+        wider: Percentage to widen the face bounding box (e.g., 10 for 10%)
 
     Returns:
         Tuple of (landmarks, num_landmarks)
@@ -340,6 +342,8 @@ def process_video_with_mediapipe(video_path: Path, face_mesh, yolo_model, csv_fi
         print(f"  [INFO] Video will be rotated 90 degrees clockwise")
     if yolo_model is not None:
         print(f"  [INFO] Using YOLO face detector for face cropping")
+        if wider > 0:
+            print(f"  [INFO] Bounding box will be widened by {wider}%")
 
     cap = cv2.VideoCapture(str(video_path))
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -412,6 +416,17 @@ def process_video_with_mediapipe(video_path: Path, face_mesh, yolo_model, csv_fi
                 # Get bounding box coordinates (xyxy format)
                 box = boxes.xyxy[best_idx].cpu().numpy()
                 x1, y1, x2, y2 = map(int, box)
+
+                # Widen the bounding box if requested
+                if wider > 0:
+                    box_width = x2 - x1
+                    box_height = y2 - y1
+                    increase_w = box_width * (wider / 100.0) / 2.0
+                    increase_h = box_height * (wider / 100.0) / 2.0
+                    x1 = int(x1 - increase_w)
+                    y1 = int(y1 - increase_h)
+                    x2 = int(x2 + increase_w)
+                    y2 = int(y2 + increase_h)
 
                 # Ensure bbox is within frame boundaries
                 x1 = max(0, x1)
@@ -551,7 +566,8 @@ def generate_csv_header(num_landmarks: int) -> List[str]:
 
 def process_single_file(file_path: Path, face_mesh, yolo_model, output_path: Path,
                         should_rotate: bool = False, check_mode: bool = False,
-                        autofill: bool = False, video_out_path: Optional[Path] = None) -> None:
+                        autofill: bool = False, video_out_path: Optional[Path] = None,
+                        wider: float = 0.0) -> None:
     """
     Process a single image or video file for face landmarks.
 
@@ -564,9 +580,12 @@ def process_single_file(file_path: Path, face_mesh, yolo_model, output_path: Pat
         check_mode: Whether to save first frame with landmarks visualization
         autofill: Whether to autofill missing values
         video_out_path: Optional path to save visualization video (AVI format)
+        wider: Percentage to widen the face bounding box (e.g., 10 for 10%)
     """
     print(f"Processing single file: {file_path.name}")
     print(f"Output: {output_path}")
+    if yolo_model and wider > 0:
+        print(f"Bounding box will be widened by {wider}%")
     print(f"{'=' * 80}\n")
 
     # Check if file is image or video
@@ -618,7 +637,7 @@ def process_single_file(file_path: Path, face_mesh, yolo_model, output_path: Pat
             landmarks, num_landmarks = process_video_with_mediapipe(
                 file_path, face_mesh, yolo_model, csv_file, timestamps,
                 should_rotate=should_rotate, check_mode=check_mode, check_output_path=check_output_path,
-                video_out_path=video_out_path
+                video_out_path=video_out_path, wider=wider
             )
 
             # Autofill if requested
@@ -680,6 +699,17 @@ def process_single_file(file_path: Path, face_mesh, yolo_model, output_path: Pat
                     # Get bounding box coordinates (xyxy format)
                     box = boxes.xyxy[best_idx].cpu().numpy()
                     x1, y1, x2, y2 = map(int, box)
+
+                    # Widen the bounding box if requested
+                    if wider > 0:
+                        box_width = x2 - x1
+                        box_height = y2 - y1
+                        increase_w = box_width * (wider / 100.0) / 2.0
+                        increase_h = box_height * (wider / 100.0) / 2.0
+                        x1 = int(x1 - increase_w)
+                        y1 = int(y1 - increase_h)
+                        x2 = int(x2 + increase_w)
+                        y2 = int(y2 + increase_h)
 
                     # Ensure bbox is within frame boundaries
                     x1 = max(0, x1)
@@ -812,6 +842,12 @@ def main():
         action='store_true',
         help='Save visualization as video file (AVI format with same fps and resolution as input)'
     )
+    parser.add_argument(
+        '--wider',
+        type=float,
+        default=0.0,
+        help='Percentage to widen the face bounding box (e.g., 10 for 10%%). Default: 0.'
+    )
 
     args = parser.parse_args()
 
@@ -874,7 +910,8 @@ def main():
                 should_rotate=should_rotate,
                 check_mode=args.check,
                 autofill=args.autofill,
-                video_out_path=video_out_path
+                video_out_path=video_out_path,
+                wider=args.wider
             )
         except Exception as e:
             print(f"\nError processing file: {e}")
@@ -918,6 +955,8 @@ def main():
     print(f"Rotate IDs: {args.rotate if args.rotate is not None else 'None'}")
     print(f"Check mode: {args.check}")
     print(f"Video output: {args.video_out}")
+    if args.wider > 0:
+        print(f"Widen bbox: {args.wider}%")
 
     # Parse selected IDs if provided
     selected_ids = None
@@ -1008,7 +1047,7 @@ def main():
             landmarks, num_landmarks = process_video_with_mediapipe(
                 files['avi'], face_mesh, yolo_model, csv_file, timestamps,
                 should_rotate=should_rotate, check_mode=args.check, check_output_path=check_output_path,
-                video_out_path=video_out_path
+                video_out_path=video_out_path, wider=args.wider
             )
 
         if landmarks is None:
