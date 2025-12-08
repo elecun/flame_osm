@@ -360,7 +360,7 @@ def draw_head_pose_axes(frame: np.ndarray, landmarks_2d: np.ndarray,
 
     # Draw 3D coordinate axes
     # Define 3D axis points (in mm)
-    axis_length = 100
+    axis_length = 50
     axis_points_3d = np.array([
         (0, 0, 0),              # Origin
         (axis_length, 0, 0),    # X-axis (Red)
