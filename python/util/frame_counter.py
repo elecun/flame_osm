@@ -44,6 +44,7 @@ def find_video_files(root_path, extensions=('.avi', '.mp4')):
 def get_frame_count(video_path):
     """
     Get the total frame count of a video file.
+    Handles Unicode/Korean characters in file paths properly.
 
     Args:
         video_path: Path to video file
@@ -52,14 +53,26 @@ def get_frame_count(video_path):
         Total number of frames, or -1 if unable to read
     """
     try:
-        print(f"  Opening video file: {video_path}")
-        cap = cv2.VideoCapture(str(video_path))
+        # Convert Path to string with proper encoding
+        video_path_str = str(video_path)
+
+        print(f"  Opening video file: {video_path_str}")
+
+        # Use CAP_FFMPEG backend explicitly for better Unicode support
+        cap = cv2.VideoCapture(video_path_str, cv2.CAP_FFMPEG)
+
         if not cap.isOpened():
-            print(f"  [ERROR] Could not open video file: {video_path}")
-            return -1
+            # Fallback: try default backend
+            print(f"  Retrying with default backend...")
+            cap = cv2.VideoCapture(video_path_str)
+
+            if not cap.isOpened():
+                print(f"  [ERROR] Could not open video file: {video_path_str}")
+                return -1
 
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         cap.release()
+
         print(f"  [SUCCESS] Frame count: {frame_count}")
         return frame_count
     except Exception as e:

@@ -149,12 +149,13 @@ class STGCNBlock(nn.Module):
         return x
 
 
-class AttentionSTGCN(nn.Module):
+class GeneralSTGCN(nn.Module):
     """
-    STGCN model for attention prediction from body and face keypoints
+    General STGCN model for attention prediction from body and face keypoints
+    (Previously named AttentionSTGCN)
     """
     def __init__(self, config, feature_dims=None):
-        super(AttentionSTGCN, self).__init__()
+        super(GeneralSTGCN, self).__init__()
 
         self.config = config
         model_cfg = config['model']
@@ -458,7 +459,7 @@ if __name__ == '__main__':
         'head_pose': 9
     }
 
-    model = AttentionSTGCN(config, feature_dims)
+    model = GeneralSTGCN(config, feature_dims)
 
     batch_size = 4
     seq_len = config['training']['sequence_length']

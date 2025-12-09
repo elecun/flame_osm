@@ -17,7 +17,9 @@ import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
 from sklearn.metrics import confusion_matrix, classification_report
 
-from model import AttentionSTGCN
+from model import GeneralSTGCN
+from multi_stream_stgcn import MultiStreamSTGCN, DEFAULT_STREAM_CONFIGS
+from attention_stgcn import AttentionSTGCN
 from dataset import create_data_loaders
 
 
@@ -324,7 +326,7 @@ def plot_training_curves(history, save_path):
     plt.close()
 
 
-def train_model(config, csv_file, device='cuda', fold_idx=None, rank=None, world_size=None):
+def train_model(config, csv_file, device='cuda', fold_idx=None, rank=None, world_size=None, model_name='attention'):
     """Main training function with k-fold cross validation support and DDP
 
     Args:
@@ -334,6 +336,7 @@ def train_model(config, csv_file, device='cuda', fold_idx=None, rank=None, world
         fold_idx: Current fold index (0 to n_folds-1). If None, uses config value.
         rank: Rank of current process for DDP (None for single GPU)
         world_size: Total number of processes for DDP (None for single GPU)
+        model_name: Name of the model to use ('attention' or 'multi_stream')
     """
     # Get fold information
     n_folds = config['training'].get('n_folds', 5)
@@ -385,16 +388,43 @@ def train_model(config, csv_file, device='cuda', fold_idx=None, rank=None, world
 
     # Create model
     if is_main:
-        print("\nCreating model...")
+        print(f"\nCreating model: {model_name}...")
 
-    # Set device
-    if use_ddp:
-        device = rank  # Use GPU corresponding to rank
-        model = AttentionSTGCN(config, feature_dims).to(device)
-        # Wrap model with DDP
-        model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
+    # Select and create model based on model_name
+    if model_name == 'general':
+        # Original model (previously named AttentionSTGCN)
+        if use_ddp:
+            device = rank  # Use GPU corresponding to rank
+            model = GeneralSTGCN(config, feature_dims).to(device)
+            # Wrap model with DDP
+            model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
+        else:
+            model = GeneralSTGCN(config, feature_dims).to(device)
+    elif model_name == 'attention':
+        # New Attention STGCN with dynamic graph constructor
+        if use_ddp:
+            device = rank  # Use GPU corresponding to rank
+            model = AttentionSTGCN(config, feature_dims).to(device)
+            # Wrap model with DDP
+            model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
+        else:
+            model = AttentionSTGCN(config, feature_dims).to(device)
+    elif model_name == 'multi_stream':
+        # Use default stream configuration or custom if specified in config
+        stream_configs = config.get('stream_configs', DEFAULT_STREAM_CONFIGS)
+        if use_ddp:
+            device = rank  # Use GPU corresponding to rank
+            model = MultiStreamSTGCN(config, feature_dims, stream_configs).to(device)
+            # Wrap model with DDP
+            model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
+        else:
+            model = MultiStreamSTGCN(config, feature_dims, stream_configs).to(device)
+
+        # Print stream info for multi-stream model
+        if is_main:
+            print(model.module.get_stream_info() if use_ddp else model.get_stream_info())
     else:
-        model = AttentionSTGCN(config, feature_dims).to(device)
+        raise ValueError(f"Unknown model name: {model_name}. Choose 'general', 'attention', or 'multi_stream'")
 
     # Count parameters (only main process)
     if is_main:
@@ -597,16 +627,17 @@ def get_default_device():
         return 'cpu'
 
 
-def run_ddp_training(rank, world_size, config, csv_path, fold_indices, class_weights):
+def run_ddp_training(rank, world_size, config, csv_path, fold_indices, class_weights, model_name='attention'):
     """
     Run training for a specific process in DDP setup
 
     Args:
-        rank: Rank of current process 
+        rank: Rank of current process
         world_size: Total number of processes
         config: Configuration dictionary
         csv_path: Path to CSV file
         fold_indices: List of fold indices to train
+        model_name: Name of the model to use
     """
     # Setup DDP
     setup_ddp(rank, world_size)
@@ -616,7 +647,7 @@ def run_ddp_training(rank, world_size, config, csv_path, fold_indices, class_wei
     for fold_idx in fold_indices:
         model, results = train_model(
             config, csv_path, device='cuda', fold_idx=fold_idx,
-            rank=rank, world_size=world_size
+            rank=rank, world_size=world_size, model_name=model_name
         )
         # Only main process collects results
         if rank == 0:
@@ -631,19 +662,41 @@ def run_ddp_training(rank, world_size, config, csv_path, fold_indices, class_wei
 def main():
     parser = argparse.ArgumentParser(description='Train STGCN for attention prediction with k-fold cross validation and DDP')
     parser.add_argument('--config', type=str, default='config.json', help='Path to config file')
-    parser.add_argument('--csv', type=str, default='merge_0.csv', help='Path to CSV file')
+    parser.add_argument('--csv', type=str, default='merge_0.csv',
+                        help='Path to CSV file or directory containing multiple CSV files (one file per person)')
     parser.add_argument('--device', type=str, default=get_default_device(),
                         help='Device to use for training (cuda/mps/cpu)')
     parser.add_argument('--fold', type=int, default=None,
                         help='Specific fold to train (0 to n_folds-1). If not specified, trains all folds.')
     parser.add_argument('--num_gpus', type=int, default=1,
                         help='Number of GPUs to use for DDP training (default: 1, single GPU)')
+    parser.add_argument('--model', type=str, default='attention',
+                        choices=['general', 'attention', 'multi_stream'],
+                        help='Model architecture to use (default: attention). '
+                             'Options: general (GeneralSTGCN), attention (AttentionSTGCN with dynamic graph), multi_stream (MultiStreamSTGCN)')
 
     args = parser.parse_args()
 
     # Load config
     with open(args.config, 'r') as f:
         config = json.load(f)
+
+    # Check if csv path is a directory and update config accordingly
+    if os.path.isdir(args.csv):
+        print(f"\nDetected directory path: {args.csv}")
+        print("Loading multiple CSV files (one per person)")
+        if 'data' not in config:
+            config['data'] = {}
+        config['data']['is_directory'] = True
+        # Ensure shuffle is False to preserve individual characteristics per file
+        if config['data'].get('shuffle', True):
+            print("Setting shuffle=False to preserve individual characteristics per CSV file")
+            config['data']['shuffle'] = False
+    else:
+        print(f"\nDetected single CSV file: {args.csv}")
+        if 'data' not in config:
+            config['data'] = {}
+        config['data']['is_directory'] = False
 
     n_folds = config['training'].get('n_folds', 5)
 
@@ -670,12 +723,15 @@ def main():
     else:
         raise ValueError("num_gpus must be >= 1")
 
+    # Print model selection
+    print(f"Selected model: {args.model}")
+
     # Train with DDP or single GPU
     if args.num_gpus > 1:
         # Multi-GPU training with DDP
         mp.spawn(
             run_ddp_training,
-            args=(args.num_gpus, config, args.csv, fold_indices, None),  # class_weights will be loaded inside
+            args=(args.num_gpus, config, args.csv, fold_indices, None, args.model),  # class_weights will be loaded inside
             nprocs=args.num_gpus,
             join=True
         )
@@ -691,7 +747,7 @@ def main():
         # Single GPU training
         all_results = []
         for fold_idx in fold_indices:
-            _, results = train_model(config, args.csv, device=args.device, fold_idx=fold_idx)
+            _, results = train_model(config, args.csv, device=args.device, fold_idx=fold_idx, model_name=args.model)
             all_results.append(results)
 
     # Print summary
