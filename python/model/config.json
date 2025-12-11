@@ -1,46 +1,87 @@
 {
-  "model": {
-    "num_body_nodes": 17,
-    "num_face_nodes": 68,
-    "body_in_channels": 2,
-    "face_2d_in_channels": 2,
-    "head_pose_features": 9,
-    "hidden_channels": 64,
-    "num_gcn_layers": 4,
-    "temporal_kernel_size": 29,
-    "dropout": 0.5
-  },
-  "training": {
-    "batch_size": 32,
-    "num_epochs": 100,
-    "learning_rate": 0.001,
-    "weight_decay": 0.0002,
-    "sequence_length": 30,
-    "n_folds": 5,
-    "current_fold": 0,
-    "label_smoothing": 0.1,
-    "early_stopping_patience": 15,
-    "lr_scheduler_patience": 5,
-    "lr_scheduler_factor": 0.5
-  },
   "data": {
-    "csv_path": "merge_0.csv",
-    "is_directory": false,
+    "is_directory": true,
+    "csv_files": ["body_kps_6.csv","face_kps_dense_6.csv", "head_pose_6.csv", "eyetrack_attention_class_5.csv"],
     "normalize": true,
-    "shuffle": false,
     "num_workers": 4,
+    "shuffle": true,
     "features": {
       "use_body_kps": true,
       "use_face_kps_2d": true,
       "use_head_pose": true,
-      "body_pattern": ["nose_", "eye_", "ear_", "shoulder_", "elbow_", "wrist_", "hip_", "knee_", "ankle_"],
-      "face_2d_pattern": "landmark_.*_2d",
-      "head_pose_cols": ["head_rotation_x", "head_rotation_y", "head_rotation_z", "head_translation_x", "head_translation_y", "head_translation_z", "head_pitch", "head_yaw", "head_roll"]
+      "body_pattern": [
+        "nose_",
+        "eye_",
+        "ear_",
+        "shoulder_",
+        "elbow_",
+        "wrist_",
+        "hip_",
+        "knee_",
+        "ankle_"
+      ],
+      "face_2d_pattern": "landmark_\\d+_[xy]$",
+      "head_pose_cols": [
+        "head_pitch",
+        "head_yaw",
+        "head_roll"
+      ]
     }
   },
-  "output": {
-    "model_save_path": "checkpoints",
-    "log_dir": "logs",
-    "save_best_only": true
-  }
+  "training": {
+    "epochs": 100,
+    "batch_size": 64,
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "sequence_length": 90,
+    "n_folds": 5,
+    "current_fold": 0,
+    "val_interval": 1,
+    "grad_clip": 1.0,
+    "checkpoint_dir": "checkpoints"
+  },
+  "model": {
+    "num_classes": 5,
+    "hidden_channels": 64,
+    "num_gcn_layers": 3,
+    "temporal_kernel_size": 9,
+    "dropout": 0.3
+  },
+  "streams": [
+    {
+      "name": "face_landmarks",
+      "column_pattern": "landmark_\\d+_[xy]$",
+      "num_nodes": 468,
+      "in_channels": 2,
+      "adjacency_type": "fully_connected"
+    },
+    {
+      "name": "head_pose",
+      "column_pattern": [
+        "head_pitch",
+        "head_yaw",
+        "head_roll"
+      ],
+        "num_nodes": 3,
+        "in_channels": 1,
+        "adjacency_type": "sequential"
+    },
+    {
+      "name": "body_pose",
+      "column_pattern": [
+        "nose_",
+        "eye_",
+        "ear_",
+        "shoulder_",
+        "elbow_",
+        "wrist_",
+        "hip_",
+        "knee_",
+        "ankle_"
+      ],
+      "num_nodes": 17,
+      "in_channels": 2,
+      "adjacency_type": "body"
+    }
+  ]
 }

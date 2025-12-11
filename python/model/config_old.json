@@ -1,0 +1,46 @@
+{
+  "model": {
+    "num_body_nodes": 17,
+    "num_face_nodes": 68,
+    "body_in_channels": 2,
+    "face_2d_in_channels": 2,
+    "head_pose_features": 9,
+    "hidden_channels": 64,
+    "num_gcn_layers": 3,
+    "temporal_kernel_size": 9,
+    "dropout": 0.4
+  },
+  "training": {
+    "batch_size": 32,
+    "num_epochs": 10,
+    "learning_rate": 0.005,
+    "weight_decay": 0.0001,
+    "sequence_length": 60,
+    "n_folds": 2,
+    "current_fold": 0,
+    "label_smoothing": 0.1,
+    "early_stopping_patience": 10,
+    "lr_scheduler_patience": 5,
+    "lr_scheduler_factor": 0.5
+  },
+  "data": {
+    "csv_path": "merge_0.csv",
+    "is_directory": false,
+    "normalize": true,
+    "shuffle": false,
+    "num_workers": 4,
+    "features": {
+      "use_body_kps": true,
+      "use_face_kps_2d": true,
+      "use_head_pose": true,
+      "body_pattern": ["nose_", "eye_", "ear_", "shoulder_", "elbow_", "wrist_", "hip_", "knee_", "ankle_"],
+      "face_2d_pattern": "landmark_.*_2d",
+      "head_pose_cols": ["head_rotation_x", "head_rotation_y", "head_rotation_z", "head_translation_x", "head_translation_y", "head_translation_z", "head_pitch", "head_yaw", "head_roll"]
+    }
+  },
+  "output": {
+    "model_save_path": "checkpoints",
+    "log_dir": "logs",
+    "save_best_only": true
+  }
+}

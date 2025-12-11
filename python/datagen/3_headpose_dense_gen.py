@@ -383,11 +383,32 @@ def draw_head_pose_axes(frame: np.ndarray, landmarks_2d: np.ndarray,
     y_axis = tuple(axis_points_2d[2].ravel().astype(int))
     z_axis = tuple(axis_points_2d[3].ravel().astype(int))
 
-    # Draw axes
+    # Draw a semi-transparent origin marker and a directional line showing the
+    # forward (Z) direction so it's easier to identify the yaw origin.
+    overlay = vis_frame.copy()
+
+    # Origin marker (semi-transparent filled circle)
+    origin_radius = max(8, int(min(image_shape) * 0.02))
+    origin_color = (50, 50, 50)  # dark gray
+    cv2.circle(overlay, origin, origin_radius, origin_color, -1)
+
+    # Directional line from origin toward positive Z (projected z_axis)
+    dir_color = (200, 200, 200)
+    dir_thickness = max(4, int(origin_radius / 2))
+    cv2.line(overlay, origin, z_axis, dir_color, dir_thickness)
+
+    # Blend overlay with original frame for translucency
+    alpha = 0.45
+    cv2.addWeighted(overlay, alpha, vis_frame, 1 - alpha, 0, vis_frame)
+
+    # Draw axes on top for clarity
     line_thickness = 3
     cv2.line(vis_frame, origin, x_axis, (0, 0, 255), line_thickness)  # X-axis: Red
     cv2.line(vis_frame, origin, y_axis, (0, 255, 0), line_thickness)  # Y-axis: Green
     cv2.line(vis_frame, origin, z_axis, (255, 0, 0), line_thickness)  # Z-axis: Blue
+
+    # Draw origin border to make it pop
+    cv2.circle(vis_frame, origin, origin_radius, (255, 255, 255), 1)
 
     # Add axis labels
     cv2.putText(vis_frame, 'X', x_axis, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
@@ -443,10 +464,32 @@ def visualize_head_pose(frame: np.ndarray, landmarks_2d: np.ndarray,
     z_axis = tuple(axis_points_2d[3].ravel().astype(int))
 
     # Draw axes
+    # Draw a semi-transparent origin marker and directional line showing the
+    # forward (Z) direction so it's easier to identify the yaw origin.
+    overlay = vis_frame.copy()
+
+    # Origin marker (semi-transparent filled circle)
+    origin_radius = max(8, int(min(image_shape) * 0.02))
+    origin_color = (50, 50, 50)  # dark gray
+    cv2.circle(overlay, origin, origin_radius, origin_color, -1)
+
+    # Directional line from origin toward positive Z (projected z_axis)
+    dir_color = (200, 200, 200)
+    dir_thickness = max(4, int(origin_radius / 2))
+    cv2.line(overlay, origin, z_axis, dir_color, dir_thickness)
+
+    # Blend overlay with original frame for translucency
+    alpha = 0.45
+    cv2.addWeighted(overlay, alpha, vis_frame, 1 - alpha, 0, vis_frame)
+
+    # Draw axes on top for clarity
     line_thickness = 3
     cv2.line(vis_frame, origin, x_axis, (0, 0, 255), line_thickness)  # X-axis: Red
     cv2.line(vis_frame, origin, y_axis, (0, 255, 0), line_thickness)  # Y-axis: Green
     cv2.line(vis_frame, origin, z_axis, (255, 0, 0), line_thickness)  # Z-axis: Blue
+
+    # Draw origin border to make it pop
+    cv2.circle(vis_frame, origin, origin_radius, (255, 255, 255), 1)
 
     # Add axis labels
     cv2.putText(vis_frame, 'X', x_axis, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)

@@ -218,15 +218,21 @@ class MultiStreamSTGCN(nn.Module):
 
         # Process each stream
         stream_features = []
+        missing_streams = []
         for stream_name in self.stream_names:
             if stream_name in self.streams and stream_name in stream_inputs:
                 stream_input = stream_inputs[stream_name]
-                if stream_input is not None:
-                    features = self.streams[stream_name](stream_input)
-                    stream_features.append(features)
+                if stream_input is None or stream_input.numel() == 0 or stream_input.shape[-1] == 0:
+                    missing_streams.append(stream_name)
+                    continue
+                features = self.streams[stream_name](stream_input)
+                stream_features.append(features)
 
         if len(stream_features) == 0:
-            raise ValueError("No valid input features provided")
+            msg = "No valid input features provided"
+            if missing_streams:
+                msg += f". Missing/empty streams: {', '.join(missing_streams)}"
+            raise ValueError(msg)
 
         # Concatenate all stream features
         combined_features = torch.cat(stream_features, dim=-1)

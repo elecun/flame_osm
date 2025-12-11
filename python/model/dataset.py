@@ -11,7 +11,8 @@ class AttentionDataset(Dataset):
     """
     Dataset for attention prediction from body/face keypoints and head pose
     """
-    def __init__(self, csv_files, sequence_length=30, normalize=True, train=True, scaler=None, feature_config=None, dataframe=None):
+    def __init__(self, csv_files, sequence_length=30, normalize=True, train=True, scaler=None,
+                 feature_config=None, dataframe=None, num_classes: int = 5):
         """
         Args:
             csv_files: List of CSV file paths or single CSV file path (ignored if dataframe is provided)
@@ -21,9 +22,11 @@ class AttentionDataset(Dataset):
             scaler: Pre-fitted scaler (for validation/test data)
             feature_config: Dictionary with feature selection configuration
             dataframe: Optional DataFrame to use instead of loading from CSV files
+            num_classes: Total number of attention classes (default: 5, expecting labels 1..num_classes)
         """
         self.sequence_length = sequence_length
         self.normalize = normalize
+        self.num_classes = num_classes
 
         # Use dataframe if provided, otherwise load from CSV files
         if dataframe is not None:
@@ -40,12 +43,31 @@ class AttentionDataset(Dataset):
 
             for csv_file in csv_files:
                 df = pd.read_csv(csv_file)
+                if 'attention_level' not in df.columns:
+                    print(f"[WARN] Skipping file without attention_level column: {csv_file}")
+                    continue
                 df_list.append(df)
                 file_boundaries.append(file_boundaries[-1] + len(df))
+
+            if len(df_list) == 0:
+                raise ValueError("No CSV files with attention_level column found. Please check input files.")
 
             combined_df = pd.concat(df_list, ignore_index=True)
 
         self.file_boundaries = file_boundaries
+
+        # Drop any accidental header-like rows where attention_level is non-numeric
+        if 'attention_level' not in combined_df.columns:
+            available = list(combined_df.columns)[:10]
+            raise ValueError(f"'attention_level' column not found in dataset. "
+                             f"Available columns (first 10): {available}")
+        numeric_target = pd.to_numeric(combined_df['attention_level'], errors='coerce')
+        non_numeric_mask = numeric_target.isna()
+        if non_numeric_mask.any():
+            dropped = non_numeric_mask.sum()
+            combined_df = combined_df.loc[~non_numeric_mask].reset_index(drop=True)
+            numeric_target = numeric_target.loc[~non_numeric_mask].reset_index(drop=True)
+            print(f"[INFO] Dropped {dropped} row(s) with non-numeric attention_level (likely header rows).")
 
         # Default feature config
         if feature_config is None:
@@ -86,6 +108,20 @@ class AttentionDataset(Dataset):
         else:
             self.head_pose_cols = []
 
+        # Validate that required feature columns exist
+        if self.use_body and len(self.body_cols) == 0:
+            raise ValueError("Body keypoints requested (use_body_kps=True) but no matching columns found "
+                             f"for patterns {feature_config['body_pattern']}.")
+
+        if self.use_face_2d and len(self.face_2d_cols) == 0:
+            raise ValueError("Face 2D keypoints requested (use_face_kps_2d=True) but no matching columns found "
+                             f"for pattern '{feature_config['face_2d_pattern']}'.")
+
+        if self.use_head_pose:
+            missing_head = [c for c in feature_config['head_pose_cols'] if c not in combined_df.columns]
+            if missing_head:
+                raise ValueError(f"Head pose requested (use_head_pose=True) but missing columns: {missing_head}")
+
         # Extract features
         if self.use_body:
             self.body_data = combined_df[self.body_cols].values.astype(np.float32)
@@ -102,8 +138,15 @@ class AttentionDataset(Dataset):
         else:
             self.head_pose_data = np.zeros((len(combined_df), 0), dtype=np.float32)
 
-        # Extract target (attention) - convert 1,2,3,4,5 to 0,1,2,3,4 for classification
-        self.attention = (combined_df['attention_level'].values - 1).astype(np.int64)
+        # Extract target (attention) - expect labels 1..num_classes, convert to 0-based
+        raw_attention = numeric_target.values.astype(np.int64)
+        invalid_mask = (raw_attention < 1) | (raw_attention > num_classes)
+        if invalid_mask.any():
+            bad_vals = np.unique(raw_attention[invalid_mask])
+            bad_idx = np.where(invalid_mask)[0][:5]
+            raise ValueError(f"Invalid attention_level values found: {bad_vals} at rows {bad_idx} "
+                             f"(expected 1..{num_classes}).")
+        self.attention = raw_attention - 1
 
         # Normalize features
         if normalize:
@@ -263,25 +306,67 @@ def create_data_loaders(config, csv_path, fold_idx=None, rank=None, world_size=N
     import glob
     from collections import Counter
 
+    specified_files = config['data'].get('csv_files', [])
+
     # Get CSV files
     if config['data'].get('is_directory', False):
-        # Load all CSV files from directory
-        csv_files = sorted(glob.glob(os.path.join(csv_path, '*.csv')))
+        if specified_files:
+            # Use explicitly listed files relative to directory
+            csv_files = [os.path.join(csv_path, f) for f in specified_files]
+        else:
+            # Load all CSV files from directory
+            csv_files = sorted(glob.glob(os.path.join(csv_path, '*.csv')))
         if len(csv_files) == 0:
             raise ValueError(f"No CSV files found in directory: {csv_path}")
-        print(f"\nFound {len(csv_files)} CSV file(s) in directory")
+        print(f"\nUsing {len(csv_files)} CSV file(s) from directory")
     else:
-        # Single CSV file
-        csv_files = [csv_path]
+        # Single CSV file (path may be provided directly or via csv_files[0])
+        if specified_files:
+            if len(specified_files) > 1:
+                raise ValueError("When is_directory is False, only one CSV file should be listed in data.csv_files")
+            csv_files = [specified_files[0]]
+        else:
+            csv_files = [csv_path]
 
-    # Load all dataframes to determine split sizes
-    df_list = []
+    # Load all dataframes; allow only one file to provide attention_level
+    feature_dfs = []
+    label_df = None
+    timestamp_ref = None
     for csv_file in csv_files:
         df = pd.read_csv(csv_file)
-        df_list.append(df)
 
-    # Concatenate all dataframes for k-fold splitting
-    combined_df = pd.concat(df_list, ignore_index=True)
+        # Timestamp consistency check
+        if 'timestamp' not in df.columns:
+            raise ValueError(f"'timestamp' column missing in file: {csv_file}")
+        ts_values = df['timestamp'].values
+        if timestamp_ref is None:
+            timestamp_ref = ts_values
+        else:
+            if len(ts_values) != len(timestamp_ref) or not (ts_values == timestamp_ref).all():
+                raise ValueError(f"Timestamp mismatch in file: {csv_file}")
+
+        if 'attention_level' in df.columns:
+            if label_df is None:
+                label_df = df[['attention_level']].copy()
+            else:
+                if len(df) != len(label_df):
+                    raise ValueError(f"Label file length mismatch: {csv_file} has {len(df)} rows, "
+                                     f"expected {len(label_df)}.")
+                # If multiple label files, ensure consistency
+                if not df['attention_level'].equals(label_df['attention_level']):
+                    raise ValueError(f"Multiple label files with differing attention_level values: {csv_file}")
+            df = df.drop(columns=['attention_level'])
+        feature_dfs.append(df)
+
+    if label_df is None:
+        raise ValueError("No CSV with attention_level found. Provide at least one file with labels.")
+
+    lengths = [len(df) for df in feature_dfs] + [len(label_df)]
+    if len(set(lengths)) != 1:
+        raise ValueError(f"Row count mismatch across files: {lengths}")
+
+    combined_df = pd.concat(feature_dfs, axis=1)
+    combined_df['attention_level'] = label_df['attention_level'].values
     total_samples = len(combined_df)
 
     # Get k-fold configuration
@@ -350,7 +435,8 @@ def create_data_loaders(config, csv_path, fold_idx=None, rank=None, world_size=N
         normalize=normalize,
         train=True,
         feature_config=feature_config,
-        dataframe=train_df
+        dataframe=train_df,
+        num_classes=num_classes
     )
 
     scaler = train_dataset.get_scaler()
@@ -363,7 +449,8 @@ def create_data_loaders(config, csv_path, fold_idx=None, rank=None, world_size=N
         train=False,
         scaler=scaler,
         feature_config=feature_config,
-        dataframe=val_df
+        dataframe=val_df,
+        num_classes=num_classes
     )
 
     test_dataset = AttentionDataset(
@@ -373,7 +460,8 @@ def create_data_loaders(config, csv_path, fold_idx=None, rank=None, world_size=N
         train=False,
         scaler=scaler,
         feature_config=feature_config,
-        dataframe=test_df
+        dataframe=test_df,
+        num_classes=num_classes
     )
 
     # Create data loaders

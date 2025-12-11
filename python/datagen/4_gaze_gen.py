@@ -18,6 +18,12 @@ from typing import Dict, List, Tuple, Optional
 import cv2
 import numpy as np
 try:
+    from ultralytics import YOLO
+    YOLO_AVAILABLE = True
+except ImportError:
+    YOLO_AVAILABLE = False
+    print("Warning: ultralytics library not available. Face detection will be disabled.")
+try:
     from omegaconf import OmegaConf
     from ptgaze.gaze_estimator import GazeEstimator
     from ptgaze.utils import (
@@ -73,6 +79,110 @@ def extract_id_from_filename(filename: str) -> Optional[int]:
     if match:
         return int(match.group(1))
     return None
+
+
+def load_face_detector(model_path: Optional[str]):
+    """
+    Load YOLO face detector if available.
+
+    Args:
+        model_path: Path to YOLO face detector model. Use 'none' to disable.
+
+    Returns:
+        YOLO model instance or None if unavailable/disabled.
+    """
+    if model_path is None:
+        return None
+
+    if isinstance(model_path, str) and model_path.lower() == 'none':
+        print("Face detector disabled (received 'none').")
+        return None
+
+    if not YOLO_AVAILABLE:
+        print("Warning: ultralytics YOLO not available. Install with: pip install ultralytics")
+        return None
+
+    try:
+        print(f"Loading face detector model: {model_path}")
+        model = YOLO(model_path)
+        print("  [SUCCESS] Face detector loaded")
+        return model
+    except Exception as e:
+        print(f"  [WARNING] Failed to load face detector '{model_path}': {e}")
+        return None
+
+
+def detect_face_bbox(frame_bgr: np.ndarray, face_detector) -> Optional[Tuple[int, int, int, int]]:
+    """
+    Detect a face bounding box using YOLO model.
+
+    Args:
+        frame_bgr: Input frame in BGR format
+        face_detector: YOLO model instance
+
+    Returns:
+        Bounding box tuple (x1, y1, x2, y2) or None if not detected
+    """
+    if face_detector is None:
+        return None
+
+    results = face_detector(frame_bgr, verbose=False)
+    if len(results) == 0 or len(results[0].boxes) == 0:
+        return None
+
+    boxes = results[0].boxes
+    confidences = boxes.conf.cpu().numpy()
+    best_idx = int(np.argmax(confidences))
+
+    x1, y1, x2, y2 = boxes.xyxy[best_idx].cpu().numpy().astype(int)
+    height, width = frame_bgr.shape[:2]
+
+    x1 = max(0, x1)
+    y1 = max(0, y1)
+    x2 = min(width, x2)
+    y2 = min(height, y2)
+
+    if x2 <= x1 or y2 <= y1:
+        return None
+
+    return x1, y1, x2, y2
+
+
+def crop_to_bbox(frame: np.ndarray, bbox: Optional[Tuple[int, int, int, int]]) -> Tuple[np.ndarray, Tuple[int, int]]:
+    """
+    Crop frame to bounding box. Returns cropped frame and offset.
+
+    Args:
+        frame: Input frame (RGB format)
+        bbox: Bounding box tuple (x1, y1, x2, y2) or None
+
+    Returns:
+        Tuple of (cropped_frame, (offset_x, offset_y))
+    """
+    if bbox is None:
+        return frame, (0, 0)
+
+    x1, y1, x2, y2 = bbox
+    return frame[y1:y2, x1:x2], (x1, y1)
+
+
+def offset_rect(rect: Optional[Tuple[int, int, int, int]], offset: Tuple[int, int]) -> Optional[Tuple[int, int, int, int]]:
+    """
+    Offset rectangle coordinates by given offset.
+
+    Args:
+        rect: Rectangle tuple (x, y, w, h)
+        offset: Offset tuple (offset_x, offset_y)
+
+    Returns:
+        Offset rectangle tuple or None if input rect is None
+    """
+    if rect is None:
+        return None
+
+    x, y, w, h = rect
+    ox, oy = offset
+    return x + ox, y + oy, w, h
 
 
 def find_file_pairs(directory: Path, selected_ids: Optional[List[int]] = None) -> Dict[int, Dict[str, Path]]:
@@ -436,6 +546,7 @@ def visualize_gaze(frame: np.ndarray, face: Tuple, left_eye: Tuple, right_eye: T
 
 def process_video_with_gaze(video_path: Path, timestamps: List[float], csv_file,
                             gaze_estimator,
+                            face_detector=None,
                             model_type: str = 'simple',
                             should_rotate: bool = False,
                             check_mode: bool = False,
@@ -455,11 +566,14 @@ def process_video_with_gaze(video_path: Path, timestamps: List[float], csv_file,
         check_mode: Whether to save first frame visualization
         check_output_path: Path to save check visualization
         video_out_path: Optional path to save visualization video (AVI format)
+        face_detector: Optional YOLO face detector for ROI cropping
     """
     print(f"Processing video: {video_path.name}")
     print(f"  [INFO] Using model: {model_type}")
     if should_rotate:
         print(f"  [INFO] Video will be rotated 90 degrees clockwise")
+    if face_detector is not None:
+        print(f"  [INFO] Using face detector for ROI cropping")
 
     cap = cv2.VideoCapture(str(video_path))
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -492,21 +606,32 @@ def process_video_with_gaze(video_path: Path, timestamps: List[float], csv_file,
         if not ret:
             break
 
-        # Convert BGR to RGB
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
         if should_rotate:
             frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+
+        # Detect face with YOLO (BGR frame)
+        bbox = detect_face_bbox(frame, face_detector)
+
+        # Convert BGR to RGB for processing
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        # Crop to detected face ROI if available
+        roi_frame, roi_offset = crop_to_bbox(frame, bbox)
 
         # For simplified method, detect face and eyes first
         face, left_eye, right_eye = None, None, None
         if model_type == 'simple':
-            face, left_eye, right_eye = detect_face_and_eyes(frame)
+            face, left_eye, right_eye = detect_face_and_eyes(roi_frame)
+
+        # Offset rectangles back to full-frame coordinates for visualization
+        global_face = offset_rect(face, roi_offset)
+        global_left_eye = offset_rect(left_eye, roi_offset)
+        global_right_eye = offset_rect(right_eye, roi_offset)
 
         # Estimate gaze direction with timing
         start_time = time.time()
         pitch, yaw = estimate_gaze_direction(
-            frame, gaze_estimator, model_type,
+            roi_frame, gaze_estimator, model_type,
             face=face, left_eye=left_eye, right_eye=right_eye
         )
         inference_time = time.time() - start_time
@@ -522,41 +647,51 @@ def process_video_with_gaze(video_path: Path, timestamps: List[float], csv_file,
         # Visualize first frame if check mode
         if check_mode and frame_idx == 0 and check_output_path is not None:
             # For visualization, we need face and eyes
-            if face is None or left_eye is None or right_eye is None:
-                face, left_eye, right_eye = detect_face_and_eyes(frame)
+            if global_face is None or global_left_eye is None or global_right_eye is None:
+                face_full, left_full, right_full = detect_face_and_eyes(frame)
+                global_face = global_face or face_full
+                global_left_eye = global_left_eye or left_full
+                global_right_eye = global_right_eye or right_full
 
-            if face is not None and left_eye is not None and right_eye is not None:
-                visualize_gaze(frame, face, left_eye, right_eye, pitch, yaw, check_output_path)
+            if global_face is not None and global_left_eye is not None and global_right_eye is not None:
+                visualize_gaze(frame, global_face, global_left_eye, global_right_eye, pitch, yaw, check_output_path)
 
         # Write visualization frame to video if requested
         if video_writer is not None:
-            # For visualization, we need face and eyes
-            if face is None or left_eye is None or right_eye is None:
-                face, left_eye, right_eye = detect_face_and_eyes(frame)
-
             # Create visualization frame
             vis_frame = frame.copy()
-            if face is not None and left_eye is not None and right_eye is not None:
-                # Draw face rectangle
-                x, y, w, h = face
+            arrow_origin = None
+
+            # Draw detected rectangles on full frame (not cropped)
+            if global_face is not None:
+                x, y, w, h = global_face
                 cv2.rectangle(vis_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            elif bbox is not None:
+                x1, y1, x2, y2 = bbox
+                cv2.rectangle(vis_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
-                # Draw eye rectangles
-                ex, ey, ew, eh = left_eye
+            if global_left_eye is not None and global_right_eye is not None:
+                ex, ey, ew, eh = global_left_eye
                 cv2.rectangle(vis_frame, (ex, ey), (ex + ew, ey + eh), (255, 0, 0), 2)
-                ex, ey, ew, eh = right_eye
+                ex, ey, ew, eh = global_right_eye
                 cv2.rectangle(vis_frame, (ex, ey), (ex + ew, ey + eh), (255, 0, 0), 2)
 
-                # Draw gaze direction indicators
-                face_center_x = x + w // 2
-                face_center_y = y + h // 2
+                arrow_origin = (
+                    (global_left_eye[0] + global_left_eye[2] // 2 + global_right_eye[0] + global_right_eye[2] // 2) // 2,
+                    (global_left_eye[1] + global_left_eye[3] // 2 + global_right_eye[1] + global_right_eye[3] // 2) // 2
+                )
+            elif global_face is not None:
+                fx, fy, fw, fh = global_face
+                arrow_origin = (fx + fw // 2, fy + fh // 2)
+            elif bbox is not None:
+                x1, y1, x2, y2 = bbox
+                arrow_origin = ((x1 + x2) // 2, (y1 + y2) // 2)
 
-                # Convert pitch and yaw to arrow
+            if arrow_origin is not None:
                 arrow_length = 100
-                # Yaw: left-right, Pitch: up-down
-                end_x = int(face_center_x + arrow_length * np.sin(np.radians(yaw)))
-                end_y = int(face_center_y - arrow_length * np.sin(np.radians(pitch)))
-                cv2.arrowedLine(vis_frame, (face_center_x, face_center_y), (end_x, end_y), (0, 0, 255), 3, tipLength=0.3)
+                end_x = int(arrow_origin[0] + arrow_length * np.sin(np.radians(yaw)))
+                end_y = int(arrow_origin[1] - arrow_length * np.sin(np.radians(pitch)))
+                cv2.arrowedLine(vis_frame, arrow_origin, (end_x, end_y), (0, 0, 255), 3, tipLength=0.3)
 
             # Add text overlay for gaze angles
             cv2.putText(vis_frame, f"Pitch: {pitch:.1f} deg", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
@@ -595,6 +730,7 @@ def process_video_with_gaze(video_path: Path, timestamps: List[float], csv_file,
 
 def process_single_file(video_path: Path, output_path: Path,
                        gaze_estimator,
+                       face_detector=None,
                        model_type: str = 'simple',
                        should_rotate: bool = False,
                        check_mode: bool = False,
@@ -607,6 +743,7 @@ def process_single_file(video_path: Path, output_path: Path,
         video_path: Path to video or image file
         output_path: Output CSV file path
         gaze_estimator: GazeEstimator instance (or None for simplified method)
+        face_detector: YOLO face detector instance or None
         model_type: Model type ('mpiigaze', 'mpiifacegaze', 'eth-xgaze', or 'simple')
         should_rotate: Whether to rotate frames
         check_mode: Whether to save first frame visualization
@@ -669,38 +806,44 @@ def process_single_file(video_path: Path, output_path: Path,
         if is_image:
             # Process single image
             print(f"Processing image...")
-            img = cv2.imread(str(video_path))
-            if img is None:
+            img_bgr = cv2.imread(str(video_path))
+            if img_bgr is None:
                 raise ValueError(f"Cannot read image: {video_path}")
-
-            # Convert BGR to RGB
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
             if should_rotate:
                 print(f"  [INFO] Image will be rotated 90 degrees clockwise")
-                img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+                img_bgr = cv2.rotate(img_bgr, cv2.ROTATE_90_CLOCKWISE)
+
+            # Detect face on BGR frame, then convert to RGB
+            bbox = detect_face_bbox(img_bgr, face_detector)
+
+            # Convert BGR to RGB
+            img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+
+            # Crop to ROI if face detected
+            roi_img, roi_offset = crop_to_bbox(img, bbox)
 
             # For simplified method, detect face and eyes first
             face, left_eye, right_eye = None, None, None
             if model_type == 'simple':
-                face, left_eye, right_eye = detect_face_and_eyes(img)
+                face, left_eye, right_eye = detect_face_and_eyes(roi_img)
+
+            global_face = offset_rect(face, roi_offset)
+            global_left_eye = offset_rect(left_eye, roi_offset)
+            global_right_eye = offset_rect(right_eye, roi_offset)
 
             # Estimate gaze direction with timing
             start_time = time.time()
             pitch, yaw = estimate_gaze_direction(
-                img, gaze_estimator, model_type,
+                roi_img, gaze_estimator, model_type,
                 face=face, left_eye=left_eye, right_eye=right_eye
             )
             inference_time = time.time() - start_time
 
             # Save visualization if check mode
             if check_mode and check_output_path is not None:
-                # For visualization, we need face and eyes
-                if face is None or left_eye is None or right_eye is None:
-                    face, left_eye, right_eye = detect_face_and_eyes(img)
-
-                if face is not None and left_eye is not None and right_eye is not None:
-                    visualize_gaze(img, face, left_eye, right_eye, pitch, yaw, check_output_path)
+                if global_face is not None and global_left_eye is not None and global_right_eye is not None:
+                    visualize_gaze(img, global_face, global_left_eye, global_right_eye, pitch, yaw, check_output_path)
                 else:
                     print(f"  [WARNING] Cannot visualize: face or eyes not detected")
 
@@ -720,134 +863,18 @@ def process_single_file(video_path: Path, output_path: Path,
             if should_rotate:
                 print(f"  [INFO] Video will be rotated 90 degrees clockwise")
 
-            cap = cv2.VideoCapture(str(video_path))
-            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-            # Initialize VideoWriter if video output is requested
-            video_writer = None
-            if video_out_path is not None:
-                fps = cap.get(cv2.CAP_PROP_FPS)
-                # Get frame dimensions
-                ret, first_frame = cap.read()
-                if ret:
-                    if should_rotate:
-                        first_frame = cv2.rotate(first_frame, cv2.ROTATE_90_CLOCKWISE)
-                    frame_height, frame_width = first_frame.shape[:2]
-                    fourcc = cv2.VideoWriter_fourcc(*'XVID')
-                    video_writer = cv2.VideoWriter(str(video_out_path), fourcc, fps, (frame_width, frame_height))
-                    print(f"  [INFO] Creating output video: {video_out_path.name} ({frame_width}x{frame_height} @ {fps:.2f} fps)")
-                    # Reset capture for frame reading
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-
-            # Inference time tracking
-            inference_times = []
-
-            frame_idx = 0
-            batch_start_time = time.time()
-            while cap.isOpened():
-                ret, frame = cap.read()
-                if not ret:
-                    break
-
-                # Convert BGR to RGB
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-                if should_rotate:
-                    frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-
-                # For simplified method, detect face and eyes first
-                face, left_eye, right_eye = None, None, None
-                if model_type == 'simple':
-                    face, left_eye, right_eye = detect_face_and_eyes(frame)
-
-                # Estimate gaze direction with timing
-                start_time = time.time()
-                pitch, yaw = estimate_gaze_direction(
-                    frame, gaze_estimator, model_type,
-                    face=face, left_eye=left_eye, right_eye=right_eye
-                )
-                inference_time = time.time() - start_time
-                inference_times.append(inference_time)
-
-                # Write to CSV
-                row = [timestamps[frame_idx]]
-                row.extend([pitch, yaw])
-
-                csv_writer.writerow(row)
-                csv_file.flush()
-
-                # Visualize first frame if check mode
-                if check_mode and frame_idx == 0 and check_output_path is not None:
-                    # For visualization, we need face and eyes
-                    if face is None or left_eye is None or right_eye is None:
-                        face, left_eye, right_eye = detect_face_and_eyes(frame)
-
-                    if face is not None and left_eye is not None and right_eye is not None:
-                        visualize_gaze(frame, face, left_eye, right_eye, pitch, yaw, check_output_path)
-
-                # Write visualization frame to video if requested
-                if video_writer is not None:
-                    # For visualization, we need face and eyes
-                    if face is None or left_eye is None or right_eye is None:
-                        face, left_eye, right_eye = detect_face_and_eyes(frame)
-
-                    # Create visualization frame
-                    vis_frame = frame.copy()
-                    if face is not None and left_eye is not None and right_eye is not None:
-                        # Draw face rectangle
-                        x, y, w, h = face
-                        cv2.rectangle(vis_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
-                        # Draw eye rectangles
-                        ex, ey, ew, eh = left_eye
-                        cv2.rectangle(vis_frame, (ex, ey), (ex + ew, ey + eh), (255, 0, 0), 2)
-                        ex, ey, ew, eh = right_eye
-                        cv2.rectangle(vis_frame, (ex, ey), (ex + ew, ey + eh), (255, 0, 0), 2)
-
-                        # Draw gaze direction indicators
-                        face_center_x = x + w // 2
-                        face_center_y = y + h // 2
-
-                        # Convert pitch and yaw to arrow
-                        arrow_length = 100
-                        # Yaw: left-right, Pitch: up-down
-                        end_x = int(face_center_x + arrow_length * np.sin(np.radians(yaw)))
-                        end_y = int(face_center_y - arrow_length * np.sin(np.radians(pitch)))
-                        cv2.arrowedLine(vis_frame, (face_center_x, face_center_y), (end_x, end_y), (0, 0, 255), 3, tipLength=0.3)
-
-                    # Add text overlay for gaze angles
-                    cv2.putText(vis_frame, f"Pitch: {pitch:.1f} deg", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                    cv2.putText(vis_frame, f"Yaw: {yaw:.1f} deg", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-
-                    # Convert RGB back to BGR for video writing
-                    vis_frame_bgr = cv2.cvtColor(vis_frame, cv2.COLOR_RGB2BGR)
-                    video_writer.write(vis_frame_bgr)
-
-                if (frame_idx + 1) % 100 == 0:
-                    batch_time = (time.time() - batch_start_time) * 1000
-                    print(f"  Processed {frame_idx + 1}/{frame_count} frames ({batch_time:.2f}ms)")
-                    batch_start_time = time.time()
-
-                frame_idx += 1
-
-            cap.release()
-
-            # Release video writer if used
-            if video_writer is not None:
-                video_writer.release()
-                print(f"  [SUCCESS] Video output saved to: {video_out_path}")
-
-            # Print inference time statistics
-            if inference_times:
-                avg_time = np.mean(inference_times)
-                min_time = np.min(inference_times)
-                max_time = np.max(inference_times)
-                fps = 1.0 / avg_time if avg_time > 0 else 0
-                print(f"  [SUCCESS] Processed all {frame_count} frames")
-                print(f"  Inference time - Avg: {avg_time*1000:.2f}ms, Min: {min_time*1000:.2f}ms, Max: {max_time*1000:.2f}ms")
-                print(f"  Average FPS: {fps:.2f}\n")
-            else:
-                print(f"  [SUCCESS] Processed all {frame_count} frames\n")
+            process_video_with_gaze(
+                video_path=video_path,
+                timestamps=timestamps,
+                csv_file=csv_file,
+                gaze_estimator=gaze_estimator,
+                face_detector=face_detector,
+                model_type=model_type,
+                should_rotate=should_rotate,
+                check_mode=check_mode,
+                check_output_path=check_output_path,
+                video_out_path=video_out_path
+            )
 
     print(f"[SUCCESS] Output saved to: {output_path}")
 
@@ -966,6 +993,12 @@ def main():
         help='Gaze estimation model to use (default: simple)'
     )
     parser.add_argument(
+        '--face-detection',
+        type=str,
+        default='yolo11n-face.pt',
+        help='Path to YOLO face detection model for ROI cropping (default: yolo11n-face.pt). Use "none" to disable.'
+    )
+    parser.add_argument(
         '--device',
         type=str,
         choices=['cuda', 'cpu'],
@@ -1003,7 +1036,11 @@ def main():
     print(f"Mode: {'Single File' if args.no_batch else 'Batch'}")
     print(f"Model: {args.model}")
     print(f"Device: {args.device}")
+    print(f"Face detector: {args.face_detection}")
     print(f"{'=' * 80}\n")
+
+    # Initialize face detector (used for ROI cropping)
+    face_detector = load_face_detector(args.face_detection)
 
     # Initialize gaze estimator
     gaze_estimator = None
@@ -1061,6 +1098,7 @@ def main():
                 video_path=video_path,
                 output_path=output_path,
                 gaze_estimator=gaze_estimator,
+                face_detector=face_detector,
                 model_type=args.model,
                 should_rotate=should_rotate,
                 check_mode=args.check,
@@ -1135,7 +1173,7 @@ def main():
         print(f"Loaded {len(timestamps)} timestamps from {files['csv'].name}\n")
 
         # Check if this ID should be rotated
-        should_rotate = file_id in args.rotate
+        should_rotate = args.rotate is not None and file_id in args.rotate
         if should_rotate:
             print(f"  [INFO] ID {file_id} will be rotated 90 degrees clockwise\n")
 
@@ -1165,6 +1203,7 @@ def main():
             process_video_with_gaze(
                 files['avi'], timestamps, csv_file,
                 gaze_estimator=gaze_estimator,
+                face_detector=face_detector,
                 model_type=args.model,
                 should_rotate=should_rotate,
                 check_mode=args.check,

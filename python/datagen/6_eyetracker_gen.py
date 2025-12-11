@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 from typing import List, Dict
 from dataclasses import dataclass
+import warnings
 
 
 @dataclass
@@ -68,7 +69,7 @@ def load_time_reference(base_path: Path, time_reference_id: int) -> np.ndarray:
 
 def find_eyetracker_data_dir(base_path: Path) -> Path:
     """
-    Find the eyetracker data directory under eyetracker/Timeseries Data/
+    Find the eyetracker data directory under <path>/eyetracker.
 
     Args:
         base_path: Base directory path
@@ -76,20 +77,23 @@ def find_eyetracker_data_dir(base_path: Path) -> Path:
     Returns:
         Path to the eyetracker data directory
     """
-    timeseries_path = base_path / "eyetracker" / "Timeseries Data"
+    data_dir = base_path / "eyetracker"
 
-    if not timeseries_path.exists():
-        raise FileNotFoundError(f"Timeseries Data directory not found: {timeseries_path}")
+    if not data_dir.exists():
+        raise FileNotFoundError(f"Eyetracker directory not found: {data_dir}")
+    if not data_dir.is_dir():
+        raise FileNotFoundError(f"Eyetracker path is not a directory: {data_dir}")
 
-    # Find the single subdirectory
-    subdirs = [d for d in timeseries_path.iterdir() if d.is_dir()]
+    return data_dir
 
-    if len(subdirs) == 0:
-        raise FileNotFoundError(f"No subdirectory found in: {timeseries_path}")
-    elif len(subdirs) > 1:
-        print(f"Warning: Multiple subdirectories found, using the first one: {subdirs[0].name}")
 
-    return subdirs[0]
+def find_first_existing_file(data_dir: Path, filenames) -> Path:
+    """Return the first existing file from filenames inside data_dir."""
+    for name in filenames:
+        candidate = data_dir / name
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(f"None of the files found in {data_dir}: {', '.join(filenames)}")
 
 
 def load_fixations(data_dir: Path) -> List[Fixation]:
@@ -102,10 +106,7 @@ def load_fixations(data_dir: Path) -> List[Fixation]:
     Returns:
         List of Fixation objects
     """
-    fixations_file = data_dir / "fixations.csv"
-
-    if not fixations_file.exists():
-        raise FileNotFoundError(f"Fixations data file not found: {fixations_file}")
+    fixations_file = find_first_existing_file(data_dir, ["fixations.csv", "fixation.csv"])
 
     fixations = []
 
@@ -145,10 +146,7 @@ def load_saccades(data_dir: Path) -> List[Saccade]:
     Returns:
         List of Saccade objects
     """
-    saccades_file = data_dir / "saccades.csv"
-
-    if not saccades_file.exists():
-        raise FileNotFoundError(f"Saccades data file not found: {saccades_file}")
+    saccades_file = find_first_existing_file(data_dir, ["saccades.csv", "saccade.csv"])
 
     saccades = []
 
@@ -210,15 +208,164 @@ def classify_attention_level(k_coefficient: float, k1: float, k2: float, num_cla
     else:
         # 5-class classification using k1 and k2
         if k_coefficient >= k2:
-            return 5  # Strong Focal Attention
+            return 5  # Strong Focal Attention (>= +k2)
         elif k_coefficient >= k1:
-            return 4  # Weak Focal Attention
-        elif k_coefficient > -k1:
-            return 3  # Neutral
-        elif k_coefficient > -k2:
-            return 2  # Weak Ambient Attention
+            return 4  # Weak Focal Attention (+k1 ~ +k2)
+        elif k_coefficient >= -k1:
+            return 3  # Neutral (-k1 ~ +k1)
+        elif k_coefficient >= -k2:
+            return 2  # Weak Ambient Attention (-k2 ~ -k1)
         else:
-            return 1  # Strong Ambient Attention
+            return 1  # Strong Ambient Attention (<= -k2)
+
+
+def compute_transition_counts(results: List[Dict], window_sec: float = 60.0) -> List[int]:
+    """
+    Compute number of ambient<->focal transitions in the past window for each timestamp.
+    Ambient: attention_level < 3
+    Focal:   attention_level > 3
+    Neutral (==3) does not count as a side; transitions are counted when sign changes across 3.
+    """
+    if window_sec <= 0:
+        window_sec = 60.0
+
+    event_times = []
+    prev_state = None
+
+    for res in results:
+        level = res.get('attention_level', 3) or 3
+        state = 0
+        if level > 3:
+            state = 1
+        elif level < 3:
+            state = -1
+
+        if prev_state is not None and prev_state != 0 and state != 0 and prev_state != state:
+            event_times.append(res['timestamp'])
+
+        if state != 0:
+            prev_state = state
+
+    event_times = np.array(event_times, dtype=float)
+    counts = [0] * len(results)
+
+    left = 0
+    right = 0
+    n_events = len(event_times)
+
+    for i, res in enumerate(results):
+        t = res['timestamp']
+        while left < n_events and event_times[left] <= t - window_sec:
+            left += 1
+        while right < n_events and event_times[right] <= t:
+            right += 1
+        counts[i] = right - left
+
+    return counts
+
+
+def visualize_attention_transition_frequency(
+    results: List[Dict],
+    output_path: Path,
+    window_length_sec: float = 1.0,
+    step_sec: float = 0.3
+) -> None:
+    """
+    Visualize attention transition frequency (rising/falling around baseline 3) using FFT.
+    Counts transitions per second using a sliding time window (default: 1s) sampled every step_sec (default: 0.3s).
+    Saves a frequency vs magnitude plot to output_path.
+    """
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        warnings.warn("matplotlib not installed; cannot generate frequency visualization.")
+        return
+
+    if len(results) < 2:
+        warnings.warn("Not enough data to compute transition frequency.")
+        return
+
+    window_length_sec = float(window_length_sec)
+    step_sec = float(step_sec)
+    if window_length_sec <= 0 or step_sec <= 0:
+        warnings.warn("Window length and step must be positive for frequency visualization.")
+        return
+
+    timestamps = np.array([r['timestamp'] for r in results], dtype=float)
+    levels = np.array([r.get('attention_level', 3) or 3 for r in results], dtype=float)
+
+    duration = timestamps[-1] - timestamps[0]
+    if duration <= 0:
+        warnings.warn("Invalid timestamp range; cannot compute frequency.")
+        return
+
+    # Sample rate estimated from timestamps
+    sample_rate = (len(timestamps) - 1) / duration
+
+    # Build transition events: +1 for rising across 3, -1 for falling across 3
+    transitions = np.zeros_like(levels)
+    event_times = []
+    for i in range(1, len(levels)):
+        prev_level = levels[i - 1]
+        curr_level = levels[i]
+        if prev_level <= 3 < curr_level:
+            transitions[i] = 1
+            event_times.append(timestamps[i])
+        elif prev_level >= 3 > curr_level:
+            transitions[i] = -1
+            event_times.append(timestamps[i])
+
+    if len(event_times) == 0:
+        warnings.warn("No transitions detected; skipping frequency visualization.")
+        return
+
+    event_times = np.array(event_times, dtype=float)
+
+    # Build rate signal (transitions per second) using a sliding window
+    start_t = timestamps[0]
+    end_t = timestamps[-1]
+    if end_t <= start_t:
+        warnings.warn("Invalid timestamp range; cannot compute frequency.")
+        return
+
+    # Grid represents window end times; start from first full window
+    time_grid = np.arange(start_t + window_length_sec, end_t + step_sec, step_sec)
+    rates = np.zeros_like(time_grid)
+
+    left = 0
+    right = 0
+    n_events = len(event_times)
+    for idx, t in enumerate(time_grid):
+        # Advance left/right pointers to maintain window (t - window_length_sec, t]
+        while left < n_events and event_times[left] <= t - window_length_sec:
+            left += 1
+        while right < n_events and event_times[right] <= t:
+            right += 1
+        count = right - left
+        rates[idx] = count / window_length_sec  # transitions per second over the window
+
+    # Remove DC component
+    signal = rates - np.mean(rates)
+
+    # FFT on rate signal (uniform sampling at 1/step_sec Hz)
+    fft_vals = np.fft.rfft(signal)
+    freqs = np.fft.rfftfreq(len(signal), d=step_sec)
+    magnitudes = np.abs(fft_vals)
+
+    # Skip the zero-frequency component for visualization clarity
+    freqs = freqs[1:]
+    magnitudes = magnitudes[1:]
+
+    plt.figure(figsize=(8, 4))
+    plt.plot(freqs, magnitudes, label='Transition magnitude')
+    plt.xlabel('Frequency (Hz)')
+    plt.ylabel('Magnitude')
+    plt.title(f'Attention Transition Frequency (window={window_length_sec:.1f}s, step={step_sec:.1f}s, baseline=3)')
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(output_path)
+    plt.close()
+    print(f"Saved attention transition frequency visualization to {output_path}")
 
 
 def apply_minimum_dwell_time(results: List[Dict], min_dwell_sec: float) -> None:
@@ -592,6 +739,11 @@ def match_timestamps_to_fixations_and_saccades(
     if min_dwell_sec is not None and min_dwell_sec > 0:
         apply_minimum_dwell_time(results, min_dwell_sec)
 
+    # Compute transition counts (ambient<->focal) over past 60s
+    transition_counts = compute_transition_counts(results, window_sec=60.0)
+    for i, res in enumerate(results):
+        res['transitions_last60s'] = transition_counts[i]
+
     return results
 
 
@@ -648,6 +800,11 @@ def main():
         choices=[3, 5],
         dest='num_classes',
         help='Number of attention classes: 3 (levels 1,3,5: Strong Ambient/Neutral/Strong Focal) or 5 (levels 1,2,3,4,5: Strong Ambient/Weak Ambient/Neutral/Weak Focal/Strong Focal, default: 5)'
+    )
+    parser.add_argument(
+        '--freq-vis',
+        action='store_true',
+        help='Generate FFT-based visualization of attention transitions (baseline=3) and save as image'
     )
 
     args = parser.parse_args()
@@ -715,14 +872,20 @@ def main():
         print(f"Matched {saccade_matched_count}/{len(results)} timestamps to saccades")
         print(f"Calculated {k_calculated_count}/{len(results)} K coefficients")
 
-        # Save results to CSV
-        output_path = base_path / args.output
+        # Save results to CSV (append class info to filename)
+        class_suffix = f"class_{args.num_classes}"
+        output_name = args.output
+        output_path = base_path / (
+            f"{Path(output_name).stem}_{class_suffix}{Path(output_name).suffix}"
+            if Path(output_name).suffix
+            else f"{output_name}_{class_suffix}"
+        )
         print(f"\nSaving results to {output_path}...")
 
         with open(output_path, 'w', newline='') as f:
             fieldnames = ['timestamp', 'fixation_id', 'saccade_id', 'saccade_amplitude_deg',
                          'k_coefficient_rolling', 'k_coefficient_ewma', 'k_coefficient_mad',
-                         'attention_level']
+                         'attention_level', 'transitions_last60s']
             writer = csv.DictWriter(f, fieldnames=fieldnames)
 
             writer.writeheader()
@@ -730,6 +893,11 @@ def main():
                 writer.writerow(result)
 
         print(f"Successfully saved results to {output_path}")
+
+        # Optional frequency visualization
+        if args.freq_vis:
+            vis_path = output_path.with_name(f"{output_path.stem}_freq.png")
+            visualize_attention_transition_frequency(results, vis_path, window_length_sec=1.0, step_sec=0.3)
 
         # Print summary statistics
         k_coeffs_rolling = [r['k_coefficient_rolling'] for r in results if r['k_coefficient_rolling'] != '']
