@@ -11,14 +11,22 @@
       "use_head_pose": true,
       "body_pattern": [
         "nose_",
-        "eye_",
-        "ear_",
-        "shoulder_",
-        "elbow_",
-        "wrist_",
-        "hip_",
-        "knee_",
-        "ankle_"
+        "left_eye_",
+        "right_eye_",
+        "left_ear_",
+        "right_ear_",
+        "left_shoulder_",
+        "right_shoulder_",
+        "left_elbow_",
+        "right_elbow_",
+        "left_wrist_",
+        "right_wrist_",
+        "left_hip_",
+        "right_hip_",
+        "left_knee_",
+        "right_knee_",
+        "left_ankle_",
+        "right_ankle_"
       ],
       "face_2d_pattern": "landmark_\\d+_[xy]$",
       "head_pose_cols": [
@@ -26,11 +34,15 @@
         "head_yaw",
         "head_roll"
       ]
+    },
+    "filter": {
+      "enabled": true,
+      "sigma": 1.0
     }
   },
   "training": {
     "epochs": 100,
-    "batch_size": 64,
+    "batch_size": 32,
     "learning_rate": 0.001,
     "weight_decay": 0.0001,
     "sequence_length": 90,
@@ -38,7 +50,20 @@
     "current_fold": 0,
     "val_interval": 1,
     "grad_clip": 1.0,
-    "checkpoint_dir": "checkpoints"
+    "checkpoint_dir": "checkpoints",
+    "loss": {
+      "name": "focal",
+      "focal": {
+        "gamma": 2.0,
+        "alpha": null
+      },
+      "ls_cross_entropy": {
+        "smoothing": 0.1
+      },
+      "triplet": {
+        "margin": 0.7
+      }
+    }
   },
   "model": {
     "num_classes": 5,
@@ -50,36 +75,41 @@
   "streams": [
     {
       "name": "face_landmarks",
+      "enabled": false,
       "column_pattern": "landmark_\\d+_[xy]$",
       "num_nodes": 468,
       "in_channels": 2,
-      "adjacency_type": "fully_connected"
+      "adjacency_type": "sequential"
     },
     {
       "name": "head_pose",
+      "enabled": true,
       "column_pattern": [
         "head_pitch",
         "head_yaw",
         "head_roll"
       ],
-        "num_nodes": 3,
-        "in_channels": 1,
-        "adjacency_type": "sequential"
+      "num_nodes": 3,
+      "in_channels": 1,
+      "adjacency_type": "sequential"
     },
     {
       "name": "body_pose",
+      "enabled": true,
       "column_pattern": [
         "nose_",
-        "eye_",
-        "ear_",
-        "shoulder_",
-        "elbow_",
-        "wrist_",
-        "hip_",
-        "knee_",
-        "ankle_"
+        "left_eye_",
+        "right_eye_",
+        "left_ear_",
+        "right_ear_",
+        "left_shoulder_",
+        "right_shoulder_",
+        "left_elbow_",
+        "right_elbow_",
+        "left_wrist_",
+        "right_wrist_"
       ],
-      "num_nodes": 17,
+      "num_nodes": 11,
       "in_channels": 2,
       "adjacency_type": "body"
     }

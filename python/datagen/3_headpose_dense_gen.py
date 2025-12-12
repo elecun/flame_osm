@@ -225,25 +225,26 @@ def get_3d_model_points():
     return model_points
 
 
-def get_camera_matrix(image_shape):
+def get_camera_matrix(_image_shape):
     """
-    Estimate camera matrix from image size.
+    Return calibrated camera intrinsics and distortion coefficients.
 
     Args:
-        image_shape: Tuple of (height, width)
+        _image_shape: Tuple of (height, width) (unused when calibration is provided)
 
     Returns:
-        Camera matrix
+        camera_matrix, dist_coeffs
     """
-    size = image_shape
-    focal_length = size[1]
-    center = (size[1] / 2, size[0] / 2)
     camera_matrix = np.array(
-        [[focal_length, 0, center[0]],
-         [0, focal_length, center[1]],
-         [0, 0, 1]], dtype=np.float64
+        [
+            [1061.014, 0.0, 477.172],
+            [0.0, 1167.336, 944.795],
+            [0.0, 0.0, 1.0],
+        ],
+        dtype=np.float64,
     )
-    return camera_matrix
+    dist_coeffs = np.array([[-0.446958, 0.281446, 0.004579, -0.055549]], dtype=np.float64)
+    return camera_matrix, dist_coeffs
 
 
 def estimate_head_pose(landmarks_2d: np.ndarray, image_shape: Tuple[int, int],
@@ -281,8 +282,7 @@ def estimate_head_pose(landmarks_2d: np.ndarray, image_shape: Tuple[int, int],
         return None, None, None
 
     # Camera internals
-    camera_matrix = get_camera_matrix(image_shape)
-    dist_coeffs = np.zeros((4, 1))  # Assuming no lens distortion
+    camera_matrix, dist_coeffs = get_camera_matrix(image_shape)
 
     # Solve PnP with temporal consistency
     if prev_rvec is not None and prev_tvec is not None:
@@ -355,8 +355,7 @@ def draw_head_pose_axes(frame: np.ndarray, landmarks_2d: np.ndarray,
     vis_frame = frame.copy()
 
     # Get camera matrix
-    camera_matrix = get_camera_matrix(image_shape)
-    dist_coeffs = np.zeros((4, 1))
+    camera_matrix, dist_coeffs = get_camera_matrix(image_shape)
 
     # Draw 3D coordinate axes
     # Define 3D axis points (in mm)
@@ -418,6 +417,32 @@ def draw_head_pose_axes(frame: np.ndarray, landmarks_2d: np.ndarray,
     return vis_frame
 
 
+def add_reference_axes_icon(frame: np.ndarray, size: int = 120, margin: int = 12) -> np.ndarray:
+    """
+    Draw a small reference axes icon (roll/pitch/yaw = 0) on the bottom-left corner.
+    """
+    h, w = frame.shape[:2]
+    icon = frame.copy()
+
+    # Icon background
+    x0, y0 = margin, h - size - margin
+    x1, y1 = x0 + size, y0 + size
+    cv2.rectangle(icon, (x0, y0), (x1, y1), (20, 20, 20), -1)
+
+    # Origin at bottom-left of icon
+    origin = (x0 + int(size * 0.25), y1 - int(size * 0.25))
+    axis_len = int(size * 0.35)
+
+    # Draw reference axes (no rotation)
+    cv2.arrowedLine(icon, origin, (origin[0] + axis_len, origin[1]), (0, 0, 255), 2, tipLength=0.15)   # X
+    cv2.arrowedLine(icon, origin, (origin[0], origin[1] - axis_len), (0, 255, 0), 2, tipLength=0.15)   # Y
+    cv2.arrowedLine(icon, origin, (origin[0] + int(axis_len * 0.7), origin[1] - int(axis_len * 0.6)), (255, 0, 0), 2, tipLength=0.15)  # Z
+
+    cv2.putText(icon, "Ref (0,0,0)", (x0 + 6, y0 + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (220, 220, 220), 1)
+    cv2.addWeighted(icon, 0.75, frame, 0.25, 0, frame)
+    return frame
+
+
 def visualize_head_pose(frame: np.ndarray, landmarks_2d: np.ndarray,
                        rotation_vector: np.ndarray, translation_vector: np.ndarray,
                        euler_angles: np.ndarray, output_path: Path):
@@ -435,8 +460,8 @@ def visualize_head_pose(frame: np.ndarray, landmarks_2d: np.ndarray,
     vis_frame = frame.copy()
 
     # Get camera matrix
-    camera_matrix = get_camera_matrix(frame.shape[:2])
-    dist_coeffs = np.zeros((4, 1))
+    image_shape = frame.shape[:2]
+    camera_matrix, dist_coeffs = get_camera_matrix(image_shape)
 
     # Draw 3D coordinate axes
     # Define 3D axis points (in mm)
@@ -522,6 +547,9 @@ def visualize_head_pose(frame: np.ndarray, landmarks_2d: np.ndarray,
     cv2.putText(vis_frame, f"X: {tx:.2f}", (x_pos, y_pos + line_spacing * 3), font, font_scale, color, thickness)
     cv2.putText(vis_frame, f"Y: {ty:.2f}", (x_pos, y_pos + line_spacing * 4), font, font_scale, color, thickness)
     cv2.putText(vis_frame, f"Z: {tz:.2f}", (x_pos, y_pos + line_spacing * 5), font, font_scale, color, thickness)
+
+    # Add reference axes icon (roll/pitch/yaw = 0) on bottom-left
+    vis_frame = add_reference_axes_icon(vis_frame)
 
     # Save visualization
     cv2.imwrite(str(output_path), vis_frame)
@@ -638,14 +666,32 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
             if video_writer is not None and current_frame is not None:
                 vis_frame = draw_head_pose_axes(current_frame, landmarks_2d, rotation_vec, translation_vec, image_shape)
 
-                # Add text overlays for angles and position
+                # Add text overlays for angles/position with background box
                 pitch, yaw, roll = euler_angles
                 tx, ty, tz = translation_vec.ravel()
 
-                cv2.putText(vis_frame, f"Pitch: {pitch:.1f} deg", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                cv2.putText(vis_frame, f"Yaw: {yaw:.1f} deg", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                cv2.putText(vis_frame, f"Roll: {roll:.1f} deg", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                cv2.putText(vis_frame, f"Pos: ({tx:.0f}, {ty:.0f}, {tz:.0f}) mm", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+                overlay = vis_frame.copy()
+                box_w, box_h = 260, 170
+                cv2.rectangle(overlay, (5, 5), (5 + box_w, 5 + box_h), (0, 0, 0), -1)
+                cv2.addWeighted(overlay, 0.6, vis_frame, 0.4, 0, vis_frame)
+
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                scale = 0.7
+                thick = 2
+                line_gap = 28
+                x0, y0 = 15, 35
+
+                def draw_line(label, value, y, color_value):
+                    cv2.putText(vis_frame, f"{label}: ", (x0, y), font, scale, (255, 255, 255), thick)
+                    label_width = cv2.getTextSize(f"{label}: ", font, scale, thick)[0][0]
+                    cv2.putText(vis_frame, value, (x0 + label_width, y), font, scale, color_value, thick)
+
+                draw_line("Pitch", f"{pitch:.1f} deg", y0, (0, 0, 255))
+                draw_line("Yaw", f"{yaw:.1f} deg", y0 + line_gap, (0, 0, 255))
+                draw_line("Roll", f"{roll:.1f} deg", y0 + line_gap * 2, (0, 0, 255))
+                draw_line("X", f"{tx:.0f} mm", y0 + line_gap * 3, (255, 0, 0))
+                draw_line("Y", f"{ty:.0f} mm", y0 + line_gap * 4, (255, 0, 0))
+                draw_line("Z", f"{tz:.0f} mm", y0 + line_gap * 5, (255, 0, 0))
 
                 video_writer.write(vis_frame)
 

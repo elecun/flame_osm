@@ -15,6 +15,7 @@ from base_model import STGCNBlock, create_body_adjacency, create_face_adjacency,
 # Users can customize these by specifying column patterns
 DEFAULT_STREAM_CONFIGS = {
     'face_landmarks': {
+        'enabled': True,
         'column_pattern': 'landmark_.*_2d',  # Regex pattern for face landmark columns
         'num_nodes': 68,
         'in_channels': 2,  # x, y coordinates
@@ -22,6 +23,7 @@ DEFAULT_STREAM_CONFIGS = {
         'description': 'Face landmarks (68 points, 2D coordinates)'
     },
     'head_pose': {
+        'enabled': True,
         'column_pattern': ['head_rotation_x', 'head_rotation_y', 'head_rotation_z',
                           'head_translation_x', 'head_translation_y', 'head_translation_z',
                           'head_pitch', 'head_yaw', 'head_roll'],
@@ -31,8 +33,26 @@ DEFAULT_STREAM_CONFIGS = {
         'description': 'Head pose (rotation, translation, pitch/yaw/roll)'
     },
     'body_pose': {
-        'column_pattern': ['nose_', 'eye_', 'ear_', 'shoulder_', 'elbow_',
-                          'wrist_', 'hip_', 'knee_', 'ankle_'],
+        'enabled': True,
+        'column_pattern': [
+            'nose_',
+            'left_eye_',
+            'right_eye_',
+            'left_ear_',
+            'right_ear_',
+            'left_shoulder_',
+            'right_shoulder_',
+            'left_elbow_',
+            'right_elbow_',
+            'left_wrist_',
+            'right_wrist_',
+            'left_hip_',
+            'right_hip_',
+            'left_knee_',
+            'right_knee_',
+            'left_ankle_',
+            'right_ankle_',
+        ],
         'num_nodes': 17,  # COCO body keypoints
         'in_channels': 2,  # x, y coordinates
         'adjacency_type': 'body',  # Use body-specific adjacency matrix

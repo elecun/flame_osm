@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 import json
+from scipy.ndimage import gaussian_filter1d
 
 
 class AttentionDataset(Dataset):
@@ -12,7 +13,7 @@ class AttentionDataset(Dataset):
     Dataset for attention prediction from body/face keypoints and head pose
     """
     def __init__(self, csv_files, sequence_length=30, normalize=True, train=True, scaler=None,
-                 feature_config=None, dataframe=None, num_classes: int = 5):
+                 feature_config=None, dataframe=None, num_classes: int = 5, filter_config=None):
         """
         Args:
             csv_files: List of CSV file paths or single CSV file path (ignored if dataframe is provided)
@@ -23,10 +24,12 @@ class AttentionDataset(Dataset):
             feature_config: Dictionary with feature selection configuration
             dataframe: Optional DataFrame to use instead of loading from CSV files
             num_classes: Total number of attention classes (default: 5, expecting labels 1..num_classes)
+            filter_config: Optional dict with Gaussian filter settings (enabled, sigma)
         """
         self.sequence_length = sequence_length
         self.normalize = normalize
         self.num_classes = num_classes
+        self.filter_config = filter_config or {"enabled": False, "sigma": 1.0}
 
         # Use dataframe if provided, otherwise load from CSV files
         if dataframe is not None:
@@ -75,7 +78,25 @@ class AttentionDataset(Dataset):
                 'use_body_kps': True,
                 'use_face_kps_2d': True,
                 'use_head_pose': True,
-                'body_pattern': ['nose_', 'eye_', 'ear_', 'shoulder_', 'elbow_', 'wrist_', 'hip_', 'knee_', 'ankle_'],
+                'body_pattern': [
+                    'nose_',
+                    'left_eye_',
+                    'right_eye_',
+                    'left_ear_',
+                    'right_ear_',
+                    'left_shoulder_',
+                    'right_shoulder_',
+                    'left_elbow_',
+                    'right_elbow_',
+                    'left_wrist_',
+                    'right_wrist_',
+                    'left_hip_',
+                    'right_hip_',
+                    'left_knee_',
+                    'right_knee_',
+                    'left_ankle_',
+                    'right_ankle_',
+                ],
                 'face_2d_pattern': 'landmark_.*_2d',
                 'head_pose_cols': ['head_rotation_x', 'head_rotation_y', 'head_rotation_z',
                                    'head_translation_x', 'head_translation_y', 'head_translation_z',
@@ -137,6 +158,17 @@ class AttentionDataset(Dataset):
             self.head_pose_data = combined_df[self.head_pose_cols].values.astype(np.float32)
         else:
             self.head_pose_data = np.zeros((len(combined_df), 0), dtype=np.float32)
+
+        # Optional Gaussian smoothing to reduce white noise before normalization
+        if self.filter_config.get("enabled", False):
+            sigma = float(self.filter_config.get("sigma", 1.0))
+            if sigma > 0:
+                if self.use_body and self.body_data.shape[1] > 0:
+                    self.body_data = gaussian_filter1d(self.body_data, sigma=sigma, axis=0, mode="nearest")
+                if self.use_face_2d and self.face_2d_data.shape[1] > 0:
+                    self.face_2d_data = gaussian_filter1d(self.face_2d_data, sigma=sigma, axis=0, mode="nearest")
+                if self.use_head_pose and self.head_pose_data.shape[1] > 0:
+                    self.head_pose_data = gaussian_filter1d(self.head_pose_data, sigma=sigma, axis=0, mode="nearest")
 
         # Extract target (attention) - expect labels 1..num_classes, convert to 0-based
         raw_attention = numeric_target.values.astype(np.int64)
@@ -424,6 +456,7 @@ def create_data_loaders(config, csv_path, fold_idx=None, rank=None, world_size=N
 
     # Feature configuration
     feature_config = config['data'].get('features', None)
+    filter_config = config['data'].get('filter', {"enabled": False, "sigma": 1.0})
 
     # Create datasets using DataFrames directly (preserves original frame indices)
     sequence_length = config['training']['sequence_length']
@@ -436,7 +469,8 @@ def create_data_loaders(config, csv_path, fold_idx=None, rank=None, world_size=N
         train=True,
         feature_config=feature_config,
         dataframe=train_df,
-        num_classes=num_classes
+        num_classes=num_classes,
+        filter_config=filter_config
     )
 
     scaler = train_dataset.get_scaler()
@@ -450,7 +484,8 @@ def create_data_loaders(config, csv_path, fold_idx=None, rank=None, world_size=N
         scaler=scaler,
         feature_config=feature_config,
         dataframe=val_df,
-        num_classes=num_classes
+        num_classes=num_classes,
+        filter_config=filter_config
     )
 
     test_dataset = AttentionDataset(
@@ -461,7 +496,8 @@ def create_data_loaders(config, csv_path, fold_idx=None, rank=None, world_size=N
         scaler=scaler,
         feature_config=feature_config,
         dataframe=test_df,
-        num_classes=num_classes
+        num_classes=num_classes,
+        filter_config=filter_config
     )
 
     # Create data loaders
