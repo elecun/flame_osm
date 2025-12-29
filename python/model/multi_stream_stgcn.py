@@ -46,17 +46,11 @@ DEFAULT_STREAM_CONFIGS = {
             'right_elbow_',
             'left_wrist_',
             'right_wrist_',
-            'left_hip_',
-            'right_hip_',
-            'left_knee_',
-            'right_knee_',
-            'left_ankle_',
-            'right_ankle_',
         ],
-        'num_nodes': 17,  # COCO body keypoints
+        'num_nodes': 11,  # Upper body keypoints only
         'in_channels': 2,  # x, y coordinates
         'adjacency_type': 'body',  # Use body-specific adjacency matrix
-        'description': 'Body keypoints (17 COCO keypoints, 2D coordinates)'
+        'description': 'Body keypoints (upper body, 2D coordinates)'
     }
 }
 
@@ -76,9 +70,9 @@ class StreamProcessor(nn.Module):
         # Create adjacency matrix based on stream type
         adj_type = stream_config['adjacency_type']
         if adj_type == 'body':
-            self.adjacency = create_body_adjacency()
+            self.adjacency = create_body_adjacency(self.num_nodes)
         elif adj_type == 'face':
-            self.adjacency = create_face_adjacency()
+            self.adjacency = create_face_adjacency(self.num_nodes)
         elif adj_type in ['sequential', 'fully_connected', 'star']:
             self.adjacency = create_generic_adjacency(self.num_nodes, adj_type)
         else:
@@ -163,6 +157,7 @@ class MultiStreamSTGCN(nn.Module):
         num_layers = model_cfg.get('num_gcn_layers', 3)
         temporal_kernel_size = model_cfg.get('temporal_kernel_size', 9)
         dropout = model_cfg.get('dropout', 0.3)
+        self.num_classes = model_cfg.get('num_classes', 5)
 
         # Create stream processors
         self.streams = nn.ModuleDict()
@@ -192,7 +187,7 @@ class MultiStreamSTGCN(nn.Module):
             nn.Linear(hidden_channels * 2, hidden_channels),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_channels, 5)  # 5 classes for attention levels
+            nn.Linear(hidden_channels, self.num_classes)
         )
 
         # Store feature mapping for data loading
@@ -227,7 +222,7 @@ class MultiStreamSTGCN(nn.Module):
             face_kps_2d: (batch_size, sequence_length, face_features) or None
             head_pose: (batch_size, sequence_length, head_pose_features) or None
         Returns:
-            logits: (batch_size, 5) - logits for 5 attention classes
+            logits: (batch_size, num_classes) - logits for attention classes
         """
         # Map inputs to streams
         stream_inputs = {

@@ -797,6 +797,11 @@ def main():
         help='Single file mode: process a single image or video file'
     )
     parser.add_argument(
+        '--recursive',
+        action='store_true',
+        help='Treat --path as a parent directory containing multiple case folders (batch only)'
+    )
+    parser.add_argument(
         '--autofill',
         action='store_true',
         help='Autofill missing values with average of neighboring 5 values'
@@ -883,154 +888,176 @@ def main():
 
         return 0
 
-    # Batch mode (original logic)
-    base_directory = Path(args.path)
-    if not base_directory.exists():
-        print(f"Error: Directory does not exist: {args.path}")
-        return 1
-
-    if not base_directory.is_dir():
-        print(f"Error: Path is not a directory: {args.path}")
-        return 1
-
-    # Input files are in 'camera' subdirectory
-    input_directory = base_directory / "camera"
-    if not input_directory.exists():
-        print(f"Error: Camera directory does not exist: {input_directory}")
-        return 1
-
-    if not input_directory.is_dir():
-        print(f"Error: Camera path is not a directory: {input_directory}")
-        return 1
-
-    # Output files will be saved in base directory
-    output_directory = base_directory
-
-    print(f"Input Directory: {input_directory}")
-    print(f"Output Directory: {output_directory}")
-    print(f"Autofill: {args.autofill}")
-    print(f"Rotate IDs: {args.rotate if args.rotate is not None else 'None'}")
-    print(f"Check mode: {args.check}")
-    print(f"Video output: {args.video_out}")
-
-    # Parse selected IDs if provided
-    selected_ids = None
-    if args.select:
-        try:
-            selected_ids = [int(x.strip()) for x in args.select.split(',')]
-            print(f"Selected IDs: {selected_ids}")
-        except ValueError:
-            print(f"Error: Invalid format for --select. Use comma-separated integers (e.g., '0,2,4,6')")
+    def process_batch(base_directory: Path) -> int:
+        if not base_directory.exists():
+            print(f"Error: Directory does not exist: {base_directory}")
+            return 1
+        if not base_directory.is_dir():
+            print(f"Error: Path is not a directory: {base_directory}")
             return 1
 
-    print(f"{'=' * 80}\n")
-
-    # Find file pairs in camera directory
-    pairs = find_file_pairs(input_directory, selected_ids=selected_ids)
-
-    if not pairs:
-        print("No file pairs found. Exiting.")
-        return 1
-
-    # Validate frame counts
-    validation_results = validate_frame_counts(pairs)
-
-    # Check for any mismatches
-    mismatches = [file_id for file_id, (_, _, is_valid) in validation_results.items() if not is_valid]
-    if mismatches:
-        print(f"[WARNING] Found {len(mismatches)} file pair(s) with frame count mismatch")
-        print(f"IDs with mismatch: {mismatches}")
-        response = input("Continue processing? (y/n): ")
-        if response.lower() != 'y':
-            print("Exiting.")
+        # Input files are in 'camera' subdirectory
+        input_directory = base_directory / "camera"
+        if not input_directory.exists():
+            print(f"Error: Camera directory does not exist: {input_directory}")
             return 1
-        print()
+        if not input_directory.is_dir():
+            print(f"Error: Camera path is not a directory: {input_directory}")
+            return 1
 
-    # Process each pair
-    print(f"{'=' * 80}")
-    print(f"Processing video files")
-    print(f"{'=' * 80}\n")
+        # Output files will be saved in base directory
+        output_directory = base_directory
 
-    for file_id, files in pairs.items():
-        print(f"{'=' * 80}")
-        print(f"Processing ID: {file_id}")
+        print(f"Input Directory: {input_directory}")
+        print(f"Output Directory: {output_directory}")
+        print(f"Autofill: {args.autofill}")
+        print(f"Rotate IDs: {args.rotate if args.rotate is not None else 'None'}")
+        print(f"Check mode: {args.check}")
+        print(f"Video output: {args.video_out}")
+
+        # Parse selected IDs if provided
+        selected_ids = None
+        if args.select:
+            try:
+                selected_ids = [int(x.strip()) for x in args.select.split(',')]
+                print(f"Selected IDs: {selected_ids}")
+            except ValueError:
+                print(f"Error: Invalid format for --select. Use comma-separated integers (e.g., '0,2,4,6')")
+                return 1
+
         print(f"{'=' * 80}\n")
 
-        # Read timestamps
-        timestamps = read_timestamps(files['csv'])
-        print(f"Loaded {len(timestamps)} timestamps from {files['csv'].name}\n")
+        # Find file pairs in camera directory
+        pairs = find_file_pairs(input_directory, selected_ids=selected_ids)
 
-        # Generate output filename in base directory
-        output_path = output_directory / f"body_kps_{file_id}.csv"
+        if not pairs:
+            print("No file pairs found. Exiting.")
+            return 1
 
-        # Check if this ID should be rotated
-        should_rotate = file_id in args.rotate
-        if should_rotate:
-            print(f"  [INFO] ID {file_id} will be rotated 90 degrees clockwise\n")
+        # Validate frame counts
+        validation_results = validate_frame_counts(pairs)
 
-        # Prepare check visualization path in base directory
-        check_output_path = None
-        if args.check:
-            check_output_path = output_directory / f"check_frame_{file_id}.jpg"
+        # Check for any mismatches
+        mismatches = [file_id for file_id, (_, _, is_valid) in validation_results.items() if not is_valid]
+        if mismatches:
+            print(f"[WARNING] Found {len(mismatches)} file pair(s) with frame count mismatch")
+            print(f"IDs with mismatch: {mismatches}")
+            response = input("Continue processing? (y/n): ")
+            if response.lower() != 'y':
+                print("Exiting.")
+                return 1
+            print()
 
-        # Prepare video output path if requested
-        video_out_path = None
-        if args.video_out:
-            video_out_path = output_directory / f"body_kps_{file_id}_visualization.avi"
+        # Process each pair
+        print(f"{'=' * 80}")
+        print(f"Processing video files")
+        print(f"{'=' * 80}\n")
 
-        # Create CSV file and write header immediately
-        print(f"Creating output file: {output_path}")
-        header = generate_csv_header()
-        with open(output_path, 'w', newline='', encoding='utf-8') as csv_file:
-            csv_writer = csv.writer(csv_file)
-            csv_writer.writerow(header)
-            csv_file.flush()
-            print(f"  [SUCCESS] CSV file created with header ({len(header)} columns)\n")
+        for file_id, files in pairs.items():
+            print(f"{'=' * 80}")
+            print(f"Processing ID: {file_id}")
+            print(f"{'=' * 80}\n")
 
-            # Process video and write results in real-time
-            keypoints = process_video_with_pose(
-                files['avi'], model, csv_file, timestamps,
-                should_rotate=should_rotate,
-                check_mode=args.check,
-                check_output_path=check_output_path,
-                video_out_path=video_out_path
-            )
+            # Read timestamps
+            timestamps = read_timestamps(files['csv'])
+            print(f"Loaded {len(timestamps)} timestamps from {files['csv'].name}\n")
 
-        print(f"  [SUCCESS] Output saved to: {output_path}\n")
+            # Generate output filename in base directory
+            output_path = output_directory / f"body_kps_{file_id}.csv"
 
-        # Autofill missing values if requested
-        if args.autofill:
-            print(f"Applying autofill to missing values...")
-            missing_count = np.isnan(keypoints).sum()
-            if missing_count > 0:
-                print(f"  Found {missing_count} missing values")
-                keypoints = autofill_missing_values(keypoints)
+            # Check if this ID should be rotated
+            should_rotate = file_id in args.rotate
+            if should_rotate:
+                print(f"  [INFO] ID {file_id} will be rotated 90 degrees clockwise\n")
 
-                # Rewrite CSV with filled values
-                print(f"  Rewriting CSV with autofilled values...")
-                with open(output_path, 'w', newline='', encoding='utf-8') as f:
-                    writer = csv.writer(f)
-                    writer.writerow(header)
+            # Prepare check visualization path in base directory
+            check_output_path = None
+            if args.check:
+                check_output_path = output_directory / f"check_frame_{file_id}.jpg"
 
-                    for frame_idx, timestamp in enumerate(timestamps):
-                        row = [timestamp]
-                        for kp_idx in range(17):
-                            x = keypoints[frame_idx, kp_idx, 0]
-                            y = keypoints[frame_idx, kp_idx, 1]
-                            row.append(x)
-                            row.append(y)
-                        writer.writerow(row)
+            # Prepare video output path if requested
+            video_out_path = None
+            if args.video_out:
+                video_out_path = output_directory / f"body_kps_{file_id}_visualization.avi"
 
-                print(f"  [SUCCESS] Autofill completed and CSV updated\n")
-            else:
-                print(f"  No missing values found\n")
+            # Create CSV file and write header immediately
+            print(f"Creating output file: {output_path}")
+            header = generate_csv_header()
+            with open(output_path, 'w', newline='', encoding='utf-8') as csv_file:
+                csv_writer = csv.writer(csv_file)
+                csv_writer.writerow(header)
+                csv_file.flush()
+                print(f"  [SUCCESS] CSV file created with header ({len(header)} columns)\n")
 
-    print(f"{'=' * 80}")
-    print(f"[SUCCESS] All files processed")
-    print(f"Total pairs processed: {len(pairs)}")
-    print(f"{'=' * 80}")
+                # Process video and write results in real-time
+                keypoints = process_video_with_pose(
+                    files['avi'], model, csv_file, timestamps,
+                    should_rotate=should_rotate,
+                    check_mode=args.check,
+                    check_output_path=check_output_path,
+                    video_out_path=video_out_path
+                )
 
-    return 0
+            print(f"  [SUCCESS] Output saved to: {output_path}\n")
+
+            # Autofill missing values if requested
+            if args.autofill:
+                print(f"Applying autofill to missing values...")
+                missing_count = np.isnan(keypoints).sum()
+                if missing_count > 0:
+                    print(f"  Found {missing_count} missing values")
+                    keypoints = autofill_missing_values(keypoints)
+
+                    # Rewrite CSV with filled values
+                    print(f"  Rewriting CSV with autofilled values...")
+                    with open(output_path, 'w', newline='', encoding='utf-8') as f:
+                        writer = csv.writer(f)
+                        writer.writerow(header)
+
+                        for frame_idx, timestamp in enumerate(timestamps):
+                            row = [timestamp]
+                            for kp_idx in range(17):
+                                x = keypoints[frame_idx, kp_idx, 0]
+                                y = keypoints[frame_idx, kp_idx, 1]
+                                row.append(x)
+                                row.append(y)
+                            writer.writerow(row)
+
+                    print(f"  [SUCCESS] Autofill completed and CSV updated\n")
+                else:
+                    print(f"  No missing values found\n")
+
+        print(f"{'=' * 80}")
+        print(f"[SUCCESS] All files processed")
+        print(f"Total pairs processed: {len(pairs)}")
+        print(f"{'=' * 80}")
+
+        return 0
+
+    # Batch mode
+    if args.recursive:
+        base_directory = Path(args.path)
+        if not base_directory.exists() or not base_directory.is_dir():
+            print(f"Error: Directory does not exist or is not a directory: {args.path}")
+            return 1
+        case_dirs = sorted({p.parent for p in base_directory.rglob('camera') if p.is_dir()})
+        if not case_dirs:
+            print(f"No case directories with a camera folder found under: {base_directory}")
+            return 1
+        print(f"\n[INFO] Recursive mode: {len(case_dirs)} case(s) found")
+        for idx, case_dir in enumerate(case_dirs, start=1):
+            print(f"  [{idx}] {case_dir}")
+        had_error = False
+        for case_dir in case_dirs:
+            print(f"\n{'=' * 80}")
+            print(f"[CASE] {case_dir}")
+            print(f"{'=' * 80}")
+            if process_batch(case_dir) != 0:
+                had_error = True
+        return 0 if not had_error else 1
+
+    base_directory = Path(args.path)
+    return process_batch(base_directory)
 
 
 if __name__ == '__main__':

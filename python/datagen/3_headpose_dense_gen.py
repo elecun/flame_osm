@@ -134,7 +134,7 @@ def find_file_pairs(directory: Path, selected_ids: Optional[List[int]] = None) -
     return pairs
 
 
-def read_face_landmarks_csv(csv_path: Path) -> Tuple[List[float], np.ndarray]:
+def read_face_landmarks_csv(csv_path: Path) -> Tuple[List[float], np.ndarray, Optional[List[int]]]:
     """
     Read face landmarks from CSV file.
     Supports MediaPipe Face Mesh format (landmark_N_x, landmark_N_y, landmark_N_z).
@@ -144,63 +144,92 @@ def read_face_landmarks_csv(csv_path: Path) -> Tuple[List[float], np.ndarray]:
         csv_path: Path to face_kps CSV file
 
     Returns:
-        Tuple of (timestamps, landmarks_array)
+        Tuple of (timestamps, landmarks_array, valid_mask)
         landmarks_array shape: (num_frames, num_landmarks, 2)
     """
     encoding = detect_csv_encoding(csv_path)
     timestamps = []
     landmarks_list = []
+    valid_mask = None
 
-    with open(csv_path, 'r', encoding=encoding) as f:
-        reader = csv.reader(f)
+    with open(csv_path, 'r', encoding=encoding, errors='replace', newline='') as f:
+        raw_lines = f.readlines()
+
+    filtered_lines = []
+    nul_lines = 0
+    for idx, line in enumerate(raw_lines, start=1):
+        if '\x00' in line:
+            nul_lines += 1
+            print(f"[WARN] Skipping line {idx}: contains NUL")
+            continue
+        filtered_lines.append(line)
+
+    reader = csv.reader(filtered_lines)
+    try:
         header = next(reader)
+    except StopIteration:
+        raise csv.Error(f"Empty CSV after removing {nul_lines} NUL-containing lines")
 
-        # Find landmark column indices for MediaPipe Face Mesh format
-        # Header format: timestamp, landmark_0_x, landmark_0_y, landmark_0_z, landmark_1_x, ...
-        landmark_indices = []
-        col_idx = 1  # Start after timestamp
+    # Find landmark column indices for MediaPipe Face Mesh format
+    # Header format: timestamp, landmark_0_x, landmark_0_y, landmark_0_z, landmark_1_x, ...
+    landmark_indices = []
+    col_idx = 1  # Start after timestamp
 
-        while col_idx < len(header):
-            col_name = header[col_idx]
-            # Check if this is an x coordinate (landmark_N_x)
-            if '_x' in col_name and col_idx + 1 < len(header):
-                next_col = header[col_idx + 1]
-                # Verify next column is y coordinate
-                if '_y' in next_col:
-                    landmark_indices.append((col_idx, col_idx + 1))
-                    # Skip x, y, z columns (assuming z exists)
-                    col_idx += 3
-                else:
-                    col_idx += 1
+    while col_idx < len(header):
+        col_name = header[col_idx]
+        # Check if this is an x coordinate (landmark_N_x)
+        if '_x' in col_name and col_idx + 1 < len(header):
+            next_col = header[col_idx + 1]
+            # Verify next column is y coordinate
+            if '_y' in next_col:
+                landmark_indices.append((col_idx, col_idx + 1))
+                # Skip x, y, z columns (assuming z exists)
+                col_idx += 3
             else:
                 col_idx += 1
+        else:
+            col_idx += 1
 
-        num_landmarks = len(landmark_indices)
+    num_landmarks = len(landmark_indices)
 
-        if num_landmarks == 0:
-            # Fallback: assume format is x, y, z triplets
-            num_cols = len(header) - 1
-            num_landmarks = num_cols // 3
-            landmark_indices = [(1 + i * 3, 1 + i * 3 + 1) for i in range(num_landmarks)]
+    if num_landmarks == 0:
+        # Fallback: assume format is x, y, z triplets
+        num_cols = len(header) - 1
+        num_landmarks = num_cols // 3
+        landmark_indices = [(1 + i * 3, 1 + i * 3 + 1) for i in range(num_landmarks)]
 
-        for row in reader:
-            if not row:
-                continue
+    valid_idx = None
+    if 'valid_mask' in header:
+        valid_idx = header.index('valid_mask')
+        valid_mask = []
 
+    line_num = 1  # header already consumed
+    for row in reader:
+        line_num += 1
+        if not row:
+            continue
+        try:
             timestamp = float(row[0])
-            timestamps.append(timestamp)
-
             # Parse 2D landmarks (x, y only)
             landmarks = []
             for x_idx, y_idx in landmark_indices:
                 x = float(row[x_idx])
                 y = float(row[y_idx])
                 landmarks.append([x, y])
+        except Exception as e:
+            print(f"[WARN] Skipping line {line_num}: {e}")
+            continue
 
-            landmarks_list.append(landmarks)
+        timestamps.append(timestamp)
+        landmarks_list.append(landmarks)
+        if valid_mask is not None and valid_idx is not None:
+            try:
+                valid_mask.append(int(float(row[valid_idx])))
+            except Exception:
+                valid_mask.append(0)
 
     landmarks_array = np.array(landmarks_list)
-    return timestamps, landmarks_array
+    return timestamps, landmarks_array, valid_mask
 
 
 def get_3d_model_points():
@@ -284,27 +313,30 @@ def estimate_head_pose(landmarks_2d: np.ndarray, image_shape: Tuple[int, int],
     # Camera internals
     camera_matrix, dist_coeffs = get_camera_matrix(image_shape)
 
-    # Solve PnP with temporal consistency
-    if prev_rvec is not None and prev_tvec is not None:
-        # Use previous frame as initial guess for better stability
+    # Solve PnP with temporal consistency; use ITERATIVE when a good initial guess exists
+    # If previous Z was excessive (>1500), re-init with EPNP to recover from bad landmarks.
+    use_guess = prev_rvec is not None and prev_tvec is not None and float(prev_tvec[2]) <= 1500
+    if use_guess:
+        flags = cv2.SOLVEPNP_ITERATIVE
         success, rotation_vector, translation_vector = cv2.solvePnP(
             model_points,
             image_points,
             camera_matrix,
             dist_coeffs,
+            useExtrinsicGuess=True,
             rvec=prev_rvec,
             tvec=prev_tvec,
-            useExtrinsicGuess=True,
-            flags=cv2.SOLVEPNP_ITERATIVE
+            flags=flags,
         )
     else:
-        # First frame: use EPNP for more stable initialization
+        # Re-init (first frame or previous pose was implausible)
+        flags = cv2.SOLVEPNP_EPNP
         success, rotation_vector, translation_vector = cv2.solvePnP(
             model_points,
             image_points,
             camera_matrix,
             dist_coeffs,
-            flags=cv2.SOLVEPNP_EPNP
+            flags=flags,
         )
 
     if not success:
@@ -561,7 +593,8 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
                                  should_rotate: bool = False,
                                  check_mode: bool = False,
                                  check_output_path: Optional[Path] = None,
-                                 video_out_path: Optional[Path] = None):
+                                 video_out_path: Optional[Path] = None,
+                                 valid_mask: Optional[List[int]] = None):
     """
     Process landmarks and estimate head pose for each frame.
     Video is only used for visualization when check_mode is enabled or video_out_path is provided.
@@ -628,6 +661,9 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
     for frame_idx in range(num_frames):
         # Get landmarks for this frame
         landmarks_2d = landmarks_array[frame_idx]
+        frame_valid = 1
+        if valid_mask is not None:
+            frame_valid = 1 if valid_mask[frame_idx] == 1 else 0
 
         # Read video frame if video output is requested
         current_frame = None
@@ -641,16 +677,22 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
 
         # Estimate head pose with timing (using previous frame for stability)
         start_time = time.time()
-        rotation_vec, translation_vec, euler_angles = estimate_head_pose(
-            landmarks_2d, image_shape, prev_rvec, prev_tvec
-        )
+        if frame_valid == 1:
+            rotation_vec, translation_vec, euler_angles = estimate_head_pose(
+                landmarks_2d, image_shape, prev_rvec, prev_tvec
+            )
+        else:
+            rotation_vec = translation_vec = euler_angles = None
         inference_time = time.time() - start_time
         inference_times.append(inference_time)
 
         # Write to CSV
         row = [timestamps[frame_idx]]
 
-        if rotation_vec is not None and translation_vec is not None:
+        # Validate pose (filter out implausible depth)
+        z_valid = translation_vec is not None and float(translation_vec[2]) <= 1500
+
+        if rotation_vec is not None and translation_vec is not None and z_valid:
             # Add rotation vector
             row.extend(rotation_vec.ravel().tolist())
             # Add translation vector
@@ -689,23 +731,26 @@ def process_video_with_head_pose(video_path: Path, landmarks_array: np.ndarray,
                 draw_line("Pitch", f"{pitch:.1f} deg", y0, (0, 0, 255))
                 draw_line("Yaw", f"{yaw:.1f} deg", y0 + line_gap, (0, 0, 255))
                 draw_line("Roll", f"{roll:.1f} deg", y0 + line_gap * 2, (0, 0, 255))
-                draw_line("X", f"{tx:.0f} mm", y0 + line_gap * 3, (255, 0, 0))
-                draw_line("Y", f"{ty:.0f} mm", y0 + line_gap * 4, (255, 0, 0))
-                draw_line("Z", f"{tz:.0f} mm", y0 + line_gap * 5, (255, 0, 0))
+                draw_line("X", f"{tx:.0f} mm", y0 + line_gap * 3, (0, 255, 0))
+                draw_line("Y", f"{ty:.0f} mm", y0 + line_gap * 4, (0, 255, 0))
+                draw_line("Z", f"{tz:.0f} mm", y0 + line_gap * 5, (0, 255, 0))
 
                 video_writer.write(vis_frame)
 
             # Update previous vectors for next frame (temporal consistency)
             prev_rvec = rotation_vec.copy()
             prev_tvec = translation_vec.copy()
+            valid_out = 1
         else:
             # Write NaN for failed estimation
             row.extend([np.nan] * 9)  # 3 rotation + 3 translation + 3 euler angles
+            valid_out = 0
 
             # Write blank frame to video if output is requested
             if video_writer is not None and current_frame is not None:
                 video_writer.write(current_frame)
 
+        row.append(valid_out)
         csv_writer.writerow(row)
         csv_file.flush()
 
@@ -756,7 +801,10 @@ def process_single_file(face_kps_csv: Path, output_path: Path,
 
     # Read face landmarks
     print(f"Reading face landmarks from {face_kps_csv.name}...")
-    timestamps, landmarks_array = read_face_landmarks_csv(face_kps_csv)
+    timestamps, landmarks_array, valid_mask = read_face_landmarks_csv(face_kps_csv)
+    if landmarks_array.ndim < 2 or landmarks_array.size == 0:
+        print(f"Error: Landmarks array empty or invalid for {face_kps_csv}")
+        return
     print(f"Loaded {len(timestamps)} frames with {landmarks_array.shape[1]} landmarks\n")
 
     # Get image shape from video or use default
@@ -840,9 +888,12 @@ def process_single_file(face_kps_csv: Path, output_path: Path,
 
             # Estimate head pose with timing (using previous frame for stability)
             start_time = time.time()
-            rotation_vec, translation_vec, euler_angles = estimate_head_pose(
-                landmarks_2d, image_shape, prev_rvec, prev_tvec
-            )
+            if valid_mask is not None and valid_mask[frame_idx] != 1:
+                rotation_vec = translation_vec = euler_angles = None
+            else:
+                rotation_vec, translation_vec, euler_angles = estimate_head_pose(
+                    landmarks_2d, image_shape, prev_rvec, prev_tvec
+                )
             inference_time = time.time() - start_time
             inference_times.append(inference_time)
 
@@ -879,14 +930,17 @@ def process_single_file(face_kps_csv: Path, output_path: Path,
                 # Update previous vectors for next frame (temporal consistency)
                 prev_rvec = rotation_vec.copy()
                 prev_tvec = translation_vec.copy()
+                valid_out = 1
             else:
                 # Write NaN for failed estimation
                 row.extend([np.nan] * 9)  # 3 rotation + 3 translation + 3 euler angles
+                valid_out = 0
 
                 # Write blank frame to video if output is requested
                 if video_writer is not None and current_frame is not None:
                     video_writer.write(current_frame)
 
+            row.append(valid_out)
             csv_writer.writerow(row)
             csv_file.flush()
 
@@ -929,7 +983,8 @@ def generate_csv_header() -> List[str]:
         'timestamp',
         'head_rotation_x', 'head_rotation_y', 'head_rotation_z',
         'head_translation_x', 'head_translation_y', 'head_translation_z',
-        'head_pitch', 'head_yaw', 'head_roll'
+        'head_pitch', 'head_yaw', 'head_roll',
+        'valid_mask'
     ]
     return header
 
@@ -949,10 +1004,15 @@ def main():
         help='Single file mode: process a single video/image file'
     )
     parser.add_argument(
+        '--recursive',
+        action='store_true',
+        help='Treat --path as a parent directory containing multiple case folders (batch only)'
+    )
+    parser.add_argument(
         '--face-landmark',
         type=str,
         default=None,
-        help='Face landmarks CSV file path (required for single file mode)'
+        help='Face landmarks CSV file path (single mode) or filename to use per case (batch/recursive)'
     )
     parser.add_argument(
         '--rotate',
@@ -1039,109 +1099,170 @@ def main():
 
         return 0
 
-    # Batch mode (original logic)
-    base_directory = Path(args.path)
-    if not base_directory.exists():
-        print(f"Error: Directory does not exist: {args.path}")
-        return 1
-
-    if not base_directory.is_dir():
-        print(f"Error: Path is not a directory: {args.path}")
-        return 1
-
-    # Output files will be saved in base directory
-    output_directory = base_directory
-
-    # camera directory must exist
-    input_directory = base_directory / "camera"
-    if not input_directory.exists():
-        print(f"Error: Camera directory does not exist: {input_directory}")
-        return 1
-
-    if not input_directory.is_dir():
-        print(f"Error: Camera path is not a directory: {input_directory}")
-        return 1
-
-    print(f"Input Directory: {input_directory}")
-    print(f"Output Directory: {output_directory}")
-    print(f"Rotate IDs: {args.rotate if args.rotate is not None else 'None'}")
-    print(f"Check mode: {args.check}")
-    print(f"Video output: {args.video_out}\n")
-
-    # Parse selected IDs if provided
-    selected_ids = None
-    if args.select:
-        try:
-            selected_ids = [int(x.strip()) for x in args.select.split(',')]
-            print(f"Selected IDs: {selected_ids}\n")
-        except ValueError:
-            print(f"Error: Invalid format for --select. Expected comma-separated integers (e.g., '0,2,4,6')")
+    def process_batch(base_directory: Path) -> int:
+        if not base_directory.exists():
+            print(f"Error: Directory does not exist: {base_directory}")
+            return 1
+        if not base_directory.is_dir():
+            print(f"Error: Path is not a directory: {base_directory}")
             return 1
 
-    # Find file pairs
-    pairs = find_file_pairs(base_directory, selected_ids=selected_ids)
+        # Output files will be saved in base directory
+        output_directory = base_directory
 
-    if not pairs:
-        print("No file pairs found. Exiting.")
-        return 1
+        # camera directory must exist
+        input_directory = base_directory / "camera"
+        if not input_directory.exists():
+            print(f"Error: Camera directory does not exist: {input_directory}")
+            return 1
+        if not input_directory.is_dir():
+            print(f"Error: Camera path is not a directory: {input_directory}")
+            return 1
 
-    # Process each pair
-    print(f"{'=' * 80}")
-    print(f"Processing video files")
-    print(f"{'=' * 80}\n")
+        print(f"Input Directory: {input_directory}")
+        print(f"Output Directory: {output_directory}")
+        print(f"Rotate IDs: {args.rotate if args.rotate is not None else 'None'}")
+        print(f"Check mode: {args.check}")
+        print(f"Video output: {args.video_out}\n")
 
-    for file_id, files in pairs.items():
+        # Parse selected IDs if provided
+        selected_ids = None
+        if args.select:
+            try:
+                selected_ids = [int(x.strip()) for x in args.select.split(',')]
+                print(f"Selected IDs: {selected_ids}\n")
+            except ValueError:
+                print(f"Error: Invalid format for --select. Expected comma-separated integers (e.g., '0,2,4,6')")
+                return 1
+
+        def resolve_face_landmark_path(case_dir: Path, face_landmark_arg: str) -> Path:
+            candidate = Path(face_landmark_arg)
+            if candidate.is_absolute():
+                return candidate
+            if candidate.parent != Path('.'):
+                return case_dir / candidate
+            return case_dir / face_landmark_arg
+
+        def find_avi_for_id(camera_dir: Path, file_id: int) -> Optional[Path]:
+            for avi_file in camera_dir.glob('*.avi'):
+                if avi_file.name.startswith('._'):
+                    continue
+                if extract_id_from_filename(avi_file.name) == file_id:
+                    return avi_file
+            return None
+
+        # Find file pairs
+        if args.face_landmark:
+            face_kps_csv = resolve_face_landmark_path(base_directory, args.face_landmark)
+            if not face_kps_csv.exists():
+                print(f"Error: Face landmarks CSV not found: {face_kps_csv}")
+                return 1
+            file_id = extract_id_from_filename(face_kps_csv.name)
+            if file_id is None:
+                print(f"Error: Could not extract ID from face landmarks filename: {face_kps_csv.name}")
+                return 1
+            avi_path = find_avi_for_id(input_directory, file_id)
+            if avi_path is None:
+                print(f"Error: No matching AVI found for ID {file_id} in {input_directory}")
+                return 1
+            pairs = {file_id: {'avi': avi_path, 'csv': face_kps_csv}}
+        else:
+            pairs = find_file_pairs(base_directory, selected_ids=selected_ids)
+
+        if not pairs:
+            print("No file pairs found. Exiting.")
+            return 1
+
+        # Process each pair
         print(f"{'=' * 80}")
-        print(f"Processing ID: {file_id}")
+        print(f"Processing video files")
         print(f"{'=' * 80}\n")
 
-        # Read face landmarks
-        print(f"Reading face landmarks from {files['csv'].name}...")
-        timestamps, landmarks_array = read_face_landmarks_csv(files['csv'])
-        print(f"Loaded {len(timestamps)} frames with {landmarks_array.shape[1]} landmarks\n")
+        for file_id, files in pairs.items():
+            print(f"{'=' * 80}")
+            print(f"Processing ID: {file_id}")
+            print(f"{'=' * 80}\n")
 
-        # Check if this ID should be rotated
-        should_rotate = args.rotate is not None and file_id in args.rotate
-        if should_rotate:
-            print(f"  [INFO] ID {file_id} will be rotated 90 degrees clockwise\n")
+            # Read face landmarks
+            print(f"Reading face landmarks from {files['csv'].name}...")
+            timestamps, landmarks_array, valid_mask = read_face_landmarks_csv(files['csv'])
+            if landmarks_array.ndim < 2 or landmarks_array.size == 0:
+                print(f"[ERROR] Landmarks array empty or invalid for {files['csv'].name}. Skipping.")
+                continue
+            print(f"Loaded {len(timestamps)} frames with {landmarks_array.shape[1]} landmarks\n")
 
-        # Prepare check visualization path
-        check_output_path = None
-        if args.check:
-            check_output_path = output_directory / f"check_headpose_{file_id}.jpg"
+            # Check if this ID should be rotated
+            should_rotate = args.rotate is not None and file_id in args.rotate
+            if should_rotate:
+                print(f"  [INFO] ID {file_id} will be rotated 90 degrees clockwise\n")
 
-        # Prepare video output path if requested
-        video_out_path = None
-        if args.video_out:
-            video_out_path = output_directory / f"headpose_{file_id}_visualization.avi"
+            # Prepare check visualization path
+            check_output_path = None
+            if args.check:
+                check_output_path = output_directory / f"check_headpose_{file_id}.jpg"
 
-        # Generate output filename
-        output_path = output_directory / f"head_pose_{file_id}.csv"
+            # Prepare video output path if requested
+            video_out_path = None
+            if args.video_out:
+                video_out_path = output_directory / f"headpose_{file_id}_visualization.avi"
 
-        # Create CSV file and write header
-        print(f"Creating output file: {output_path}")
-        header = generate_csv_header()
-        with open(output_path, 'w', newline='', encoding='utf-8') as csv_file:
-            csv_writer = csv.writer(csv_file)
-            csv_writer.writerow(header)
-            csv_file.flush()
-            print(f"  [SUCCESS] CSV file created with header ({len(header)} columns)\n")
+            # Generate output filename
+            output_path = output_directory / f"head_pose_{file_id}.csv"
 
-            # Process video and estimate head pose
-            process_video_with_head_pose(
-                files['avi'], landmarks_array, timestamps, csv_file,
-                should_rotate=should_rotate,
-                check_mode=args.check,
-                check_output_path=check_output_path,
-                video_out_path=video_out_path
-            )
+            # Create CSV file and write header
+            print(f"Creating output file: {output_path}")
+            header = generate_csv_header()
+            with open(output_path, 'w', newline='', encoding='utf-8') as csv_file:
+                csv_writer = csv.writer(csv_file)
+                csv_writer.writerow(header)
+                csv_file.flush()
+                print(f"  [SUCCESS] CSV file created with header ({len(header)} columns)\n")
 
-        print(f"  [SUCCESS] Output saved to: {output_path}\n")
+                # Process video and estimate head pose
+                process_video_with_head_pose(
+                    files['avi'], landmarks_array, timestamps, csv_file,
+                    should_rotate=should_rotate,
+                    check_mode=args.check,
+                    check_output_path=check_output_path,
+                    video_out_path=video_out_path,
+                    valid_mask=valid_mask
+                )
 
-    print(f"{'=' * 80}")
-    print(f"[SUCCESS] All files processed")
-    print(f"Total pairs processed: {len(pairs)}")
-    print(f"{'=' * 80}")
+            print(f"  [SUCCESS] Output saved to: {output_path}\n")
+
+        print(f"{'=' * 80}")
+        print(f"[SUCCESS] All files processed")
+        print(f"Total pairs processed: {len(pairs)}")
+        print(f"{'=' * 80}")
+
+        return 0
+
+    # Batch mode
+    if args.recursive:
+        base_directory = Path(args.path)
+        if not base_directory.exists() or not base_directory.is_dir():
+            print(f"Error: Directory does not exist or is not a directory: {args.path}")
+            return 1
+        case_dirs = sorted({p.parent for p in base_directory.rglob('camera') if p.is_dir()})
+        if not case_dirs:
+            print(f"No case directories with a camera folder found under: {base_directory}")
+            return 1
+        print(f"\n[INFO] Recursive mode: {len(case_dirs)} case(s) found")
+        for idx, case_dir in enumerate(case_dirs, start=1):
+            print(f"  [{idx}] {case_dir}")
+    else:
+        case_dirs = [Path(args.path)]
+
+    had_error = False
+    for case_dir in case_dirs:
+        if args.recursive:
+            print(f"\n{'=' * 80}")
+            print(f"[CASE] {case_dir}")
+            print(f"{'=' * 80}")
+        if process_batch(case_dir) != 0:
+            had_error = True
+
+    return 0 if not had_error else 1
 
     return 0
 

@@ -154,27 +154,38 @@ class STGCNBlock(nn.Module):
         return x
 
 
-def create_body_adjacency():
+def create_body_adjacency(num_nodes: int = 17):
     """
-    Create adjacency matrix for body skeleton (COCO format)
-    17 keypoints: nose, eyes, ears, shoulders, elbows, wrists, hips, knees, ankles
+    Create adjacency matrix for body skeleton (COCO format).
+    Supports full body (17 keypoints) or upper body only (11 keypoints).
     """
-    num_nodes = 17
-    adj = torch.zeros(num_nodes, num_nodes)
-
-    # Define body skeleton connections
-    connections = [
-        (0, 1), (0, 2),  # nose to eyes
-        (1, 3), (2, 4),  # eyes to ears
-        (0, 5), (0, 6),  # nose to shoulders
-        (5, 6),  # shoulders
-        (5, 7), (7, 9),  # left arm
-        (6, 8), (8, 10),  # right arm
-        (5, 11), (6, 12),  # shoulders to hips
-        (11, 12),  # hips
-        (11, 13), (13, 15),  # left leg
-        (12, 14), (14, 16)  # right leg
-    ]
+    if num_nodes == 17:
+        adj = torch.zeros(num_nodes, num_nodes)
+        connections = [
+            (0, 1), (0, 2),  # nose to eyes
+            (1, 3), (2, 4),  # eyes to ears
+            (0, 5), (0, 6),  # nose to shoulders
+            (5, 6),  # shoulders
+            (5, 7), (7, 9),  # left arm
+            (6, 8), (8, 10),  # right arm
+            (5, 11), (6, 12),  # shoulders to hips
+            (11, 12),  # hips
+            (11, 13), (13, 15),  # left leg
+            (12, 14), (14, 16)  # right leg
+        ]
+    elif num_nodes == 11:
+        # Upper-body subset (nose/eyes/ears/shoulders/elbows/wrists)
+        adj = torch.zeros(num_nodes, num_nodes)
+        connections = [
+            (0, 1), (0, 2),  # nose to eyes
+            (1, 3), (2, 4),  # eyes to ears
+            (0, 5), (0, 6),  # nose to shoulders
+            (5, 6),  # shoulders
+            (5, 7), (7, 9),  # left arm
+            (6, 8), (8, 10),  # right arm
+        ]
+    else:
+        raise ValueError(f"Unsupported num_nodes for body adjacency: {num_nodes}")
 
     for i, j in connections:
         adj[i, j] = 1
@@ -192,59 +203,66 @@ def create_body_adjacency():
     return adj_normalized
 
 
-def create_face_adjacency():
+def create_face_adjacency(num_nodes: int = 68):
     """
-    Create adjacency matrix for face landmarks (68 points)
-    Simplified connectivity based on facial structure
+    Create adjacency matrix for face landmarks.
+    - If num_nodes == 68, use predefined landmark connectivity (iBUG-style).
+    - Otherwise, fall back to fully-connected graph for the given size.
     """
-    num_nodes = 68
-    adj = torch.zeros(num_nodes, num_nodes)
+    if num_nodes == 68:
+        adj = torch.zeros(num_nodes, num_nodes)
 
-    # Face contour (0-16)
-    for i in range(16):
-        adj[i, i+1] = 1
+        # Face contour (0-16)
+        for i in range(16):
+            adj[i, i+1] = 1
 
-    # Eyebrows
-    for i in range(17, 21):  # Right eyebrow
-        adj[i, i+1] = 1
-    for i in range(22, 26):  # Left eyebrow
-        adj[i, i+1] = 1
+        # Eyebrows
+        for i in range(17, 21):  # Right eyebrow
+            adj[i, i+1] = 1
+        for i in range(22, 26):  # Left eyebrow
+            adj[i, i+1] = 1
 
-    # Nose
-    for i in range(27, 30):  # Nose bridge
-        adj[i, i+1] = 1
-    for i in range(31, 35):  # Nose bottom
-        adj[i, i+1] = 1
+        # Nose
+        for i in range(27, 30):  # Nose bridge
+            adj[i, i+1] = 1
+        for i in range(31, 35):  # Nose bottom
+            adj[i, i+1] = 1
 
-    # Eyes
-    for i in range(36, 41):  # Right eye
-        adj[i, i+1] = 1
-    adj[41, 36] = 1  # Close right eye
-    for i in range(42, 47):  # Left eye
-        adj[i, i+1] = 1
-    adj[47, 42] = 1  # Close left eye
+        # Eyes
+        for i in range(36, 41):  # Right eye
+            adj[i, i+1] = 1
+        adj[41, 36] = 1  # Close right eye
+        for i in range(42, 47):  # Left eye
+            adj[i, i+1] = 1
+        adj[47, 42] = 1  # Close left eye
 
-    # Mouth
-    for i in range(48, 59):  # Outer mouth
-        adj[i, i+1] = 1
-    adj[59, 48] = 1  # Close outer mouth
-    for i in range(60, 67):  # Inner mouth
-        adj[i, i+1] = 1
-    adj[67, 60] = 1  # Close inner mouth
+        # Mouth
+        for i in range(48, 59):  # Outer mouth
+            adj[i, i+1] = 1
+        adj[59, 48] = 1  # Close outer mouth
+        for i in range(60, 67):  # Inner mouth
+            adj[i, i+1] = 1
+        adj[67, 60] = 1  # Close inner mouth
 
-    # Make symmetric
-    adj = adj + adj.T
+        # Make symmetric
+        adj = adj + adj.T
 
-    # Add self-loops
-    adj = adj + torch.eye(num_nodes)
+        # Add self-loops
+        adj = adj + torch.eye(num_nodes)
 
-    # Normalize adjacency matrix
-    degree = adj.sum(dim=1)
-    degree_inv_sqrt = torch.pow(degree, -0.5)
-    degree_inv_sqrt[torch.isinf(degree_inv_sqrt)] = 0
-    adj_normalized = degree_inv_sqrt.unsqueeze(1) * adj * degree_inv_sqrt.unsqueeze(0)
+        # Normalize adjacency matrix
+        degree = adj.sum(dim=1)
+        degree_inv_sqrt = torch.pow(degree, -0.5)
+        degree_inv_sqrt[torch.isinf(degree_inv_sqrt)] = 0
+        adj_normalized = degree_inv_sqrt.unsqueeze(1) * adj * degree_inv_sqrt.unsqueeze(0)
 
-    return adj_normalized
+        return adj_normalized
+
+    if num_nodes <= 0:
+        raise ValueError(f"Invalid num_nodes for face adjacency: {num_nodes}")
+
+    # Fallback: fully-connected graph for arbitrary landmark counts (e.g., 468)
+    return create_generic_adjacency(num_nodes, connection_type='fully_connected')
 
 
 def create_generic_adjacency(num_nodes, connection_type='sequential'):

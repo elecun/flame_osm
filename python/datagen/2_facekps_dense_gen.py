@@ -33,7 +33,18 @@ def detect_csv_encoding(file_path: Path) -> str:
     Returns:
         Detected encoding string
     """
-    encodings = ['utf-8', 'cp949', 'euc-kr', 'latin-1']
+    # Quick BOM sniff
+    try:
+        with open(file_path, 'rb') as f:
+            start_bytes = f.read(4)
+        if start_bytes.startswith(b'\xff\xfe') or start_bytes.startswith(b'\xfe\xff'):
+            return 'utf-16'
+        if start_bytes.startswith(b'\xef\xbb\xbf'):
+            return 'utf-8-sig'
+    except Exception:
+        pass
+
+    encodings = ['utf-8', 'utf-16', 'utf-16-le', 'utf-16-be', 'cp949', 'euc-kr', 'latin-1']
 
     for encoding in encodings:
         try:
@@ -219,9 +230,14 @@ def read_timestamps(csv_path: Path) -> List[float]:
     encoding = detect_csv_encoding(csv_path)
     timestamps = []
 
-    with open(csv_path, 'r', encoding=encoding) as f:
-        reader = csv.reader(f)
-        rows = list(reader)
+    with open(csv_path, 'r', encoding=encoding, errors='replace', newline='') as f:
+        raw_lines = f.readlines()
+
+    rows = []
+    for idx, line in enumerate(raw_lines, start=1):
+        if '\x00' in line:
+            raise csv.Error(f"NUL found in timestamp file at line {idx}")
+        rows.append(next(csv.reader([line])))
 
         if not rows:
             return timestamps
@@ -246,42 +262,6 @@ def read_timestamps(csv_path: Path) -> List[float]:
                 timestamps.append(timestamp)
 
     return timestamps
-
-
-def autofill_missing_values(landmarks_sequence: np.ndarray) -> np.ndarray:
-    """
-    Fill missing values (-1.0) with average of neighboring 5 values.
-
-    Args:
-        landmarks_sequence: Array of shape (num_frames, num_landmarks, 3)
-
-    Returns:
-        Array with filled values
-    """
-    filled = landmarks_sequence.copy()
-    num_frames, num_landmarks, num_coords = filled.shape
-
-    for lm_idx in range(num_landmarks):
-        for coord_idx in range(num_coords):  # x, y, z
-            for frame_idx in range(num_frames):
-                if filled[frame_idx, lm_idx, coord_idx] == -1.0:
-                    # Get neighboring values within window
-                    window_start = max(0, frame_idx - 5)
-                    window_end = min(num_frames, frame_idx + 6)
-
-                    neighbor_values = []
-                    for i in range(window_start, window_end):
-                        if i != frame_idx and filled[i, lm_idx, coord_idx] != -1.0:
-                            neighbor_values.append(filled[i, lm_idx, coord_idx])
-
-                    # Fill with average of neighbors
-                    if neighbor_values:
-                        filled[frame_idx, lm_idx, coord_idx] = np.mean(neighbor_values)
-                    else:
-                        # If no valid neighbors, keep as -1.0
-                        filled[frame_idx, lm_idx, coord_idx] = -1.0
-
-    return filled
 
 
 def visualize_first_frame(frame: np.ndarray, landmarks: np.ndarray, output_path: Path, bbox=None):
@@ -318,7 +298,7 @@ def visualize_first_frame(frame: np.ndarray, landmarks: np.ndarray, output_path:
 def process_video_with_mediapipe(video_path: Path, face_mesh, yolo_model, csv_file, timestamps: List[float],
                                   should_rotate: bool = False, check_mode: bool = False,
                                   check_output_path: Optional[Path] = None, video_out_path: Optional[Path] = None,
-                                  wider: float = 0.0) -> Tuple[np.ndarray, int]:
+                                  wider: float = 0.0) -> Tuple[np.ndarray, int, List[int]]:
     """
     Process video with YOLO face detection + MediaPipe FaceMesh and write results to CSV immediately.
 
@@ -335,7 +315,7 @@ def process_video_with_mediapipe(video_path: Path, face_mesh, yolo_model, csv_fi
         wider: Percentage to widen the face bounding box (e.g., 10 for 10%)
 
     Returns:
-        Tuple of (landmarks, num_landmarks)
+        Tuple of (landmarks, num_landmarks, valid_mask)
     """
     print(f"Processing video: {video_path.name}")
     if should_rotate:
@@ -353,9 +333,10 @@ def process_video_with_mediapipe(video_path: Path, face_mesh, yolo_model, csv_fi
 
     # MediaPipe FaceMesh has 468 landmarks
     num_landmarks = 468
-    all_landmarks = np.full((frame_count, num_landmarks, 3), -1.0)
+    all_landmarks = np.zeros((frame_count, num_landmarks, 3), dtype=np.float32)
+    valid_mask = [0] * frame_count
 
-    csv_writer = csv.writer(csv_file)
+    csv_writer = csv.writer(csv_file, lineterminator="\n")
 
     # Initialize VideoWriter if video output is requested
     video_writer = None
@@ -397,7 +378,8 @@ def process_video_with_mediapipe(video_path: Path, face_mesh, yolo_model, csv_fi
         height, width, _ = frame.shape
 
         # Extract landmarks
-        lms = np.full((num_landmarks, 3), -1.0)
+        lms = np.zeros((num_landmarks, 3), dtype=np.float32)
+        detected = False
 
         # Step 1: Detect face with YOLO (if provided)
         bbox = None
@@ -460,6 +442,7 @@ def process_video_with_mediapipe(video_path: Path, face_mesh, yolo_model, csv_fi
             if mp_results.multi_face_landmarks:
                 # Take the first detected face
                 face_landmarks = mp_results.multi_face_landmarks[0]
+                detected = True
 
                 # Convert normalized coordinates to pixel coordinates
                 # Only process up to num_landmarks (468) to avoid index errors
@@ -470,10 +453,11 @@ def process_video_with_mediapipe(video_path: Path, face_mesh, yolo_model, csv_fi
                     lms[idx, 2] = landmark.z * crop_width  # z is relative to crop width
 
         all_landmarks[frame_idx] = lms
+        valid_mask[frame_idx] = 1 if detected else 0
 
         # Save first frame with face detection if check mode is enabled
         if check_mode and not check_image_saved and check_output_path is not None:
-            if not np.all(lms == -1.0):
+            if valid_mask[frame_idx]:
                 print(f"  Saving check image from frame {frame_idx}...")
                 visualize_first_frame(frame, lms, check_output_path, bbox=bbox)
                 check_image_saved = True
@@ -489,7 +473,7 @@ def process_video_with_mediapipe(video_path: Path, face_mesh, yolo_model, csv_fi
 
             # Draw landmark points
             for idx, (x, y, z) in enumerate(lms):
-                if x != -1.0:
+                if valid_mask[frame_idx]:
                     cv2.circle(vis_frame, (int(x), int(y)), 2, (0, 255, 0), -1)
 
             video_writer.write(vis_frame)
@@ -506,6 +490,7 @@ def process_video_with_mediapipe(video_path: Path, face_mesh, yolo_model, csv_fi
             row.append(y)
             row.append(z)
 
+        row.append(valid_mask[frame_idx])
         csv_writer.writerow(row)
         csv_file.flush()  # Flush to disk immediately
 
@@ -539,7 +524,7 @@ def process_video_with_mediapipe(video_path: Path, face_mesh, yolo_model, csv_fi
         print(f"    Min: {min_mp:.2f}ms")
         print(f"    Max: {max_mp:.2f}ms")
 
-    return all_landmarks, num_landmarks
+    return all_landmarks, num_landmarks, valid_mask
 
 
 def generate_csv_header(num_landmarks: int) -> List[str]:
@@ -561,12 +546,14 @@ def generate_csv_header(num_landmarks: int) -> List[str]:
         header.append(f'{lm_name}_y')
         header.append(f'{lm_name}_z')
 
+    header.append('valid_mask')
+
     return header
 
 
 def process_single_file(file_path: Path, face_mesh, yolo_model, output_path: Path,
                         should_rotate: bool = False, check_mode: bool = False,
-                        autofill: bool = False, video_out_path: Optional[Path] = None,
+                        video_out_path: Optional[Path] = None,
                         wider: float = 0.0) -> None:
     """
     Process a single image or video file for face landmarks.
@@ -578,7 +565,6 @@ def process_single_file(file_path: Path, face_mesh, yolo_model, output_path: Pat
         output_path: Output CSV file path
         should_rotate: Whether to rotate frames 90 degrees clockwise
         check_mode: Whether to save first frame with landmarks visualization
-        autofill: Whether to autofill missing values
         video_out_path: Optional path to save visualization video (AVI format)
         wider: Percentage to widen the face bounding box (e.g., 10 for 10%)
     """
@@ -634,39 +620,11 @@ def process_single_file(file_path: Path, face_mesh, yolo_model, output_path: Pat
         csv_writer.writerow(header)
 
         if is_video:
-            landmarks, num_landmarks = process_video_with_mediapipe(
+            landmarks, num_landmarks, valid_mask = process_video_with_mediapipe(
                 file_path, face_mesh, yolo_model, csv_file, timestamps,
                 should_rotate=should_rotate, check_mode=check_mode, check_output_path=check_output_path,
                 video_out_path=video_out_path, wider=wider
             )
-
-            # Autofill if requested
-            if autofill and landmarks is not None:
-                print(f"Applying autofill to missing values...")
-                total_missing = (landmarks == -1.0).sum()
-
-                if total_missing > 0:
-                    print(f"  Found {total_missing} missing values")
-                    landmarks = autofill_missing_values(landmarks)
-
-                    # Re-write CSV with autofilled data
-                    print(f"  Re-writing CSV with autofilled data...")
-                    csv_file.seek(0)
-                    csv_file.truncate()
-                    csv_writer.writerow(header)
-
-                    for frame_idx in range(len(landmarks)):
-                        row = [timestamps[frame_idx]]
-                        for lm_idx in range(num_landmarks):
-                            x = landmarks[frame_idx, lm_idx, 0]
-                            y = landmarks[frame_idx, lm_idx, 1]
-                            z = landmarks[frame_idx, lm_idx, 2]
-                            row.append(x)
-                            row.append(y)
-                            row.append(z)
-                        csv_writer.writerow(row)
-
-                    print(f"  [SUCCESS] Autofilled data written to CSV")
         else:
             # Process single image
             img = cv2.imread(str(file_path))
@@ -681,7 +639,8 @@ def process_single_file(file_path: Path, face_mesh, yolo_model, output_path: Pat
             height, width, _ = img.shape
 
             # Extract landmarks
-            lms = np.full((num_landmarks, 3), -1.0)
+            lms = np.zeros((num_landmarks, 3), dtype=np.float32)
+            detected = False
 
             # Step 1: Detect face with YOLO (if provided)
             bbox = None
@@ -744,6 +703,7 @@ def process_single_file(file_path: Path, face_mesh, yolo_model, output_path: Pat
 
                 if mp_results.multi_face_landmarks:
                     face_landmarks = mp_results.multi_face_landmarks[0]
+                    detected = True
                     # Only process up to num_landmarks (468) to avoid index errors
                     for idx, landmark in enumerate(face_landmarks.landmark[:num_landmarks]):
                         # Convert from cropped image coordinates to original image coordinates
@@ -756,7 +716,7 @@ def process_single_file(file_path: Path, face_mesh, yolo_model, output_path: Pat
 
             # Save visualization if check mode
             if check_mode and check_output_path is not None:
-                if not np.all(lms == -1.0):
+                if detected:
                     print(f"  Saving check image...")
                     visualize_first_frame(img, lms, check_output_path, bbox=bbox)
                 else:
@@ -765,6 +725,7 @@ def process_single_file(file_path: Path, face_mesh, yolo_model, output_path: Pat
                     print(f"  Saved original image to: {check_output_path}")
 
             # Write to CSV
+            valid_mask = 1 if detected else 0
             row = [timestamps[0]]
             for lm_idx in range(num_landmarks):
                 x = lms[lm_idx, 0]
@@ -773,6 +734,7 @@ def process_single_file(file_path: Path, face_mesh, yolo_model, output_path: Pat
                 row.append(x)
                 row.append(y)
                 row.append(z)
+            row.append(valid_mask)
             csv_writer.writerow(row)
 
     print(f"\n[SUCCESS] Processing completed!")
@@ -795,13 +757,13 @@ def main():
         action='store_true',
         help='Single file mode: process a single image or video file'
     )
+    parser.add_argument(
+        '--recursive',
+        action='store_true',
+        help='Treat --path as a parent directory containing multiple case folders (batch only)'
+    )
 
     # Processing options
-    parser.add_argument(
-        '--autofill',
-        action='store_true',
-        help='Autofill missing values with average of neighboring frames'
-    )
     parser.add_argument(
         '--rotate',
         type=int,
@@ -909,7 +871,6 @@ def main():
                 output_path=output_path,
                 should_rotate=should_rotate,
                 check_mode=args.check,
-                autofill=args.autofill,
                 video_out_path=video_out_path,
                 wider=args.wider
             )
@@ -923,73 +884,146 @@ def main():
 
         return 0
 
-    # Batch mode
-    base_directory = Path(args.path)
-    if not base_directory.exists():
-        print(f"Error: Directory does not exist: {args.path}")
-        return 1
-
-    if not base_directory.is_dir():
-        print(f"Error: Path is not a directory: {args.path}")
-        return 1
-
-    # Input files are in 'camera' subdirectory
-    input_directory = base_directory / "camera"
-    if not input_directory.exists():
-        print(f"Error: Camera directory does not exist: {input_directory}")
-        return 1
-
-    if not input_directory.is_dir():
-        print(f"Error: Camera path is not a directory: {input_directory}")
-        return 1
-
-    # Output directory is the base directory
-    output_directory = base_directory
-
-    print(f"\n{'=' * 80}")
-    print(f"Dense Face Keypoints Generator (MediaPipe)")
-    print(f"Mode: Batch")
-    print(f"Input directory: {input_directory}")
-    print(f"Output directory: {output_directory}")
-    print(f"Autofill: {args.autofill}")
-    print(f"Rotate IDs: {args.rotate if args.rotate is not None else 'None'}")
-    print(f"Check mode: {args.check}")
-    print(f"Video output: {args.video_out}")
-    if args.wider > 0:
-        print(f"Widen bbox: {args.wider}%")
-
-    # Parse selected IDs if provided
-    selected_ids = None
-    if args.select:
-        try:
-            selected_ids = [int(x.strip()) for x in args.select.split(',')]
-            print(f"Selected IDs: {selected_ids}")
-        except ValueError:
-            print(f"Error: Invalid format for --select. Use comma-separated integers (e.g., '0,2,4,6')")
+    def process_batch(base_directory: Path, face_mesh, yolo_model) -> int:
+        if not base_directory.exists():
+            print(f"Error: Directory does not exist: {base_directory}")
+            return 1
+        if not base_directory.is_dir():
+            print(f"Error: Path is not a directory: {base_directory}")
             return 1
 
-    print(f"{'=' * 80}\n")
+        # Input files are in 'camera' subdirectory
+        input_directory = base_directory / "camera"
+        if not input_directory.exists():
+            print(f"Error: Camera directory does not exist: {input_directory}")
+            return 1
+        if not input_directory.is_dir():
+            print(f"Error: Camera path is not a directory: {input_directory}")
+            return 1
 
-    # Find file pairs
-    pairs = find_file_pairs(input_directory, selected_ids=selected_ids)
+        # Output directory is the base directory
+        output_directory = base_directory
 
-    if not pairs:
-        print("[ERROR] No valid file pairs found!")
-        return 1
+        print(f"\n{'=' * 80}")
+        print(f"Dense Face Keypoints Generator (MediaPipe)")
+        print(f"Mode: Batch")
+        print(f"Input directory: {input_directory}")
+        print(f"Output directory: {output_directory}")
+        print(f"Rotate IDs: {args.rotate if args.rotate is not None else 'None'}")
+        print(f"Check mode: {args.check}")
+        print(f"Video output: {args.video_out}")
+        if args.wider > 0:
+            print(f"Widen bbox: {args.wider}%")
 
-    # Validate frame counts if requested
-    if args.validate_only:
-        validate_frame_counts(pairs)
+        # Parse selected IDs if provided
+        selected_ids = None
+        if args.select:
+            try:
+                selected_ids = [int(x.strip()) for x in args.select.split(',')]
+                print(f"Selected IDs: {selected_ids}")
+            except ValueError:
+                print(f"Error: Invalid format for --select. Use comma-separated integers (e.g., '0,2,4,6')")
+                return 1
+
+        print(f"{'=' * 80}\n")
+
+        # Find file pairs
+        pairs = find_file_pairs(input_directory, selected_ids=selected_ids)
+
+        if not pairs:
+            print("[ERROR] No valid file pairs found!")
+            return 1
+
+        # Validate frame counts if requested
+        if args.validate_only:
+            validate_frame_counts(pairs)
+            return 0
+
+        # Determine which IDs to rotate
+        rotate_ids = set(args.rotate) if args.rotate else set()
+
+        # Process each pair
+        for file_id, files in sorted(pairs.items()):
+            print(f"{'=' * 80}")
+            print(f"Processing ID: {file_id}")
+            print(f"  AVI: {files['avi'].name}")
+            print(f"  CSV: {files['csv'].name}")
+
+            should_rotate = file_id in rotate_ids
+            if should_rotate:
+                print(f"  [INFO] ID {file_id} will be rotated 90 degrees clockwise\n")
+
+            # Prepare check visualization path in base directory
+            check_output_path = None
+            if args.check:
+                check_output_path = output_directory / f"check_face_dense_{file_id}.jpg"
+
+            # Prepare video output path if requested
+            video_out_path = None
+            if args.video_out:
+                video_out_path = output_directory / f"face_kps_dense_{file_id}_visualization.avi"
+
+            # Generate output filename in base directory
+            output_path = output_directory / f"face_kps_dense_{file_id}.csv"
+
+            # Read timestamps
+            timestamps = read_timestamps(files['csv'])
+
+            # Create CSV file and write header immediately
+            print(f"Creating output file: {output_path}")
+            num_landmarks = 468
+            header = generate_csv_header(num_landmarks)
+
+            with open(output_path, 'w', newline='', encoding='utf-8', errors='strict') as csv_file:
+                csv_writer = csv.writer(csv_file)
+                csv_writer.writerow(header)
+                csv_file.flush()
+                print(f"  [SUCCESS] CSV file created with header ({len(header)} columns)\n")
+
+                # Process video
+                landmarks, num_landmarks, valid_mask = process_video_with_mediapipe(
+                    files['avi'], face_mesh, yolo_model, csv_file, timestamps,
+                    should_rotate=should_rotate, check_mode=args.check, check_output_path=check_output_path,
+                    video_out_path=video_out_path, wider=args.wider
+                )
+
+            if landmarks is None:
+                print(f"  [ERROR] Failed to process video\n")
+                continue
+
+            print(f"  [SUCCESS] Output saved to: {output_path}\n")
+
+        print(f"{'=' * 80}")
+        print(f"[SUCCESS] All files processed")
+        print(f"Total pairs processed: {len(pairs)}")
+        print(f"{'=' * 80}")
+
         return 0
 
-    # Load YOLO face detector if provided
+    # Batch mode
+    if args.recursive:
+        base_directory = Path(args.path)
+        if not base_directory.exists() or not base_directory.is_dir():
+            print(f"Error: Directory does not exist or is not a directory: {args.path}")
+            return 1
+        case_dirs = sorted({p.parent for p in base_directory.rglob('camera') if p.is_dir()})
+        if not case_dirs:
+            print(f"No case directories with a camera folder found under: {base_directory}")
+            return 1
+        print(f"\n[INFO] Recursive mode: {len(case_dirs)} case(s) found")
+        for idx, case_dir in enumerate(case_dirs, start=1):
+            print(f"  [{idx}] {case_dir}")
+    else:
+        case_dirs = [Path(args.path)]
+
+    # Load YOLO face detector if provided (shared)
     yolo_model = None
     if args.face_detector:
         print(f"Loading YOLO face detector: {args.face_detector}")
         yolo_model = YOLO(args.face_detector)
         print(f"  YOLO model loaded successfully\n")
 
-    # Initialize MediaPipe FaceMesh
+    # Initialize MediaPipe FaceMesh (shared)
     print(f"Initializing MediaPipe FaceMesh...")
     mp_face_mesh = mp.solutions.face_mesh
     face_mesh = mp_face_mesh.FaceMesh(
@@ -1002,100 +1036,18 @@ def main():
     print(f"  MediaPipe FaceMesh initialized with 468 landmarks")
     print()
 
-    # Determine which IDs to rotate
-    rotate_ids = set(args.rotate) if args.rotate else set()
+    had_error = False
+    for case_dir in case_dirs:
+        if args.recursive:
+            print(f"\n{'=' * 80}")
+            print(f"[CASE] {case_dir}")
+            print(f"{'=' * 80}")
+        if process_batch(case_dir, face_mesh, yolo_model) != 0:
+            had_error = True
 
-    # Process each pair
-    for file_id, files in sorted(pairs.items()):
-        print(f"{'=' * 80}")
-        print(f"Processing ID: {file_id}")
-        print(f"  AVI: {files['avi'].name}")
-        print(f"  CSV: {files['csv'].name}")
-
-        should_rotate = file_id in rotate_ids
-        if should_rotate:
-            print(f"  [INFO] ID {file_id} will be rotated 90 degrees clockwise\n")
-
-        # Prepare check visualization path in base directory
-        check_output_path = None
-        if args.check:
-            check_output_path = output_directory / f"check_face_dense_{file_id}.jpg"
-
-        # Prepare video output path if requested
-        video_out_path = None
-        if args.video_out:
-            video_out_path = output_directory / f"face_kps_dense_{file_id}_visualization.avi"
-
-        # Generate output filename in base directory
-        output_path = output_directory / f"face_kps_dense_{file_id}.csv"
-
-        # Read timestamps
-        timestamps = read_timestamps(files['csv'])
-
-        # Create CSV file and write header immediately
-        print(f"Creating output file: {output_path}")
-        num_landmarks = 468
-        header = generate_csv_header(num_landmarks)
-
-        with open(output_path, 'w', newline='', encoding='utf-8') as csv_file:
-            csv_writer = csv.writer(csv_file)
-            csv_writer.writerow(header)
-            csv_file.flush()
-            print(f"  [SUCCESS] CSV file created with header ({len(header)} columns)\n")
-
-            # Process video
-            landmarks, num_landmarks = process_video_with_mediapipe(
-                files['avi'], face_mesh, yolo_model, csv_file, timestamps,
-                should_rotate=should_rotate, check_mode=args.check, check_output_path=check_output_path,
-                video_out_path=video_out_path, wider=args.wider
-            )
-
-        if landmarks is None:
-            print(f"  [ERROR] Failed to process video\n")
-            continue
-
-        print(f"  [SUCCESS] Output saved to: {output_path}\n")
-
-        # Autofill missing values if requested
-        if args.autofill:
-            print(f"Applying autofill to missing values...")
-
-            total_missing = (landmarks == -1.0).sum()
-
-            if total_missing > 0:
-                print(f"  Found {total_missing} missing values")
-                landmarks = autofill_missing_values(landmarks)
-
-                # Re-write CSV with autofilled data
-                print(f"  Rewriting CSV with autofilled values...")
-                with open(output_path, 'w', newline='', encoding='utf-8') as f:
-                    writer = csv.writer(f)
-                    writer.writerow(header)
-
-                    for frame_idx in range(len(landmarks)):
-                        row = [timestamps[frame_idx]]
-                        for lm_idx in range(num_landmarks):
-                            x = landmarks[frame_idx, lm_idx, 0]
-                            y = landmarks[frame_idx, lm_idx, 1]
-                            z = landmarks[frame_idx, lm_idx, 2]
-                            row.append(x)
-                            row.append(y)
-                            row.append(z)
-                        writer.writerow(row)
-
-                print(f"  [SUCCESS] Autofill completed and CSV updated\n")
-            else:
-                print(f"  No missing values found\n")
-
-    # Cleanup
     face_mesh.close()
 
-    print(f"{'=' * 80}")
-    print(f"[SUCCESS] All files processed")
-    print(f"Total pairs processed: {len(pairs)}")
-    print(f"{'=' * 80}")
-
-    return 0
+    return 0 if not had_error else 1
 
 
 if __name__ == '__main__':

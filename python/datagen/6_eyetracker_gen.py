@@ -87,6 +87,24 @@ def find_eyetracker_data_dir(base_path: Path) -> Path:
     return data_dir
 
 
+def list_case_dirs(parent: Path):
+    """
+    Find case directories under parent by locating 'camera' folders (handles nested date folders).
+    """
+    case_dirs = []
+    seen = set()
+    for cam_dir in sorted(parent.rglob("camera")):
+        if not cam_dir.is_dir():
+            continue
+        case_dir = cam_dir.parent
+        if case_dir in seen:
+            continue
+        seen.add(case_dir)
+        if (case_dir / "eyetracker").exists():
+            case_dirs.append(case_dir)
+    return case_dirs
+
+
 def find_first_existing_file(data_dir: Path, filenames) -> Path:
     """Return the first existing file from filenames inside data_dir."""
     for name in filenames:
@@ -453,7 +471,10 @@ def match_timestamps_to_fixations_and_saccades(
     k1: float = 0.5,
     k2: float = 1.5,
     min_dwell_sec: float = None,
-    num_classes: int = 5
+    num_classes: int = 5,
+    k_smooth_alpha: float = 1.0,
+    u1: float = 0.33,
+    u2: float = 0.66,
 ) -> List[Dict]:
     """
     Match camera timestamps to fixation IDs and saccade data, and calculate K coefficient
@@ -494,31 +515,34 @@ def match_timestamps_to_fixations_and_saccades(
 
     results = []
 
+    def find_event_in_interval(events, start_ns: int, end_ns: int):
+        """
+        Find an event whose interval overlaps with (start_ns, end_ns].
+        Prefer the event that contains the midpoint; fallback to any overlap.
+        """
+        mid_ns = (start_ns + end_ns) // 2
+        for ev in events:
+            if ev.start_timestamp_ns <= mid_ns <= ev.end_timestamp_ns:
+                return ev
+        for ev in events:
+            if not (ev.end_timestamp_ns < start_ns or ev.start_timestamp_ns > end_ns):
+                return ev
+        return None
+
     for i, timestamp_sec in enumerate(time_references):
-        # Convert timestamp from seconds to nanoseconds
-        timestamp_ns = int(timestamp_sec * 1e9)
+        # Define interval from previous timestamp to current (inclusive of current)
+        prev_ts = time_references[i - 1] if i > 0 else time_references[i]
+        start_ns = int(prev_ts * 1e9)
+        end_ns = int(timestamp_sec * 1e9)
 
-        # Find matching fixation
-        matched_fixation_id = None
-        for fixation in fixations:
-            if fixation.start_timestamp_ns <= timestamp_ns <= fixation.end_timestamp_ns:
-                matched_fixation_id = fixation.fixation_id
-                break
-
-        # Find matching saccade
-        matched_saccade_id = None
-        matched_saccade_amplitude = None
-        for saccade in saccades:
-            if saccade.start_timestamp_ns <= timestamp_ns <= saccade.end_timestamp_ns:
-                matched_saccade_id = saccade.saccade_id
-                matched_saccade_amplitude = saccade.amplitude_deg
-                break
+        fixation_match = find_event_in_interval(fixations, start_ns, end_ns)
+        saccade_match = find_event_in_interval(saccades, start_ns, end_ns)
 
         results.append({
             'timestamp': timestamp_sec,
-            'fixation_id': matched_fixation_id if matched_fixation_id is not None else '',
-            'saccade_id': matched_saccade_id if matched_saccade_id is not None else '',
-            'saccade_amplitude_deg': matched_saccade_amplitude if matched_saccade_amplitude is not None else ''
+            'fixation_id': fixation_match.fixation_id if fixation_match is not None else '',
+            'saccade_id': saccade_match.saccade_id if saccade_match is not None else '',
+            'saccade_amplitude_deg': saccade_match.amplitude_deg if saccade_match is not None else ''
         })
 
     # Calculate fixation duration and saccade amplitude for each window
@@ -671,7 +695,7 @@ def match_timestamps_to_fixations_and_saccades(
     # ============================================================
     # Apply additional EWMA smoothing for attention level classification
     # ============================================================
-    alpha_k = 0.02  # Much slower smoothing for stable attention classification
+    alpha_k = k_smooth_alpha  # Much slower smoothing for stable attention classification
     k_smooth = np.zeros(len(results))
     k_smooth_value = None
 
@@ -739,10 +763,53 @@ def match_timestamps_to_fixations_and_saccades(
     if min_dwell_sec is not None and min_dwell_sec > 0:
         apply_minimum_dwell_time(results, min_dwell_sec)
 
-    # Compute transition counts (ambient<->focal) over past 60s
+    # Compute transition counts (ambient<->focal) over past windows
     transition_counts = compute_transition_counts(results, window_sec=60.0)
+    transition_counts_30 = compute_transition_counts(results, window_sec=30.0)
+    transition_counts_10 = compute_transition_counts(results, window_sec=10.0)
+    transition_counts_5 = compute_transition_counts(results, window_sec=5.0)
+
+    def classify_transition_levels(counts: List[int], lower: float, upper: float) -> List[int]:
+        """
+        Normalize counts to 0..1 across the sequence, then map to 3-class labels:
+          <= u1 => 5 (Strong Focal, 낮은 전환)
+          <= u2 => 3 (Neutral)
+          >  u2 => 1 (Strong Ambient, 높은 전환)
+        """
+        if len(counts) == 0:
+            return []
+        min_c = min(counts)
+        max_c = max(counts)
+        denom = max_c - min_c
+        labels = []
+        for c in counts:
+            norm = 0.0 if denom == 0 else (c - min_c) / denom
+            if norm >= upper:           # 높은 전환: ambient
+                labels.append(1)
+            elif norm >= lower:         # 중간 전환: neutral (u1 <= norm < u2)
+                labels.append(3)
+            else:                       # 낮은 전환: focal
+                labels.append(5)
+        return labels
+
+    attn_t60 = classify_transition_levels(transition_counts, u1, u2)
+    attn_t30 = classify_transition_levels(transition_counts_30, u1, u2)
+    attn_t10 = classify_transition_levels(transition_counts_10, u1, u2)
+    attn_t5 = classify_transition_levels(transition_counts_5, u1, u2)
+
     for i, res in enumerate(results):
         res['transitions_last60s'] = transition_counts[i]
+        res['transitions_last30s'] = transition_counts_30[i]
+        res['transitions_last10s'] = transition_counts_10[i]
+        res['transitions_last5s'] = transition_counts_5[i]
+        if attn_t60:
+            res['attention_level_t60'] = attn_t60[i]
+        if attn_t30:
+            res['attention_level_t30'] = attn_t30[i]
+        if attn_t10:
+            res['attention_level_t10'] = attn_t10[i]
+        if attn_t5:
+            res['attention_level_t5'] = attn_t5[i]
 
     return results
 
@@ -756,6 +823,11 @@ def main():
         type=str,
         required=True,
         help='Base directory containing eyetracker data'
+    )
+    parser.add_argument(
+        '--recursive',
+        action='store_true',
+        help='Treat --path as a parent containing multiple case folders (find camera/ and eyetracker/ inside)'
     )
     parser.add_argument(
         '--time-reference',
@@ -786,6 +858,25 @@ def main():
         type=float,
         default=1.5,
         help='Second threshold for attention level classification (strong attention boundary, default: 1.5)'
+    )
+    parser.add_argument(
+        '--k-smooth-alpha',
+        type=float,
+        default=None,
+        dest='k_smooth_alpha',
+        help='EWMA smoothing alpha for attention classification (default: 1.0; set 1.0 for no additional smoothing)'
+    )
+    parser.add_argument(
+        '--u1',
+        type=float,
+        default=None,
+        help='Lower threshold (0..1) for transition-based attention classification (default: 0.33)'
+    )
+    parser.add_argument(
+        '--u2',
+        type=float,
+        default=None,
+        help='Upper threshold (0..1) for transition-based attention classification (default: 0.66)'
     )
     parser.add_argument(
         '--min-dwell',
@@ -858,10 +949,22 @@ def main():
             print(f"  1=Strong Ambient, 2=Weak Ambient, 3=Neutral, 4=Weak Focal, 5=Strong Focal")
         if getattr(args, 'min_dwell', None) is not None:
             print(f"Applying minimum dwell time filter: {args.min_dwell} seconds")
+        k_smooth_alpha = args.k_smooth_alpha if args.k_smooth_alpha is not None else 1.0
+        print(f"k_smooth EWMA alpha: {k_smooth_alpha}")
+        u1 = args.u1 if args.u1 is not None else 0.33
+        u2 = args.u2 if args.u2 is not None else 0.66
+        if not (0.0 <= u1 <= 1.0 and 0.0 <= u2 <= 1.0):
+            raise ValueError("u1 and u2 must be in the range [0, 1].")
+        if u1 > u2:
+            raise ValueError("u1 must be <= u2.")
+        print(f"Transition thresholds: u1={u1}, u2={u2} (normalized 0..1 scale)")
         results = match_timestamps_to_fixations_and_saccades(
             time_references, fixations, saccades, args.window_size, args.k1, args.k2,
             min_dwell_sec=getattr(args, 'min_dwell', None),
-            num_classes=args.num_classes
+            num_classes=args.num_classes,
+            k_smooth_alpha=k_smooth_alpha,
+            u1=u1,
+            u2=u2,
         )
 
         # Count matches
@@ -883,9 +986,15 @@ def main():
         print(f"\nSaving results to {output_path}...")
 
         with open(output_path, 'w', newline='') as f:
-            fieldnames = ['timestamp', 'fixation_id', 'saccade_id', 'saccade_amplitude_deg',
-                         'k_coefficient_rolling', 'k_coefficient_ewma', 'k_coefficient_mad',
-                         'attention_level', 'transitions_last60s']
+            fieldnames = [
+                'timestamp', 'fixation_id', 'saccade_id', 'saccade_amplitude_deg',
+                'k_coefficient_rolling', 'k_coefficient_ewma', 'k_coefficient_mad',
+                'attention_level',
+                'transitions_last60s', 'transitions_last30s',
+                'transitions_last10s', 'transitions_last5s',
+                'attention_level_t60', 'attention_level_t30',
+                'attention_level_t10', 'attention_level_t5'
+            ]
             writer = csv.DictWriter(f, fieldnames=fieldnames)
 
             writer.writeheader()
@@ -930,6 +1039,28 @@ def main():
             print(f"  Level 3 (Neutral):           {level_counts[3]:4d} ({level_counts[3]/total_with_level*100:5.1f}%)")
             print(f"  Level 4 (Weak Focal):        {level_counts[4]:4d} ({level_counts[4]/total_with_level*100:5.1f}%)")
             print(f"  Level 5 (Strong Focal):      {level_counts[5]:4d} ({level_counts[5]/total_with_level*100:5.1f}%)")
+
+        # Transition-based attention distribution (3-class: 1/3/5)
+        def print_transition_distribution(values, label):
+            if not values:
+                return
+            counts = {1: 0, 3: 0, 5: 0}
+            for v in values:
+                counts[v] = counts.get(v, 0) + 1
+            total = len(values)
+            print(f"\nAttention Level (Transition) Distribution {label} (u1={u1}, u2={u2}):")
+            print(f"  Level 1 (Strong Ambient):    {counts[1]:4d} ({counts[1]/total*100:5.1f}%)")
+            print(f"  Level 3 (Neutral):           {counts[3]:4d} ({counts[3]/total*100:5.1f}%)")
+            print(f"  Level 5 (Strong Focal):      {counts[5]:4d} ({counts[5]/total*100:5.1f}%)")
+
+        attn_t60 = [r['attention_level_t60'] for r in results if 'attention_level_t60' in r]
+        attn_t30 = [r['attention_level_t30'] for r in results if 'attention_level_t30' in r]
+        attn_t10 = [r['attention_level_t10'] for r in results if 'attention_level_t10' in r]
+        attn_t5 = [r['attention_level_t5'] for r in results if 'attention_level_t5' in r]
+        print_transition_distribution(attn_t60, "(60s)")
+        print_transition_distribution(attn_t30, "(30s)")
+        print_transition_distribution(attn_t10, "(10s)")
+        print_transition_distribution(attn_t5, "(5s)")
 
         if k_coeffs_rolling:
             print(f"\nK coefficient statistics (Rolling Z-score):")

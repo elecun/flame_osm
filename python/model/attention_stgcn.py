@@ -276,6 +276,7 @@ class AttentionSTGCN(nn.Module):
 
         self.config = config
         model_cfg = config['model']
+        self.num_classes = model_cfg.get('num_classes', 5)
 
         # Get feature configuration
         feature_config = config['data'].get('features', {})
@@ -309,12 +310,12 @@ class AttentionSTGCN(nn.Module):
 
         # Create adjacency matrices
         if self.use_body and body_features > 0:
-            self.body_adj = create_body_adjacency()
+            self.body_adj = create_body_adjacency(self.num_body_nodes)
         else:
             self.body_adj = None
 
         if self.use_face_2d and face_2d_features > 0:
-            self.face_adj = create_face_adjacency()
+            self.face_adj = create_face_adjacency(self.num_face_nodes)
         else:
             self.face_adj = None
 
@@ -405,7 +406,7 @@ class AttentionSTGCN(nn.Module):
             nn.Linear(hidden_channels * 2, hidden_channels),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_channels, 5)  # 5 classes
+            nn.Linear(hidden_channels, self.num_classes)
         )
 
     def forward(self, body_kps, face_kps_2d, head_pose):
@@ -415,7 +416,7 @@ class AttentionSTGCN(nn.Module):
             face_kps_2d: (batch_size, sequence_length, num_face_nodes * 2) or None
             head_pose: (batch_size, sequence_length, head_pose_features) or None
         Returns:
-            logits: (batch_size, 5) - logits for 5 attention classes
+            logits: (batch_size, num_classes) - logits for attention classes
         """
         features_list = []
 

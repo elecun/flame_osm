@@ -12,8 +12,10 @@ Features
 import argparse
 import json
 import os
+from copy import deepcopy
 from pathlib import Path
 from typing import Dict, Any
+import numpy as np
 
 import torch
 import torch.nn as nn
@@ -31,6 +33,7 @@ import matplotlib.pyplot as plt
 
 from dataset import create_data_loaders
 from multi_stream_stgcn import MultiStreamSTGCN, DEFAULT_STREAM_CONFIGS
+from multi_stream_stgcn_xattn import MultiStreamSTGCNXAttn
 
 
 def load_config(config_path: Path) -> Dict[str, Any]:
@@ -72,13 +75,13 @@ def merge_stream_configs(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return enabled_streams
 
 
-def create_loss_fn(loss_cfg: Dict[str, Any], class_weights: torch.Tensor | None, device: torch.device):
+def create_loss_fn(loss_cfg: Dict[str, Any], class_weights: torch.Tensor | None, device: torch.device, reduction: str = "mean"):
     name = loss_cfg.get("name", "cross_entropy")
     name = name.lower()
     weight = class_weights.to(device) if class_weights is not None else None
 
     if name == "cross_entropy":
-        return nn.CrossEntropyLoss(weight=weight)
+        return nn.CrossEntropyLoss(weight=weight, reduction=reduction)
 
     if name == "focal":
         focal_cfg = loss_cfg.get("focal", {})
@@ -88,12 +91,12 @@ def create_loss_fn(loss_cfg: Dict[str, Any], class_weights: torch.Tensor | None,
             alpha = weight
         else:
             alpha = torch.tensor(alpha_cfg, device=device, dtype=torch.float32)
-        return FocalLoss(gamma=gamma, alpha=alpha)
+        return FocalLoss(gamma=gamma, alpha=alpha, reduction=reduction)
 
     if name == "ls_cross_entropy":
         ls_cfg = loss_cfg.get("ls_cross_entropy", {})
         smoothing = float(ls_cfg.get("smoothing", 0.1))
-        return nn.CrossEntropyLoss(weight=weight, label_smoothing=smoothing)
+        return nn.CrossEntropyLoss(weight=weight, label_smoothing=smoothing, reduction=reduction)
 
     if name == "triplet":
         triplet_cfg = loss_cfg.get("triplet", {})
@@ -101,6 +104,30 @@ def create_loss_fn(loss_cfg: Dict[str, Any], class_weights: torch.Tensor | None,
         return TripletLossWrapper(margin=margin)
 
     raise ValueError(f"Unsupported loss name: {name}")
+
+
+def create_scheduler(optimizer: optim.Optimizer, scheduler_cfg: Dict[str, Any], rank: int):
+    if not scheduler_cfg:
+        return None
+
+    name = scheduler_cfg.get("name") if isinstance(scheduler_cfg, dict) else None
+    if name is None or str(name).lower() in ["none", ""]:
+        return None
+
+    name = str(name).lower()
+    if name == "reduce_on_plateau":
+        roc = scheduler_cfg.get("reduce_on_plateau", {})
+        return optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            factor=float(roc.get("factor", 0.5)),
+            patience=int(roc.get("patience", 5)),
+            threshold=float(roc.get("threshold", 1e-4)),
+            cooldown=int(roc.get("cooldown", 0)),
+            min_lr=float(roc.get("min_lr", 1e-6)),
+        )
+
+    raise ValueError(f"Unsupported scheduler name: {name}")
 
 
 def plot_learning_curves(
@@ -111,6 +138,7 @@ def plot_learning_curves(
     learning_rates,
     val_interval,
     checkpoint_dir: Path,
+    fold_idx=None,
 ):
     if len(train_losses) == 0:
         return
@@ -147,7 +175,8 @@ def plot_learning_curves(
     axes[2].grid(True, alpha=0.3)
 
     plt.tight_layout()
-    curve_path = checkpoint_dir / "learning_curves.png"
+    suffix = f"_fold_{fold_idx}" if fold_idx is not None else ""
+    curve_path = checkpoint_dir / f"learning_curves{suffix}.png"
     plt.savefig(curve_path)
     plt.close()
     print(f"Saved learning curves (loss/acc/lr) to {curve_path}")
@@ -162,6 +191,8 @@ def ensure_defaults(cfg: Dict[str, Any]) -> Dict[str, Any]:
     cfg["data"].setdefault("normalize", True)
     cfg["data"].setdefault("num_workers", 4)
     cfg["data"].setdefault("shuffle", True)
+    cfg["data"].setdefault("label_column", "attention_level")
+    cfg["data"].setdefault("valid_mask_columns", [])
     cfg["data"].setdefault(
         "features",
         {
@@ -180,12 +211,6 @@ def ensure_defaults(cfg: Dict[str, Any]) -> Dict[str, Any]:
                 "right_elbow_",
                 "left_wrist_",
                 "right_wrist_",
-                "left_hip_",
-                "right_hip_",
-                "left_knee_",
-                "right_knee_",
-                "left_ankle_",
-                "right_ankle_",
             ],
             "face_2d_pattern": "landmark_.*_2d",
             "head_pose_cols": [
@@ -209,6 +234,19 @@ def ensure_defaults(cfg: Dict[str, Any]) -> Dict[str, Any]:
     cfg["training"].setdefault("grad_clip", 1.0)
     cfg["training"].setdefault("checkpoint_dir", "checkpoints")
     cfg["training"].setdefault(
+        "lr_scheduler",
+        {
+            "name": None,  # set to "reduce_on_plateau" to enable
+            "reduce_on_plateau": {
+                "factor": 0.5,
+                "patience": 5,
+                "threshold": 1e-4,
+                "min_lr": 1e-6,
+                "cooldown": 0,
+            },
+        },
+    )
+    cfg["training"].setdefault(
         "loss",
         {
             "name": "cross_entropy",
@@ -224,6 +262,15 @@ def ensure_defaults(cfg: Dict[str, Any]) -> Dict[str, Any]:
     cfg["model"].setdefault("num_gcn_layers", 3)
     cfg["model"].setdefault("temporal_kernel_size", 9)
     cfg["model"].setdefault("dropout", 0.3)
+    cfg["model"].setdefault(
+        "cross_attention",
+        {
+            "enabled": False,
+            "d_model": 128,
+            "num_heads": 4,
+            "dropout": 0.1,
+        },
+    )
 
     return cfg
 
@@ -241,6 +288,46 @@ def align_feature_flags_with_streams(config: Dict[str, Any], stream_configs: Dic
 
     for stream_name, flag_name in stream_to_feature_flag.items():
         features_cfg[flag_name] = stream_name in stream_configs
+
+
+def verify_attention_values(loader: DataLoader, num_classes: int, split_name: str, rank: int = 0):
+    """
+    Sanity check for attention labels to avoid CUDA scatter/gather OOB errors.
+    Expects loader.dataset.attention in 0..num_classes-1 after preprocessing.
+    """
+    ds = getattr(loader, "dataset", None)
+    if ds is None or not hasattr(ds, "attention"):
+        return
+    att = np.array(ds.attention)
+    if att.size == 0:
+        return
+    att_min = att.min()
+    att_max = att.max()
+    if att_min < 0 or att_max >= num_classes:
+        bad_idx = np.where((att < 0) | (att >= num_classes))[0][:5]
+        if rank == 0:
+            raise ValueError(
+                f"[{split_name}] attention_level out of range. "
+                f"min={att_min}, max={att_max}, expected 0..{num_classes-1}. "
+                f"Bad indices sample: {bad_idx}"
+            )
+
+
+def ensure_targets_fit_logits(logits: torch.Tensor, targets: torch.Tensor, split: str):
+    """
+    Ensure classification targets are within the logits class dimension to avoid CUDA OOB assertions.
+    """
+    if logits.ndim < 2 or logits.shape[1] == 0 or targets.numel() == 0:
+        return
+    num_classes = logits.shape[1]
+    t_min = int(targets.min().item())
+    t_max = int(targets.max().item())
+    if t_min < 0 or t_max >= num_classes:
+        raise ValueError(
+            f"[{split}] attention_level out of range for model output. "
+            f"min={t_min}, max={t_max}, classes={num_classes}. "
+            "Check config.model.num_classes or label preprocessing."
+        )
 
 
 def to_device(batch: Dict[str, torch.Tensor], device: torch.device) -> Dict[str, torch.Tensor]:
@@ -293,6 +380,7 @@ class FocalLoss(nn.Module):
 
         focal_weight = (1 - gather_prob) ** self.gamma
         loss = -alpha_factor * focal_weight * gather_log
+        loss = loss.view(-1)
         if self.reduction == "mean":
             return loss.mean()
         if self.reduction == "sum":
@@ -341,11 +429,11 @@ class TripletLossWrapper(nn.Module):
         return torch.stack(anchors), torch.stack(positives), torch.stack(negatives)
 
 
-def train_one_epoch(model, loader, criterion, optimizer, device, grad_clip=None, distributed=False):
+def train_one_epoch(model, loader, criterion, optimizer, device, grad_clip=None, distributed=False, use_mask=False):
     model.train()
     running_loss = 0.0
-    correct = 0
-    total = 0
+    total_weight = 0.0
+    correct = 0.0
     batch_count = 0
 
     for batch in tqdm(loader, desc="Train"):
@@ -353,7 +441,29 @@ def train_one_epoch(model, loader, criterion, optimizer, device, grad_clip=None,
 
         optimizer.zero_grad()
         outputs = model(batch.get("body_kps"), batch.get("face_kps_2d"), batch.get("head_pose"))
-        loss = criterion(outputs, batch["attention_level"])
+        ensure_targets_fit_logits(outputs, batch["attention_level"], split="train")
+        if use_mask:
+            mask = batch.get("sample_mask", None)
+            if mask is None:
+                mask = torch.ones_like(batch["attention_level"], dtype=torch.float32, device=device)
+            else:
+                mask = mask.to(device).float()
+            losses = criterion(outputs, batch["attention_level"])
+            if losses.dim() > 1:
+                losses = losses.view(-1)
+            weighted = losses * mask
+            weight_sum = mask.sum().clamp(min=1.0)
+            loss = weighted.sum() / weight_sum
+            running_loss += weighted.sum().item()
+            total_weight += mask.sum().item()
+            _, preds = torch.max(outputs, 1)
+            correct += ((preds == batch["attention_level"]) * mask).sum().item()
+        else:
+            loss = criterion(outputs, batch["attention_level"])
+            running_loss += loss.item()
+            _, preds = torch.max(outputs, 1)
+            correct += (preds == batch["attention_level"]).sum().item()
+            total_weight += batch["attention_level"].size(0)
         loss.backward()
 
         if grad_clip is not None and grad_clip > 0:
@@ -361,52 +471,117 @@ def train_one_epoch(model, loader, criterion, optimizer, device, grad_clip=None,
 
         optimizer.step()
 
-        running_loss += loss.item()
-        _, preds = torch.max(outputs, 1)
-        total += batch["attention_level"].size(0)
-        correct += (preds == batch["attention_level"]).sum().item()
         batch_count += 1
 
     if distributed:
         stats = torch.tensor(
-            [running_loss, correct, total, batch_count], device=device, dtype=torch.float64
+            [running_loss, correct, total_weight, batch_count], device=device, dtype=torch.float64
         )
         dist.all_reduce(stats, op=dist.ReduceOp.SUM)
-        running_loss, correct, total, batch_count = stats.tolist()
+        running_loss, correct, total_weight, batch_count = stats.tolist()
 
-    avg_loss = running_loss / max(1, batch_count)
-    acc = 100.0 * correct / max(1, total)
+    avg_loss = running_loss / max(1.0, total_weight if use_mask else batch_count)
+    acc = 100.0 * correct / max(1.0, total_weight)
     return avg_loss, acc
 
 
-def validate(model, loader, criterion, device, distributed=False):
+def validate(model, loader, criterion, device, distributed=False, num_classes=None, return_stats=False, use_mask=False):
     model.eval()
     running_loss = 0.0
-    correct = 0
-    total = 0
+    total_weight = 0.0
+    correct = 0.0
+    conf_mat = None
+    if return_stats and num_classes is not None:
+        conf_mat = torch.zeros((num_classes, num_classes), device=device, dtype=torch.float64)
 
     with torch.no_grad():
         for batch in tqdm(loader, desc="Val"):
             batch = to_device(batch, device)
             outputs = model(batch.get("body_kps"), batch.get("face_kps_2d"), batch.get("head_pose"))
-            loss = criterion(outputs, batch["attention_level"])
-            running_loss += loss.item()
-            _, preds = torch.max(outputs, 1)
-            total += batch["attention_level"].size(0)
-            correct += (preds == batch["attention_level"]).sum().item()
+            ensure_targets_fit_logits(outputs, batch["attention_level"], split="val")
+            if use_mask:
+                mask = batch.get("sample_mask", None)
+                if mask is None:
+                    mask = torch.ones_like(batch["attention_level"], dtype=torch.float32, device=device)
+                else:
+                    mask = mask.to(device).float()
+                losses = criterion(outputs, batch["attention_level"])
+                if losses.dim() > 1:
+                    losses = losses.view(-1)
+                weighted = losses * mask
+                running_loss += weighted.sum().item()
+                total_weight += mask.sum().item()
+                _, preds = torch.max(outputs, 1)
+                correct += ((preds == batch["attention_level"]) * mask).sum().item()
+            else:
+                loss = criterion(outputs, batch["attention_level"])
+                running_loss += loss.item()
+                _, preds = torch.max(outputs, 1)
+                total_weight += batch["attention_level"].size(0)
+                correct += (preds == batch["attention_level"]).sum().item()
+            if conf_mat is not None:
+                if use_mask:
+                    for t, p, m in zip(batch["attention_level"].view(-1), preds.view(-1), mask.view(-1)):
+                        if m > 0.5:
+                            conf_mat[t, p] += 1
+                else:
+                    for t, p in zip(batch["attention_level"].view(-1), preds.view(-1)):
+                        conf_mat[t, p] += 1
 
     if distributed:
-        stats = torch.tensor(
-            [running_loss, correct, total, len(loader)], device=device, dtype=torch.float64
-        )
+        stats = torch.tensor([running_loss, correct, total_weight, len(loader)], device=device, dtype=torch.float64)
         dist.all_reduce(stats, op=dist.ReduceOp.SUM)
-        running_loss, correct, total, batches = stats.tolist()
+        running_loss, correct, total_weight, batches = stats.tolist()
+        if conf_mat is not None:
+            dist.all_reduce(conf_mat, op=dist.ReduceOp.SUM)
     else:
         batches = len(loader)
 
-    avg_loss = running_loss / max(1, batches)
-    acc = 100.0 * correct / max(1, total)
-    return avg_loss, acc
+    avg_loss = running_loss / max(1.0, total_weight if use_mask else batches)
+    acc = 100.0 * correct / max(1.0, total_weight)
+    if conf_mat is None:
+        return avg_loss, acc
+
+    diag = conf_mat.diag()
+    total = conf_mat.sum()
+    tp_per_class = diag
+    fp_per_class = conf_mat.sum(dim=0) - diag
+    fn_per_class = conf_mat.sum(dim=1) - diag
+    tn_per_class = total - (tp_per_class + fp_per_class + fn_per_class)
+
+    # Per-class precision/recall/F1 for aggregate metrics
+    precision_per_class = torch.zeros_like(tp_per_class)
+    recall_per_class = torch.zeros_like(tp_per_class)
+    f1_per_class = torch.zeros_like(tp_per_class)
+
+    prec_den = tp_per_class + fp_per_class
+    rec_den = tp_per_class + fn_per_class
+
+    valid_prec = prec_den > 0
+    valid_rec = rec_den > 0
+
+    precision_per_class[valid_prec] = tp_per_class[valid_prec] / prec_den[valid_prec]
+    recall_per_class[valid_rec] = tp_per_class[valid_rec] / rec_den[valid_rec]
+
+    pr_sum = precision_per_class + recall_per_class
+    valid_f1 = pr_sum > 0
+    f1_per_class[valid_f1] = 2 * precision_per_class[valid_f1] * recall_per_class[valid_f1] / pr_sum[valid_f1]
+
+    support = tp_per_class + fn_per_class
+    total_support = support.sum()
+    if total_support > 0:
+        weighted_f1 = (f1_per_class * support).sum().item() / total_support.item()
+    else:
+        weighted_f1 = 0.0
+
+    stats_out = {
+        "tp": tp_per_class.sum().item(),
+        "fp": fp_per_class.sum().item(),
+        "fn": fn_per_class.sum().item(),
+        "tn": tn_per_class.sum().item(),
+        "weighted_f1": weighted_f1,
+    }
+    return avg_loss, acc, stats_out
 
 
 def save_checkpoint(state, checkpoint_dir: Path, is_best: bool):
@@ -435,27 +610,37 @@ def run_training(rank, world_size, config, stream_configs, args):
         csv_path = config["data"]["csv_path"]
         if csv_path is None:
             raise ValueError("CSV path must be provided via --path or data.csv_path in config.")
-        train_loader, val_loader, _, _, feature_dims, class_weights = create_data_loaders(
+        train_loader, val_loader, _, _, feature_dims, class_weights, has_valid_mask = create_data_loaders(
             config, csv_path, rank=rank if distributed else None, world_size=world_size if distributed else None
         )
+        # Validate attention labels to prevent CUDA OOB assertions
+        num_classes = config["model"].get("num_classes", 5)
+        verify_attention_values(train_loader, num_classes, split_name="train", rank=rank)
+        verify_attention_values(val_loader, num_classes, split_name="val", rank=rank)
 
         if distributed:
             train_loader = ensure_distributed_sampler(train_loader, rank, world_size, shuffle=config["data"]["shuffle"])
             val_loader = ensure_distributed_sampler(val_loader, rank, world_size, shuffle=False)
 
         # Model
-        model = MultiStreamSTGCN(config, feature_dims=feature_dims, stream_configs=stream_configs).to(device)
+        if args.model == "xattn":
+            model = MultiStreamSTGCNXAttn(config, feature_dims=feature_dims, stream_configs=stream_configs).to(device)
+        else:
+            model = MultiStreamSTGCN(config, feature_dims=feature_dims, stream_configs=stream_configs).to(device)
         if distributed:
-            model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=False)
+            # xattn + disabled streams can leave some params unused; allow unused params to avoid DDP errors
+            model = DDP(model, device_ids=[rank], output_device=rank, find_unused_parameters=True)
 
         # Loss / Optimizer
         loss_cfg = config["training"].get("loss", {})
-        criterion = create_loss_fn(loss_cfg, class_weights, device)
+        reduction = "none" if has_valid_mask else "mean"
+        criterion = create_loss_fn(loss_cfg, class_weights, device, reduction=reduction)
         optimizer = optim.Adam(
             model.parameters(),
             lr=config["training"]["learning_rate"],
             weight_decay=config["training"]["weight_decay"],
         )
+        scheduler = create_scheduler(optimizer, config["training"].get("lr_scheduler", {}), rank)
 
         # Training loop
         best_val_loss = float("inf")
@@ -463,6 +648,8 @@ def run_training(rank, world_size, config, stream_configs, args):
         num_epochs = config["training"]["epochs"]
         grad_clip = config["training"].get("grad_clip", None)
         val_interval = max(1, int(config["training"].get("val_interval", 1)))
+        early_stop_patience = 10
+        no_improve_count = 0
 
         train_losses = []
         val_losses = []
@@ -477,16 +664,26 @@ def run_training(rank, world_size, config, stream_configs, args):
             if rank == 0 or not distributed:
                 print(f"\nEpoch {epoch}/{num_epochs}")
             train_loss, train_acc = train_one_epoch(
-                model, train_loader, criterion, optimizer, device, grad_clip, distributed=distributed
+                model, train_loader, criterion, optimizer, device, grad_clip, distributed=distributed, use_mask=has_valid_mask
             )
             if rank == 0 or not distributed:
                 print(f"  Train loss: {train_loss:.4f} | acc: {train_acc:.2f}%")
                 train_losses.append(train_loss)
                 train_accs.append(train_acc)
-                learning_rates.append(optimizer.param_groups[0]["lr"])
+
+            stop_flag = False
 
             if epoch % val_interval == 0:
-                val_loss, val_acc = validate(model, val_loader, criterion, device, distributed=distributed)
+                val_loss, val_acc, val_stats = validate(
+                    model,
+                    val_loader,
+                    criterion,
+                    device,
+                    distributed=distributed,
+                    num_classes=config["model"].get("num_classes", 5),
+                    return_stats=True,
+                    use_mask=has_valid_mask,
+                )
                 if rank == 0 or not distributed:
                     print(f"  Val   loss: {val_loss:.4f} | acc: {val_acc:.2f}%")
                     val_losses.append(val_loss)
@@ -495,16 +692,52 @@ def run_training(rank, world_size, config, stream_configs, args):
                     is_best = val_loss < best_val_loss
                     if is_best:
                         best_val_loss = val_loss
+                        no_improve_count = 0
+                    else:
+                        no_improve_count += 1
 
                     # Save checkpoint (best + latest)
                     state = {
                         "epoch": epoch,
                         "model_state": model.module.state_dict() if isinstance(model, DDP) else model.state_dict(),
                         "optimizer_state": optimizer.state_dict(),
+                        "scheduler_state": scheduler.state_dict() if scheduler is not None else None,
                         "best_val_loss": best_val_loss,
                         "config": config,
                     }
                     save_checkpoint(state, checkpoint_dir, is_best=is_best)
+                    if is_best:
+                        fold_idx = config["training"].get("current_fold", 0)
+                        acc_path = checkpoint_dir / f"accuracy_fold_{fold_idx}.txt"
+                        with open(acc_path, "w") as f:
+                            f.write(
+                                f"val_accuracy: {val_acc:.4f}\n"
+                                f"weighted_f1: {val_stats.get('weighted_f1', 0):.4f}\n"
+                                "\n"
+                                f"true_positive: {val_stats.get('tp', 0):.0f}\n"
+                                f"false_positive: {val_stats.get('fp', 0):.0f}\n"
+                                f"false_negative: {val_stats.get('fn', 0):.0f}\n"
+                                f"true_negative: {val_stats.get('tn', 0):.0f}\n"
+                            )
+                        print(f"Saved accuracy stats to {acc_path}")
+
+                # Step LR scheduler on validation metric
+                if scheduler is not None:
+                    scheduler.step(val_loss)
+
+                if args.early_stop and no_improve_count >= early_stop_patience:
+                    stop_flag = True
+                    if rank == 0 or not distributed:
+                        print(f"[EARLY STOP] No val loss improvement for {early_stop_patience} validation steps. Stopping.")
+
+            if distributed:
+                stop_tensor = torch.tensor([1 if stop_flag else 0], device=device)
+                dist.broadcast(stop_tensor, src=0)
+                stop_flag = bool(stop_tensor.item())
+
+            # Track LR after potential scheduler step
+            if rank == 0 or not distributed:
+                learning_rates.append(optimizer.param_groups[0]["lr"])
 
             if rank == 0 or not distributed:
                 plot_learning_curves(
@@ -515,7 +748,11 @@ def run_training(rank, world_size, config, stream_configs, args):
                     learning_rates,
                     val_interval,
                     checkpoint_dir,
+                    fold_idx=config["training"].get("current_fold", None),
                 )
+
+            if stop_flag:
+                break
 
         # Plot learning curves (rank 0 only)
         if (rank == 0 or not distributed) and len(train_losses) > 0:
@@ -527,6 +764,7 @@ def run_training(rank, world_size, config, stream_configs, args):
                 learning_rates,
                 val_interval,
                 checkpoint_dir,
+                fold_idx=config["training"].get("current_fold", None),
             )
     finally:
         if distributed:
@@ -538,34 +776,86 @@ def main():
     parser.add_argument("--config", type=str, default="config.json", help="Path to config JSON")
     parser.add_argument("--gpus", type=int, default=1, help="Number of GPUs to use (>=2 enables DDP)")
     parser.add_argument("--path", type=str, default=None, help="Path to training CSV file or directory containing CSV files")
+    parser.add_argument(
+        "--gt",
+        type=str,
+        default=None,
+        help="Ground-truth column to use for labels (default: attention_level). Example: attention_level_t30",
+    )
+    parser.add_argument(
+        "--multi",
+        action="store_true",
+        help="Treat --path as a directory containing multiple case folders to load.",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="base",
+        choices=["base", "xattn"],
+        help="Model type: base (MultiStreamSTGCN) or xattn (cross-stream attention)",
+    )
     parser.add_argument("--filter", action="store_true", help="Apply Gaussian filtering to input features")
     parser.add_argument("--filter-sigma", type=float, default=None, help="Override Gaussian filter sigma")
+    parser.add_argument(
+        "--fold-loop",
+        type=int,
+        default=None,
+        help="Run n folds sequentially (overrides training.current_fold). Example: --fold-loop 5",
+    )
+    parser.add_argument(
+        "--early-stop",
+        action="store_true",
+        help="Enable early stopping: stop if val loss does not improve for 10 validation steps",
+    )
     args = parser.parse_args()
 
     config_path = Path(args.config)
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
-    config = ensure_defaults(load_config(config_path))
+    base_config = ensure_defaults(load_config(config_path))
     if args.path is not None:
-        config["data"]["csv_path"] = args.path
+        if args.multi:
+            case_root = Path(args.path)
+            if not case_root.exists() or not case_root.is_dir():
+                raise ValueError(f"--multi expects a directory path, got: {case_root}")
+            case_dirs = sorted([p for p in case_root.iterdir() if p.is_dir()])
+            if not case_dirs:
+                raise ValueError(f"No case directories found under: {case_root}")
+            base_config["data"]["csv_path"] = [str(p) for p in case_dirs]
+        else:
+            base_config["data"]["csv_path"] = args.path
+    if args.gt is not None:
+        base_config.setdefault("data", {})["label_column"] = args.gt
 
     if args.filter:
-        config["data"]["filter"]["enabled"] = True
+        base_config["data"]["filter"]["enabled"] = True
     if args.filter_sigma is not None:
-        config["data"]["filter"]["sigma"] = args.filter_sigma
+        base_config["data"]["filter"]["sigma"] = args.filter_sigma
 
-    stream_configs = merge_stream_configs(config)
-    align_feature_flags_with_streams(config, stream_configs)
+    total_folds = args.fold_loop if args.fold_loop is not None else 1
+    fold_indices = (
+        list(range(total_folds))
+        if args.fold_loop is not None
+        else [base_config["training"].get("current_fold", 0)]
+    )
 
-    # Decide on GPU usage and distributed setup
-    if torch.cuda.is_available() and args.gpus > 1:
-        world_size = min(args.gpus, torch.cuda.device_count())
-        print(f"Using DDP with {world_size} GPUs")
-        mp.spawn(run_training, args=(world_size, config, stream_configs, args), nprocs=world_size, join=True)
-    else:
-        print("Using single process (CPU or single GPU)")
-        run_training(rank=0, world_size=1, config=config, stream_configs=stream_configs, args=args)
+    for fold_idx in fold_indices:
+        config = deepcopy(base_config)
+        config["training"]["current_fold"] = fold_idx
+        stream_configs = merge_stream_configs(config)
+        align_feature_flags_with_streams(config, stream_configs)
+
+        print(f"\n==== Running fold {fold_idx} ====")
+
+        # Decide on GPU usage and distributed setup
+        if torch.cuda.is_available() and args.gpus > 1:
+            world_size = min(args.gpus, torch.cuda.device_count())
+            print(f"Using DDP with {world_size} GPUs")
+            mp.spawn(run_training, args=(world_size, config, stream_configs, args), nprocs=world_size, join=True)
+        else:
+            print("Using single process (CPU or single GPU)")
+            run_training(rank=0, world_size=1, config=config, stream_configs=stream_configs, args=args)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@
     "normalize": true,
     "num_workers": 4,
     "shuffle": true,
+    "valid_mask_columns": ["face_kps_dense_6_valid_mask", "head_pose_6_valid_mask"],
     "features": {
       "use_body_kps": true,
       "use_face_kps_2d": true,
@@ -20,13 +21,7 @@
         "left_elbow_",
         "right_elbow_",
         "left_wrist_",
-        "right_wrist_",
-        "left_hip_",
-        "right_hip_",
-        "left_knee_",
-        "right_knee_",
-        "left_ankle_",
-        "right_ankle_"
+        "right_wrist_"
       ],
       "face_2d_pattern": "landmark_\\d+_[xy]$",
       "head_pose_cols": [
@@ -36,7 +31,7 @@
       ]
     },
     "filter": {
-      "enabled": true,
+      "enabled": false,
       "sigma": 1.0
     }
   },
@@ -45,12 +40,22 @@
     "batch_size": 32,
     "learning_rate": 0.001,
     "weight_decay": 0.0001,
-    "sequence_length": 90,
+    "sequence_length": 30,
     "n_folds": 5,
     "current_fold": 0,
     "val_interval": 1,
     "grad_clip": 1.0,
     "checkpoint_dir": "checkpoints",
+    "lr_scheduler": {
+      "name": "reduce_on_plateau",
+      "reduce_on_plateau": {
+        "factor": 0.5,
+        "patience": 5,
+        "threshold": 0.0001,
+        "min_lr": 1e-06,
+        "cooldown": 0
+      }
+    },
     "loss": {
       "name": "focal",
       "focal": {
@@ -70,7 +75,13 @@
     "hidden_channels": 64,
     "num_gcn_layers": 3,
     "temporal_kernel_size": 9,
-    "dropout": 0.3
+    "dropout": 0.3,
+    "cross_attention": {
+      "enabled": true,
+      "d_model": 128,
+      "num_heads": 4,
+      "dropout": 0.2
+    }
   },
   "streams": [
     {
@@ -79,7 +90,7 @@
       "column_pattern": "landmark_\\d+_[xy]$",
       "num_nodes": 468,
       "in_channels": 2,
-      "adjacency_type": "sequential"
+      "adjacency_type": "face"
     },
     {
       "name": "head_pose",
