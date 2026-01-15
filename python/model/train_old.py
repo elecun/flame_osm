@@ -370,7 +370,7 @@ def train_model(config, csv_file, device='cuda', fold_idx=None, rank=None, world
     # Create data loaders
     if is_main:
         print("Creating data loaders...")
-    train_loader, val_loader, test_loader, scaler, feature_dims, class_weights = create_data_loaders(
+    train_loader, val_loader, test_loader, scaler, feature_dims, class_weights, _ = create_data_loaders(
         config, csv_file, fold_idx, rank, world_size
     )
 
