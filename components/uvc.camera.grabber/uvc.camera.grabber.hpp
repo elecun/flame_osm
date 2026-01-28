@@ -28,7 +28,7 @@ class uvc_camera_grabber : public flame::component::object {
         bool on_init() override;
         void on_loop() override;
         void on_close() override;
-        void on_message(const message_t& msg) override;
+        void on_message(const flame::component::message_t& msg) override;
 
     private:
         /* grabber tasks */
@@ -45,7 +45,10 @@ class uvc_camera_grabber : public flame::component::object {
         atomic<bool> _worker_stop { false };
         atomic<bool> _use_image_stream_monitoring { false };
         atomic<bool> _use_image_stream { false };
-        
+        atomic<double> _rotation_cw { 0.0 };
+        mutex _calibration_mtx;
+        cv::Mat _map1, _map2;
+        atomic<bool> _use_undistortion { false };
 
 }; /* class */
 

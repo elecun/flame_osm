@@ -62,7 +62,7 @@ else ifeq ($(ARCH), aarch64)
 
 else
 	# x86_64 (Default)
-	INCLUDE_DIR = $(INCLUDE_BASE) -I$(FLAME_PATH)/include -I$(FLAME_PATH)/include/dep -I/usr/local/include -I/usr/include/opencv4 -I/usr/local/cuda/include
+	INCLUDE_DIR = $(INCLUDE_BASE) -I$(FLAME_PATH)/include -I$(FLAME_PATH)/include/dep -I$(FLAME_PATH)/include/dep/libzmq -I/usr/local/include -I/usr/include/opencv4 -I/usr/local/cuda/include
 	LIBDIR = -L/usr/local/lib -L$(FLAME_PATH)/lib/x86_64/ -L/usr/lib/x86-64-linux-gnu -L/usr/local/cuda/lib64
 endif
 

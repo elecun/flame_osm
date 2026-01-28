@@ -41,6 +41,43 @@ bool uvc_camera_grabber::on_init(){
         /* configure data for data pipelining  */
         _use_image_stream_monitoring.store(parameters.value("use_image_stream_monitoring", false));
         _use_image_stream.store(parameters.value("use_image_stream", false));
+        _rotation_cw.store(parameters.value("rotation_cw", 0.0));
+        _worker_stop.store(false);
+
+        /* load calibration data */
+        if(parameters.contains("calibration")){
+            json calib = parameters["calibration"];
+            if(calib.contains("focal_length") && calib.contains("principal_point") && calib.contains("distortion")){
+                vector<double> f = calib["focal_length"];
+                vector<double> c = calib["principal_point"];
+                vector<double> d = calib["distortion"];
+                
+                if(f.size()>=2 && c.size()>=2 && d.size()>=4){
+                    cv::Mat K = cv::Mat::eye(3, 3, CV_64F);
+                    K.at<double>(0,0) = f[0]; K.at<double>(1,1) = f[1];
+                    K.at<double>(0,2) = c[0]; K.at<double>(1,2) = c[1];
+                    
+                    cv::Mat D = cv::Mat::zeros(1, 5, CV_64F); // Assume at least 4 coeffs, support up to 5 standard
+                    for(size_t i=0; i<d.size() && i<5; ++i) D.at<double>(0,i) = d[i];
+
+                    /* pre-compute undistort maps (will initialize size later once resolution is known or assume port resolution) */
+                    // Wait.. we need image resolution to init maps. 
+                    // Since resolution might depend on camera, we can defer map init or do it if we know resolution.
+                    // Let's assume resolution from dataport or first frame. 
+                    // Better approach: In _grab_task, check if maps are empty and init them once.
+                    // So here we store K and D, or just rely on parameters access in _grab_task? 
+                    // Storing K and D in member might be cleaner but thread safety?
+                    // Let's parse here but compute maps in _grab_task to be safe with image size.
+                    // Actually, simpler: Just enable flags here and parse in task or helper.
+                    // Given the structure, parsing in on_init and storing locally to transfer to task or member variables is best.
+                    // Let's just set the flag here and parse K/D inside the task or valid place.
+                    // Actually, K and D are specific to camera. If multiple cameras, we need a map of K/D.
+                    // The current json has "calibration" at root, implying one calibration for the component (likely single camera case).
+                    // We will parse it into members (protected by mutex if needed or just read-only after init).
+                    _use_undistortion.store(true);
+                }
+            }
+        }
     }
     catch(json::exception& e){
         logger::error("[{}] Component profile read exception : {}", get_name(), e.what());
@@ -76,7 +113,7 @@ void uvc_camera_grabber::on_close(){
 
 }
 
-void uvc_camera_grabber::on_message(const message_t& msg){
+void uvc_camera_grabber::on_message(const flame::component::message_t& msg){
     // Note: The 'msg' parameter is currently unused.
 }
 
@@ -96,7 +133,8 @@ void uvc_camera_grabber::_grab_task(int camera_id, json camera_param){
         _cap.open(device, CAP_V4L2); /* for linux only */
         _cap.set(cv::CAP_PROP_BUFFERSIZE, 1);
         if(!_cap.isOpened()){
-            CV_Error(cv::Error::StsError, fmt::format("Camera #{} cannot be opened.", camera_id));
+            logger::error("[{}] Camera #{} cannot be opened.", get_name(), camera_id);
+            return;
         }
 
         /* read port configurations */
@@ -104,20 +142,77 @@ void uvc_camera_grabber::_grab_task(int camera_id, json camera_param){
         string stream_portname = fmt::format("image_stream_{}", camera_id);
 
         json dataport_config = get_profile()->dataport();
-        int monitoring_width = dataport_config.at(monitoring_portname).at("resolution").value("width", 480);
-        int monitoring_height = dataport_config.at(monitoring_portname).at("resolution").value("height", 270);
+        int monitoring_width = 480; 
+        int monitoring_height = 270;
+
+        if (dataport_config.contains(monitoring_portname)) {
+            monitoring_width = dataport_config.at(monitoring_portname).at("resolution").value("width", 480);
+            monitoring_height = dataport_config.at(monitoring_portname).at("resolution").value("height", 270);
+        }
 
         json tag;
         auto last_time = chrono::high_resolution_clock::now();
         logger::debug("[{}] Camera #{} grabbing is now working...", get_name(), camera_id);
+
+        cv::Mat raw_frame;
+        cv::Mat undistorted_frame;
+        cv::Mat rotated_frame;
+        cv::Mat monitor_image;
+        std::vector<unsigned char> serialized_image;
+        std::vector<unsigned char> serialized_monitor_image;
+        double rotation = _rotation_cw.load();
+        bool do_undistort = _use_undistortion.load();
+        
+        /* init undistortion maps if needed */
+        cv::Mat K, D;
+        if(do_undistort){
+             // Parse calibration again here or pass it? parsing here is safe for thread isolation
+             // Accessing get_profile() is thread safe? profile is unique_ptr, read-only usually.
+             json params = get_profile()->parameters();
+             if(params.contains("calibration")){
+                 json calib = params["calibration"];
+                 vector<double> f = calib["focal_length"];
+                 vector<double> c = calib["principal_point"];
+                 vector<double> d = calib["distortion"];
+                 K = cv::Mat::eye(3, 3, CV_64F);
+                 K.at<double>(0,0) = f[0]; K.at<double>(1,1) = f[1];
+                 K.at<double>(0,2) = c[0]; K.at<double>(1,2) = c[1];
+                 D = cv::Mat::zeros(1, 5, CV_64F);
+                 for(size_t i=0; i<d.size() && i<5; ++i) D.at<double>(0,i) = d[i];
+             }
+        }
+
         while(!_worker_stop.load()){
 
             /* capture from camera */
-            Mat raw_frame;
             _cap >> raw_frame;
             if(raw_frame.empty()){
                 logger::warn("[{}] Camera #{}({}) frame is empty", get_name(), camera_id, device);
                 continue;
+            }
+
+            /* apply undistortion */
+            if(do_undistort && !K.empty()){
+                if(_map1.empty() || _map1.size() != raw_frame.size()){
+                    unique_lock<mutex> lock(_calibration_mtx);
+                    if(_map1.empty() || _map1.size() != raw_frame.size()){
+                         cv::initUndistortRectifyMap(K, D, cv::Mat(), K, raw_frame.size(), CV_16SC2, _map1, _map2);
+                         logger::info("[{}] Undistortion map initialized for {}x{}", get_name(), raw_frame.cols, raw_frame.rows);
+                    }
+                }
+                cv::remap(raw_frame, undistorted_frame, _map1, _map2, cv::INTER_LINEAR);
+            } else {
+                undistorted_frame = raw_frame;
+            }
+
+            /* rotate if needed */
+            if (abs(rotation) > 0.1) {
+                if (abs(rotation - 90.0) < 0.1) cv::rotate(undistorted_frame, rotated_frame, cv::ROTATE_90_CLOCKWISE);
+                else if (abs(rotation - 180.0) < 0.1) cv::rotate(undistorted_frame, rotated_frame, cv::ROTATE_180);
+                else if (abs(rotation - 270.0) < 0.1) cv::rotate(undistorted_frame, rotated_frame, cv::ROTATE_90_COUNTERCLOCKWISE);
+                else rotated_frame = undistorted_frame; 
+            } else {
+                rotated_frame = undistorted_frame; 
             }
 
             /* generate tag */
@@ -126,46 +221,42 @@ void uvc_camera_grabber::_grab_task(int camera_id, json camera_param){
             last_time = now;
             tag["fps"] = 1.0/elapsed.count();
             tag["camera_id"] = camera_id;
-            tag["height"] = raw_frame.rows;
-            tag["width"] = raw_frame.cols;
+            tag["height"] = rotated_frame.rows;
+            tag["width"] = rotated_frame.cols;
             tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
+            string tag_str = tag.dump();
 
             /* transfer original image to processs */
             if(_use_image_stream.load()){
                 /* image encoding */
-                std::vector<unsigned char> serialized_image;
-                cv::imencode(".jpg", raw_frame, serialized_image);
+                cv::imencode(".jpg", rotated_frame, serialized_image);
 
-                if(get_port(stream_portname)->handle()!=nullptr){
+                auto* port = get_port(stream_portname);
+                if(port != nullptr && port->handle()!=nullptr){
                     zmq::multipart_t msg_multipart_image;
-                    msg_multipart_image.addstr(tag.dump());
+                    msg_multipart_image.addstr(tag_str);
                     msg_multipart_image.addmem(serialized_image.data(), serialized_image.size());
-                    msg_multipart_image.send(*get_port(stream_portname), ZMQ_DONTWAIT);
-                    msg_multipart_image.clear();
+                    msg_multipart_image.send(*port, ZMQ_DONTWAIT);
                 }
                 else{
                     logger::warn("[{}] {} socket handle is not valid ", get_name(), camera_id);
                 }
-                serialized_image.clear();
             }
 
             /* transfer small image for monitoring */
             if(_use_image_stream_monitoring.load()){
                 
-                cv::Mat monitor_image;
-                cv::resize(raw_frame, monitor_image, cv::Size(monitoring_width, monitoring_height));
-                std::vector<unsigned char> serialized_monitor_image;
+                cv::resize(rotated_frame, monitor_image, cv::Size(monitoring_width, monitoring_height));
                 cv::imencode(".jpg", monitor_image, serialized_monitor_image);
 
-                if(get_port(monitoring_portname)->handle()!=nullptr){
+                auto* port = get_port(monitoring_portname);
+                if(port != nullptr && port->handle()!=nullptr){
                     zmq::multipart_t msg_multipart;
-                    msg_multipart.addstr(fmt::format("{}/image_stream_monitor_{}",get_name(), camera_id));
-                    msg_multipart.addstr(tag.dump());
+                    msg_multipart.addstr(fmt::format("{}/image_stream_monitor_{}", get_name(), camera_id));
+                    msg_multipart.addstr(tag_str);
                     msg_multipart.addmem(serialized_monitor_image.data(), serialized_monitor_image.size());
-                    msg_multipart.send(*get_port(monitoring_portname), ZMQ_DONTWAIT);
-                    msg_multipart.clear();
+                    msg_multipart.send(*port, ZMQ_DONTWAIT);
                 }
-                serialized_monitor_image.clear();
             }
 
         } /* end while */
@@ -188,7 +279,5 @@ void uvc_camera_grabber::_grab_task(int camera_id, json camera_param){
     catch(const json::exception& e){
         logger::error("[{}] Data Parse Error : {}", get_name(), e.what());
     }
-
-    
 
 }
