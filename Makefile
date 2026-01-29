@@ -84,37 +84,16 @@ endif
 $(shell mkdir -p $(OUTDIR))
 $(shell mkdir -p $(BUILDDIR))
 
-.PHONY: all clean debug deploy FORCE osm
+.PHONY: all clean debug deploy FORCE osm flame
 
 all : flame
 
 # -----------------------------------------------------------------------------
 # Target: flame (Service Engine)
 # -----------------------------------------------------------------------------
-FLAME_OBJS = \
-	$(BUILDDIR)flame.o \
-	$(BUILDDIR)config.o \
-	$(BUILDDIR)manager.o \
-	$(BUILDDIR)driver.o \
-	$(BUILDDIR)instance.o
-
-flame: $(FLAME_OBJS)
-	$(CC) $(LDFLAGS) -o $(BUILDDIR)$@ $^ $(LDLIBS)
-
-$(BUILDDIR)flame.o: $(FLAME_PATH)/tools/flame/flame.cc
-	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
-
-$(BUILDDIR)instance.o: $(FLAME_PATH)/tools/flame/instance.cc
-	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
-
-$(BUILDDIR)manager.o: $(FLAME_PATH)/tools/flame/manager.cc
-	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
-
-$(BUILDDIR)driver.o: $(INCLUDES_PATH)/flame/component/driver.cc
-	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
-
-$(BUILDDIR)config.o: $(INCLUDES_PATH)/flame/config.cc
-	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
+# Delegates build to the Makefile in flame/ directory
+flame:
+	$(MAKE) -C $(FLAME_PATH) OUTDIR=$(OUTDIR) BUILDDIR=$(BUILDDIR)
 
 
 # -----------------------------------------------------------------------------
