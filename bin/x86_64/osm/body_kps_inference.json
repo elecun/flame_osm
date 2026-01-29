@@ -1,45 +1,43 @@
 {
-    "rt_cycle_ns" : 1000000000,
-    "verbose" : 1,
-
-    "parameters":{
-        "model_path":"models/yolo11x-pose.engine",
+    "rt_cycle_ns": 1000000000,
+    "verbose": 1,
+    "parameters": {
+        "model_path": "models/yolo11x-pose.engine",
         "input_width": 640,
         "input_height": 640,
         "num_keypoints": 17,
-        "gpu_id":0
+        "gpu_id": 0
     },
-
-    "dataport":{
-        "status" : {
-            "transport" : "tcp",
-            "host" : "*",
-            "port" : 5102,
-            "socket_type" : "pub",
-            "queue_size" : 100
+    "dataport": {
+        "status": {
+            "transport": "tcp",
+            "host": "*",
+            "port": 5102,
+            "socket_type": "pub",
+            "queue_size": 100
         },
-        "image_stream_1" : {
-            "transport" : "inproc",
-            "socket_type" : "sub",
-            "queue_size" : 100
+        "image_stream_1": {
+            "transport": "inproc",
+            "socket_type": "sub",
+            "queue_size": 100
         },
-        "image_stream_1_monitor":{
-            "transport":"tcp",
-            "host":"*",
-            "port":5110,
-            "socket_type" : "pub",
-            "queue_size" : 10,
-            "resolution" : {
-                "width" : 540,
-                "height" : 960
+        "image_stream_1_monitor": {
+            "transport": "tcp",
+            "host": "*",
+            "port": 5110,
+            "socket_type": "pub",
+            "queue_size": 10,
+            "resolution": {
+                "width": 540,
+                "height": 960
             }
         },
-        "pose_result" : {
-            "transport" : "tcp",
-            "host" : "*",
-            "port" : 5120,
-            "socket_type" : "pub",
-            "queue_size" : 10
+        "pose_result": {
+            "transport": "tcp",
+            "host": "*",
+            "port": 5120,
+            "socket_type": "pub",
+            "queue_size": 10
         }
     }
 }

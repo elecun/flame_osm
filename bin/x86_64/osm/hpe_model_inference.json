@@ -1,24 +1,24 @@
 {
-    "rt_cycle_ns" : 1000000000,
-    "verbose" : 1,
-
-    "parameters":{
-        "onnx_model_path":"",
-        "image_stream_ids":[1]
+    "rt_cycle_ns": 1000000000,
+    "verbose": 1,
+    "parameters": {
+        "onnx_model_path": "",
+        "image_stream_ids": [
+            1
+        ]
     },
-
-    "dataport":{
-        "status" : {
-            "transport" : "tcp",
-            "host" : "*",
-            "port" : 5101,
-            "socket_type" : "pub",
-            "queue_size" : 100
+    "dataport": {
+        "status": {
+            "transport": "tcp",
+            "host": "*",
+            "port": 5101,
+            "socket_type": "pub",
+            "queue_size": 100
         },
-        "image_stream_1" : {
-            "transport" : "inproc",
-            "socket_type" : "pull",
-            "queue_size" : 100
+        "image_stream_1": {
+            "transport": "inproc",
+            "socket_type": "pull",
+            "queue_size": 100
         }
     }
 }

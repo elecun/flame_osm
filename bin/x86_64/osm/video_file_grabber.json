@@ -1,33 +1,47 @@
 {
-    "rt_cycle_ns" : 1000000000,
-    "verbose" : 1,
-
-    "parameters":{
-        "use_image_stream":true,
-        "use_image_stream_monitoring":false,
-        "camera":[
-            {"id":1, "name":"Left A Pillar", "portname":"image_stream_1", "file":"sample.avi", "rotate_flag":0}
+    "rt_cycle_ns": 1000000000,
+    "verbose": 1,
+    "parameters": {
+        "use_image_stream": true,
+        "use_image_stream_monitoring": false,
+        "camera": [
+            {
+                "id": 1,
+                "name": "Left A Pillar",
+                "portname": "image_stream_1",
+                "file": "sample.avi",
+                "rotate_flag": 0
+            }
         ],
-        "calibration":{
-            "focal_length":[1061.013861, 1167.335993],
-            "principal_point":[477.171894, 944.795309],
-            "distortion":[-0.446958, 0.281446, 0.004579, -0.055549]
+        "calibration": {
+            "focal_length": [
+                1061.013861,
+                1167.335993
+            ],
+            "principal_point": [
+                477.171894,
+                944.795309
+            ],
+            "distortion": [
+                -0.446958,
+                0.281446,
+                0.004579,
+                -0.055549
+            ]
         }
     },
-
-
-    "dataport":{
-        "status" : {
-            "transport" : "tcp",
-            "host" : "*",
-            "port" : 5101,
-            "socket_type" : "pub",
-            "queue_size" : 10
+    "dataport": {
+        "status": {
+            "transport": "tcp",
+            "host": "*",
+            "port": 5101,
+            "socket_type": "pub",
+            "queue_size": 10
         },
-        "image_stream_1":{
-            "transport":"inproc",
-            "socket_type" : "pub",
-            "queue_size" : 100
+        "image_stream_1": {
+            "transport": "inproc",
+            "socket_type": "pub",
+            "queue_size": 100
         }
     }
 }

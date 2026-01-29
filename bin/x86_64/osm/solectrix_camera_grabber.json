@@ -1,46 +1,51 @@
 {
-    "rt_cycle_ns" : 1000000000,
-    "verbose" : 1,
-    "info":{
-        "frame_grabber":"solectrix proframe 3.0",
-        "interface":"fpdlink iii",
-        "serializer":"ti_953",
-        "deserializer":"ti_954",
-        "cmos":"OV2778"
+    "rt_cycle_ns": 1000000000,
+    "verbose": 1,
+    "info": {
+        "frame_grabber": "solectrix proframe 3.0",
+        "interface": "fpdlink iii",
+        "serializer": "ti_953",
+        "deserializer": "ti_954",
+        "cmos": "OV2778"
     },
-
-    "parameters":{
-        "camera":[
-            {"id":1, "name":"Left A Pillar", "portname":"image_stream_1", "card":0, "channel":4, "rotate_flag":0}
+    "parameters": {
+        "camera": [
+            {
+                "id": 1,
+                "name": "Left A Pillar",
+                "portname": "image_stream_1",
+                "card": 0,
+                "channel": 4,
+                "rotate_flag": 0
+            }
         ],
-        "csi2_datatype":"0x1e",
-        "left_shift":8,
-        "use_image_stream":true,
-        "use_image_stream_monitoring":true
+        "csi2_datatype": "0x1e",
+        "left_shift": 8,
+        "use_image_stream": true,
+        "use_image_stream_monitoring": true
     },
-
-    "dataport":{
-        "status" : {
-            "transport" : "tcp",
-            "host" : "*",
-            "port" : 5101,
-            "socket_type" : "pub",
-            "queue_size" : 10
+    "dataport": {
+        "status": {
+            "transport": "tcp",
+            "host": "*",
+            "port": 5101,
+            "socket_type": "pub",
+            "queue_size": 10
         },
-        "image_stream_1":{
-            "transport":"inproc",
-            "socket_type" : "push",
-            "queue_size" : 100
+        "image_stream_1": {
+            "transport": "inproc",
+            "socket_type": "push",
+            "queue_size": 100
         },
-        "image_stream_1_monitor":{
-            "transport":"tcp",
-            "host":"*",
-            "port":5110,
-            "socket_type" : "pub",
-            "queue_size" : 10,
-            "resolution" : {
-                "width" : 540,
-                "height" : 960
+        "image_stream_1_monitor": {
+            "transport": "tcp",
+            "host": "*",
+            "port": 5110,
+            "socket_type": "pub",
+            "queue_size": 10,
+            "resolution": {
+                "width": 540,
+                "height": 960
             }
         }
     }

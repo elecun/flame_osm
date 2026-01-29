@@ -1,26 +1,24 @@
 {
-    "rt_cycle_ns" : 1000000000,
-    "verbose" : 1,
-
-    "parameters":{
-        "model_path":"models/yolo11n-face.engine",
+    "rt_cycle_ns": 1000000000,
+    "verbose": 1,
+    "parameters": {
+        "model_path": "models/yolo11n-face.engine",
         "input_width": 640,
         "input_height": 640,
-        "gpu_id":0
+        "gpu_id": 0
     },
-
-    "dataport":{
-        "status" : {
-            "transport" : "tcp",
-            "host" : "*",
-            "port" : 5103,
-            "socket_type" : "pub",
-            "queue_size" : 100
+    "dataport": {
+        "status": {
+            "transport": "tcp",
+            "host": "*",
+            "port": 5103,
+            "socket_type": "pub",
+            "queue_size": 100
         },
-        "image_stream_1" : {
-            "transport" : "inproc",
-            "socket_type" : "sub",
-            "queue_size" : 100
+        "image_stream_1": {
+            "transport": "inproc",
+            "socket_type": "sub",
+            "queue_size": 100
         }
     }
 }
