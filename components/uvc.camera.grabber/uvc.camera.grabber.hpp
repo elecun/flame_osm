@@ -16,6 +16,7 @@
 #include <opencv2/opencv.hpp>
 #include <vector>
 #include <unordered_map>
+#include <flame/common/zpipe.hpp>
 
 using namespace std;
 
@@ -40,6 +41,10 @@ class uvc_camera_grabber : public flame::component::object {
     private:
         /* grabbing worker */
         unordered_map<int, thread> _grab_worker;
+        
+        /* zpipe */
+        std::shared_ptr<flame::pipe::ZPipe> _pipe;
+        std::map<int, std::shared_ptr<flame::pipe::AsyncZSocket>> _pub_sockets;
 
         /* flag */
         atomic<bool> _worker_stop { false };

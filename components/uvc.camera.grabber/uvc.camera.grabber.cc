@@ -22,6 +22,9 @@ bool uvc_camera_grabber::on_init(){
         /* read profile */
         json parameters = get_profile()->parameters();
 
+        /* init zpipe */
+        _pipe = flame::pipe::create_pipe(1);
+
         /* set video capture instance */
         int auto_id = 1;
         if(parameters.contains("camera")){
@@ -111,6 +114,13 @@ void uvc_camera_grabber::on_close(){
     });
     _grab_worker.clear();
 
+    /* close sockets and pipe */
+    for(auto& s : _pub_sockets) {
+        s.second->close();
+    }
+    _pub_sockets.clear();
+    flame::pipe::destroy_pipe();
+
 }
 
 void uvc_camera_grabber::on_message(const flame::component::message_t& msg){
@@ -139,7 +149,30 @@ void uvc_camera_grabber::_grab_task(int camera_id, json camera_param){
 
         /* read port configurations */
         string monitoring_portname = fmt::format("image_stream_monitor_{}", camera_id);
+
         string stream_portname = fmt::format("image_stream_{}", camera_id);
+
+        /* Create AsyncZSocket for EPGM */
+        string socket_id = fmt::format("camera_{}", camera_id);
+        auto socket = std::make_shared<flame::pipe::AsyncZSocket>(socket_id, flame::pipe::Pattern::PUBLISH);
+        if(socket->create(_pipe)) {
+            // EPGM requires multicast address. Defaulting to eth0;239.192.1.1 if not in config.
+            // Address format: "interface;multicast_group"
+            string epgm_addr = "eth0;239.192.1.1"; 
+            if(camera_param.contains("epgm_address")){
+                epgm_addr = camera_param["epgm_address"].get<string>();
+            }
+            int epgm_port = 5555 + camera_id;
+            
+            if(socket->join(flame::pipe::Transport::EPGM, epgm_addr, epgm_port)){
+                logger::info("[{}] Camera #{} publishing via EPGM: {}:{}", get_name(), camera_id, epgm_addr, epgm_port);
+                _pub_sockets[camera_id] = socket;
+            } else {
+                logger::error("[{}] Failed to join EPGM for camera #{}", get_name(), camera_id);
+            }
+        } else {
+             logger::error("[{}] Failed to create socket for camera #{}", get_name(), camera_id);
+        }
 
         json dataport_config = get_profile()->dataport();
         int monitoring_width = 480; 
@@ -231,6 +264,23 @@ void uvc_camera_grabber::_grab_task(int camera_id, json camera_param){
                 /* image encoding */
                 cv::imencode(".jpg", rotated_frame, serialized_image);
 
+                /* Send via AsyncZSocket (EPGM) */
+                if(_pub_sockets.count(camera_id)){
+                    auto& sock = _pub_sockets[camera_id];
+                    vector<string> msg;
+                    // Topic "camera_{id}" is implicitly handled by dispatch for PUBLISH pattern
+                    msg.push_back(tag_str);
+                    msg.push_back(string(serialized_image.begin(), serialized_image.end()));
+                    
+                    sock->dispatch(msg);
+                }
+
+                // Existing port logic kept or removed?
+                // Request says "change structure to use zpipe ... publish via epgm"
+                // Assuming replacement of the old mechanism, but I'll comment out old one or just leave it if backward compatibility needed?
+                // The request says "change structure", implying a replacement. I will comment out the old port logic to be safe.
+                
+                /*
                 auto* port = get_port(stream_portname);
                 if(port != nullptr && port->handle()!=nullptr){
                     zmq::multipart_t msg_multipart_image;
@@ -241,6 +291,7 @@ void uvc_camera_grabber::_grab_task(int camera_id, json camera_param){
                 else{
                     logger::warn("[{}] {} socket handle is not valid ", get_name(), camera_id);
                 }
+                */
             }
 
             /* transfer small image for monitoring */
