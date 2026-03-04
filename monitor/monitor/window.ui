@@ -7,8 +7,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1481</width>
-    <height>1029</height>
+    <width>1487</width>
+    <height>1023</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -30,7 +30,7 @@
      <rect>
       <x>0</x>
       <y>0</y>
-      <width>1476</width>
+      <width>1481</width>
       <height>996</height>
      </rect>
     </property>
@@ -47,38 +47,16 @@
     <property name="currentIndex">
      <number>0</number>
     </property>
-    <widget class="QWidget" name="tab_4">
+    <widget class="QWidget" name="tab_monitoring">
      <attribute name="title">
       <string>Online OSM Monitoring</string>
      </attribute>
-     <widget class="QLabel" name="window_camera_1">
-      <property name="geometry">
-       <rect>
-        <x>0</x>
-        <y>0</y>
-        <width>540</width>
-        <height>960</height>
-       </rect>
-      </property>
-      <property name="styleSheet">
-       <string notr="true">background-color: rgb(0, 0, 0);
-color:rgb(255,255,255);
-border-color: rgb(255, 255, 255);
-border: 1px solid white;</string>
-      </property>
-      <property name="text">
-       <string>Camera #1</string>
-      </property>
-      <property name="alignment">
-       <set>Qt::AlignCenter</set>
-      </property>
-     </widget>
      <widget class="QGroupBox" name="groupBox">
       <property name="geometry">
        <rect>
-        <x>545</x>
+        <x>390</x>
         <y>670</y>
-        <width>921</width>
+        <width>1076</width>
         <height>286</height>
        </rect>
       </property>
@@ -88,68 +66,13 @@ border: 1px solid white;</string>
       <property name="checkable">
        <bool>true</bool>
       </property>
-      <widget class="QCheckBox" name="chk_option_show_frame_info">
-       <property name="geometry">
-        <rect>
-         <x>10</x>
-         <y>105</y>
-         <width>271</width>
-         <height>20</height>
-        </rect>
-       </property>
-       <property name="text">
-        <string>Show Frame Information</string>
-       </property>
-       <property name="checked">
-        <bool>false</bool>
-       </property>
-      </widget>
-      <widget class="QCheckBox" name="chk_option_disable_camera_monitoring_stream">
-       <property name="geometry">
-        <rect>
-         <x>10</x>
-         <y>30</y>
-         <width>271</width>
-         <height>20</height>
-        </rect>
-       </property>
-       <property name="text">
-        <string>Disable Camera Monitoring Stream</string>
-       </property>
-      </widget>
-      <widget class="Line" name="line">
-       <property name="geometry">
-        <rect>
-         <x>10</x>
-         <y>85</y>
-         <width>271</width>
-         <height>16</height>
-        </rect>
-       </property>
-       <property name="orientation">
-        <enum>Qt::Horizontal</enum>
-       </property>
-      </widget>
-      <widget class="QCheckBox" name="chk_option_show_body_keypoints">
-       <property name="geometry">
-        <rect>
-         <x>10</x>
-         <y>135</y>
-         <width>271</width>
-         <height>20</height>
-        </rect>
-       </property>
-       <property name="text">
-        <string>Show Body Key-points</string>
-       </property>
-      </widget>
      </widget>
      <widget class="QGroupBox" name="groupBox_3">
       <property name="geometry">
        <rect>
-        <x>545</x>
+        <x>390</x>
         <y>5</y>
-        <width>921</width>
+        <width>1076</width>
         <height>661</height>
        </rect>
       </property>
@@ -166,33 +89,145 @@ border: 1px solid white;</string>
        </size>
       </property>
       <property name="title">
-       <string>Occupant Status Analysis</string>
+       <string>Systsem Dashboard</string>
       </property>
-      <widget class="QFrame" name="frame">
+      <widget class="QTableView" name="table_osm_dashboard">
        <property name="geometry">
         <rect>
          <x>5</x>
          <y>25</y>
-         <width>911</width>
+         <width>1066</width>
          <height>626</height>
         </rect>
        </property>
-       <property name="autoFillBackground">
-        <bool>false</bool>
-       </property>
-       <property name="styleSheet">
-        <string notr="true">background-color: rgb(255, 255, 255);</string>
-       </property>
-       <property name="frameShape">
-        <enum>QFrame::StyledPanel</enum>
-       </property>
-       <property name="frameShadow">
-        <enum>QFrame::Raised</enum>
-       </property>
+      </widget>
+     </widget>
+     <widget class="QTabWidget" name="tab_camera_view">
+      <property name="geometry">
+       <rect>
+        <x>5</x>
+        <y>10</y>
+        <width>376</width>
+        <height>681</height>
+       </rect>
+      </property>
+      <property name="tabPosition">
+       <enum>QTabWidget::South</enum>
+      </property>
+      <property name="currentIndex">
+       <number>0</number>
+      </property>
+      <widget class="QWidget" name="tab_camera_1">
+       <attribute name="title">
+        <string>Camera 1</string>
+       </attribute>
+       <widget class="QLabel" name="window_camera_1">
+        <property name="geometry">
+         <rect>
+          <x>5</x>
+          <y>5</y>
+          <width>360</width>
+          <height>640</height>
+         </rect>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">background-color: rgb(0, 0, 0);
+color:rgb(255,255,255);
+border-color: rgb(255, 255, 255);
+border: 1px solid white;</string>
+        </property>
+        <property name="text">
+         <string>Camera #1</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignCenter</set>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QWidget" name="tab_camera_2">
+       <attribute name="title">
+        <string>Camera 2</string>
+       </attribute>
+       <widget class="QLabel" name="window_camera_2">
+        <property name="geometry">
+         <rect>
+          <x>5</x>
+          <y>5</y>
+          <width>360</width>
+          <height>640</height>
+         </rect>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">background-color: rgb(0, 0, 0);
+color:rgb(255,255,255);
+border-color: rgb(255, 255, 255);
+border: 1px solid white;</string>
+        </property>
+        <property name="text">
+         <string>Camera #2</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignCenter</set>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QWidget" name="tab_camera_3">
+       <attribute name="title">
+        <string>Camera 3</string>
+       </attribute>
+       <widget class="QLabel" name="window_camera_3">
+        <property name="geometry">
+         <rect>
+          <x>5</x>
+          <y>5</y>
+          <width>360</width>
+          <height>640</height>
+         </rect>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">background-color: rgb(0, 0, 0);
+color:rgb(255,255,255);
+border-color: rgb(255, 255, 255);
+border: 1px solid white;</string>
+        </property>
+        <property name="text">
+         <string>Camera #3</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignCenter</set>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QWidget" name="tab_camera_4">
+       <attribute name="title">
+        <string>Camera 4</string>
+       </attribute>
+       <widget class="QLabel" name="window_camera_4">
+        <property name="geometry">
+         <rect>
+          <x>5</x>
+          <y>5</y>
+          <width>360</width>
+          <height>640</height>
+         </rect>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">background-color: rgb(0, 0, 0);
+color:rgb(255,255,255);
+border-color: rgb(255, 255, 255);
+border: 1px solid white;</string>
+        </property>
+        <property name="text">
+         <string>Camera #4</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignCenter</set>
+        </property>
+       </widget>
       </widget>
      </widget>
     </widget>
-    <widget class="QWidget" name="tab_3">
+    <widget class="QWidget" name="tab_simulation">
      <attribute name="title">
       <string>Offline Simulation</string>
      </attribute>
@@ -366,12 +401,12 @@ border: 1px solid white;</string>
       </widget>
      </widget>
     </widget>
-    <widget class="QWidget" name="tab">
+    <widget class="QWidget" name="tab_controller">
      <attribute name="title">
       <string>Controller Status</string>
      </attribute>
     </widget>
-    <widget class="QWidget" name="tab_2">
+    <widget class="QWidget" name="tab_config">
      <attribute name="title">
       <string>Configurations</string>
      </attribute>
