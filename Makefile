@@ -102,7 +102,7 @@ flame:
 
 # UVC Camera Grabber
 uvc_camera_grabber.comp: $(BUILDDIR)uvc.camera.grabber.o $(BUILDDIR)support.o
-	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio
+	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio -lopencv_calib3d
 
 $(BUILDDIR)uvc.camera.grabber.o: $(CURRENT_DIR)/components/uvc.camera.grabber/uvc.camera.grabber.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
