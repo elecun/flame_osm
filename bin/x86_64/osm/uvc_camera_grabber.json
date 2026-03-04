@@ -9,24 +9,16 @@
             {
                 "id": 1,
                 "name": "Left Top A Pillar",
-                "device": "/dev/video0"
+                "device": "/dev/video0",
+                "dataport":"camera_1",
+                "monitorport":"camera_monitor_1"
             }
         ],
+        "use_calibration":false,
         "calibration": {
-            "focal_length": [
-                1061.013861,
-                1167.335993
-            ],
-            "principal_point": [
-                477.171894,
-                944.795309
-            ],
-            "distortion": [
-                -0.446958,
-                0.281446,
-                0.004579,
-                -0.055549
-            ]
+            "focal_length": [1061.013861, 1167.335993],
+            "principal_point": [477.171894, 944.795309],
+            "distortion": [-0.446958, 0.281446, 0.004579, -0.055549]
         }
     },
     "dataport": {
@@ -37,21 +29,23 @@
             "socket_type": "pub",
             "queue_size": 100
         },
-        "image_stream_monitor_1": {
+        "camera_monitor_1": {
             "transport": "tcp",
             "host": "*",
             "port": 9001,
             "socket_type": "pub",
             "queue_size": 10,
             "resolution": {
-                "width": 480,
-                "height": 270
+                "width": 360,
+                "height": 640
             }
         },
-        "image_stream_1": {
-            "transport": "inproc",
-            "socket_type": "push",
-            "queue_size": 100
+        "camera_1": {
+            "transport": "tcp",
+            "host": "*",
+            "port": 9002,
+            "socket_type": "pub",
+            "queue_size": 10
         }
     }
 }
