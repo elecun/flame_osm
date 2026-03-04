@@ -21,5 +21,5 @@ vector<string> uvc_camera_grabber::find_available_camera(int n_max, const string
         }
     }
 
-    return std::move(available_cameras);
+    return available_cameras;
 }
