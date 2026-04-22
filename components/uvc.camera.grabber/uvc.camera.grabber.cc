@@ -48,8 +48,7 @@ bool uvc_camera_grabber::on_init() {
         dev["id"] = id; /* update camera id */
 
         /* assign grabber worker */
-        _grab_worker[id] =
-            thread(&uvc_camera_grabber::_grab_task, this, id, dev);
+        _grab_worker[id] = thread(&uvc_camera_grabber::_grab_task, this, id, dev);
       }
     } else {
       logger::warn("[{}] Cannot found camera(s) available", get_name());
@@ -391,6 +390,8 @@ void uvc_camera_grabber::_grab_task(int camera_id, json camera_param) {
         if (_pub_sockets.count(stream_portname)) {
           auto &sock = _pub_sockets[stream_portname];
           vector<string> msg;
+          msg.push_back(
+              fmt::format("{}/image_stream_{}", get_name(), camera_id));
           msg.push_back(tag_str);
           msg.push_back(
               string(serialized_image.begin(), serialized_image.end()));

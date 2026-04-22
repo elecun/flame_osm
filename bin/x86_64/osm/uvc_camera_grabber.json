@@ -2,7 +2,7 @@
     "rt_cycle_ns": 1000000000,
     "verbose": 1,
     "parameters": {
-        "use_image_stream": false,
+        "use_image_stream": true,
         "use_image_stream_monitoring": true,
         "rotation_cw": 90,
         "camera": [
@@ -11,7 +11,7 @@
                 "name": "Left Top A Pillar",
                 "device": "/dev/video0",
                 "dataport":"camera_1",
-                "monitorport":"camera_monitor_1"
+                "monitorport":"monitor_camera_1"
             }
         ],
         "use_calibration":false,
@@ -29,21 +29,19 @@
             "socket_type": "pub",
             "queue_size": 100
         },
-        "camera_monitor_1": {
+        "monitor_camera_1": {
             "transport": "tcp",
             "host": "*",
             "port": 9001,
             "socket_type": "pub",
             "queue_size": 10,
             "resolution": {
-                "width": 360,
-                "height": 640
+                "width": 500,
+                "height": 800
             }
         },
         "camera_1": {
-            "transport": "tcp",
-            "host": "*",
-            "port": 9002,
+            "transport": "inproc",
             "socket_type": "pub",
             "queue_size": 10
         }

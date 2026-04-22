@@ -36,10 +36,8 @@ private:
   void _grab_task(int camera_id, json camera_param);
 
   /* private function */
-  vector<string> find_available_camera(int n_max = 10,
-                                       const string prefix = "/dev/video");
-  std::shared_ptr<flame::pipe::AsyncZSocket>
-  _create_socket(const std::string &name, const json &dataport_config);
+  vector<string> find_available_camera(int n_max = 10, const string prefix = "/dev/video");
+  std::shared_ptr<flame::pipe::AsyncZSocket> _create_socket(const std::string &name, const json &dataport_config);
 
 private:
   /* grabbing worker */
@@ -47,8 +45,7 @@ private:
 
   /* zpipe */
   std::shared_ptr<flame::pipe::ZPipe> _pipe;
-  std::map<std::string, std::shared_ptr<flame::pipe::AsyncZSocket>>
-      _pub_sockets;
+  std::map<std::string, std::shared_ptr<flame::pipe::AsyncZSocket>> _pub_sockets;
 
   /* flag */
   atomic<bool> _worker_stop{false};
