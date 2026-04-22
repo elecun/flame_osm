@@ -29,7 +29,7 @@ public:
   bool on_init() override;
   void on_loop() override;
   void on_close() override;
-  void on_message(const flame::component::message_t &msg) override;
+  void on_data(flame::component::zdata &data) override;
 
 private:
   /* grabber tasks */
@@ -37,16 +37,12 @@ private:
 
   /* private function */
   vector<string> find_available_camera(int n_max = 10, const string prefix = "/dev/video");
-  std::shared_ptr<flame::pipe::AsyncZSocket> _create_socket(const std::string &name, const json &dataport_config);
 
 private:
   /* grabbing worker */
   unordered_map<int, thread> _grab_worker;
 
   /* zpipe */
-  std::shared_ptr<flame::pipe::ZPipe> _pipe;
-  std::map<std::string, std::shared_ptr<flame::pipe::AsyncZSocket>> _pub_sockets;
-
   /* flag */
   atomic<bool> _worker_stop{false};
   atomic<bool> _use_image_stream_monitoring{false};

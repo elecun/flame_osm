@@ -29,17 +29,6 @@ bool uvc_camera_grabber::on_init() {
     /* read profile */
     json parameters = get_profile()->parameters();
 
-    /* init zpipe */
-    _pipe = flame::pipe::create_pipe(1);
-
-    /* create status socket */
-    json dataport_config = get_profile()->dataport();
-    if (dataport_config.contains("status")) {
-      auto socket = _create_socket("status", dataport_config);
-      if (socket)
-        _pub_sockets["status"] = socket;
-    }
-
     /* set video capture instance */
     int auto_id = 1;
     if (parameters.contains("camera")) {
@@ -123,24 +112,21 @@ void uvc_camera_grabber::on_loop() {
   if (_worker_stop.load())
     return;
 
-  if (_pub_sockets.count("status")) {
-    auto &sock = _pub_sockets["status"];
+  flame::component::zdata msg;
+  msg.addstr("status");
+  msg.addstr(""); // broadcast
+  msg.addstr("json");
 
-    json status;
-    status["component"] = get_name();
-    status["state"] = "running";
-    status["timestamp"] = chrono::duration_cast<chrono::milliseconds>(
-                              chrono::system_clock::now().time_since_epoch())
-                              .count();
+  json status;
+  status["component"] = get_name();
+  status["state"] = "running";
+  status["timestamp"] = chrono::duration_cast<chrono::milliseconds>(
+                            chrono::system_clock::now().time_since_epoch())
+                            .count();
+  msg.addstr(status.dump());
 
-    vector<string> msg;
-    msg.push_back(fmt::format("{}/status", get_name()));
-    msg.push_back(status.dump());
-
-    // Prevent segfault if socket was cleared off map concurrently
-    if (sock != nullptr) {
-      sock->dispatch(msg);
-    }
+  if (!dispatch("status", msg)) {
+    logger::warn("[{}] status socket is not valid", get_name());
   }
 }
 
@@ -157,76 +143,10 @@ void uvc_camera_grabber::on_close() {
     }
   });
   _grab_worker.clear();
-
-  /* close sockets and pipe */
-  for (auto &s : _pub_sockets) {
-    s.second->close();
-  }
-  _pub_sockets.clear();
 }
 
-void uvc_camera_grabber::on_message(const flame::component::message_t &msg) {
-  // Note: The 'msg' parameter is currently unused.
-}
-
-std::shared_ptr<flame::pipe::AsyncZSocket>
-uvc_camera_grabber::_create_socket(const std::string &name,
-                                   const json &dataport_config) {
-  if (!dataport_config.contains(name)) {
-    logger::warn("[{}] Dataport '{}' is not defined in the configuration.",
-                 get_name(), name);
-    return nullptr;
-  }
-
-  auto port_config = dataport_config[name];
-  std::string transport_str = port_config.value("transport", "tcp");
-  std::string socket_type_str = port_config.value("socket_type", "pub");
-  std::string host = port_config.value("host", "*");
-  int port = port_config.value("port", 5555);
-
-  flame::pipe::Transport transport = flame::pipe::Transport::TCP;
-  if (transport_str == "epgm")
-    transport = flame::pipe::Transport::EPGM;
-  else if (transport_str == "pgm")
-    transport = flame::pipe::Transport::PGM;
-  else if (transport_str == "ipc")
-    transport = flame::pipe::Transport::IPC;
-  else if (transport_str == "inproc")
-    transport = flame::pipe::Transport::INPROC;
-
-  flame::pipe::Pattern pattern = flame::pipe::Pattern::PUBLISH;
-  if (socket_type_str == "sub")
-    pattern = flame::pipe::Pattern::SUBSCRIBE;
-  else if (socket_type_str == "push")
-    pattern = flame::pipe::Pattern::PUSH;
-  else if (socket_type_str == "pull")
-    pattern = flame::pipe::Pattern::PULL;
-
-  auto socket = std::make_shared<flame::pipe::AsyncZSocket>(name, pattern);
-  if (socket->create(_pipe)) {
-    try {
-      auto *old_port = get_port(name);
-      if (old_port) {
-        old_port->close();
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        logger::info("[{}] Closed existing framework socket for '{}'",
-                     get_name(), name);
-      }
-    } catch (...) {
-      // Port not found or already closed
-    }
-
-    if (socket->join(transport, host, port)) {
-      logger::info("[{}] Socket '{}' created and joined at {}://{}:{}",
-                   get_name(), name, transport_str, host, port);
-      return socket;
-    } else {
-      logger::error("[{}] Failed to join socket '{}'", get_name(), name);
-    }
-  } else {
-    logger::error("[{}] Failed to create socket '{}'", get_name(), name);
-  }
-  return nullptr;
+void uvc_camera_grabber::on_data(flame::component::zdata& data) {
+  // data[0] = src_port, data[1] = dst_port, data[2] = type, data[3] = payload
 }
 
 void uvc_camera_grabber::_grab_task(int camera_id, json camera_param) {
@@ -256,24 +176,15 @@ void uvc_camera_grabber::_grab_task(int camera_id, json camera_param) {
     string monitoring_portname = camera_param.value("monitorport", "");
     json dataport_config = get_profile()->dataport();
 
-    // Create socket for streaming original image
-    if (!stream_portname.empty() && dataport_config.contains(stream_portname)) {
-      auto socket = _create_socket(stream_portname, dataport_config);
-      if (socket)
-        _pub_sockets[stream_portname] = socket;
-    } else {
+    // Check socket for streaming original image
+    if (stream_portname.empty() || !dataport_config.contains(stream_portname)) {
       logger::warn(
           "[{}] stream dataport for camera #{} is invalid or not defined",
           get_name(), camera_id);
     }
 
-    // Create socket for monitoring image
-    if (!monitoring_portname.empty() &&
-        dataport_config.contains(monitoring_portname)) {
-      auto socket = _create_socket(monitoring_portname, dataport_config);
-      if (socket)
-        _pub_sockets[monitoring_portname] = socket;
-    } else {
+    // Check socket for monitoring image
+    if (monitoring_portname.empty() || !dataport_config.contains(monitoring_portname)) {
       logger::warn(
           "[{}] monitor dataport for camera #{} is invalid or not defined",
           get_name(), camera_id);
@@ -386,18 +297,14 @@ void uvc_camera_grabber::_grab_task(int camera_id, json camera_param) {
         /* image encoding */
         cv::imencode(".jpg", rotated_frame, serialized_image);
 
-        /* Send via AsyncZSocket */
-        if (_pub_sockets.count(stream_portname)) {
-          auto &sock = _pub_sockets[stream_portname];
-          vector<string> msg;
-          msg.push_back(
-              fmt::format("{}/image_stream_{}", get_name(), camera_id));
-          msg.push_back(tag_str);
-          msg.push_back(
-              string(serialized_image.begin(), serialized_image.end()));
+        /* Send via dispatch - addmem avoids string copy for binary data */
+        flame::component::zdata msg;
+        msg.addstr(stream_portname);
+        msg.addstr(""); // broadcast
+        msg.addstr("binary");
+        msg.addmem(serialized_image.data(), serialized_image.size());
 
-          sock->dispatch(msg);
-        } else {
+        if (!dispatch(stream_portname, msg)) {
           logger::warn("[{}] {} socket is not valid", get_name(),
                        stream_portname);
         }
@@ -410,17 +317,14 @@ void uvc_camera_grabber::_grab_task(int camera_id, json camera_param) {
                    cv::Size(monitoring_width, monitoring_height));
         cv::imencode(".jpg", monitor_image, serialized_monitor_image);
 
-        /* Send relative monitor image via AsyncZSocket */
-        if (_pub_sockets.count(monitoring_portname)) {
-          auto &sock = _pub_sockets[monitoring_portname];
-          vector<string> msg;
-          msg.push_back(
-              fmt::format("{}/image_stream_monitor_{}", get_name(), camera_id));
-          msg.push_back(tag_str);
-          msg.push_back(string(serialized_monitor_image.begin(),
-                               serialized_monitor_image.end()));
-          sock->dispatch(msg);
-        } else {
+        /* Send monitor image via dispatch - addmem for binary zero-copy */
+        flame::component::zdata msg;
+        msg.addstr(monitoring_portname);
+        msg.addstr(""); // broadcast
+        msg.addstr("binary");
+        msg.addmem(serialized_monitor_image.data(), serialized_monitor_image.size());
+
+        if (!dispatch(monitoring_portname, msg)) {
           logger::warn("[{}] {} socket is not valid", get_name(),
                        monitoring_portname);
         }
