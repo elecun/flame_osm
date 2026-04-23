@@ -10,24 +10,24 @@ using namespace std;
 using namespace cv;
 
 /* create component instance */
-static uvc_camera_grabber *_instance = nullptr;
-flame::component::object *create() {
-  if (!_instance)
-    _instance = new uvc_camera_grabber();
-  return _instance;
+static UvcCameraGrabber *instance_ = nullptr;
+flame::component::Object *Create() {
+  if (!instance_)
+    instance_ = new UvcCameraGrabber();
+  return instance_;
 }
-void release() {
-  if (_instance) {
-    delete _instance;
-    _instance = nullptr;
+void Release() {
+  if (instance_) {
+    delete instance_;
+    instance_ = nullptr;
   }
 }
 
-bool uvc_camera_grabber::on_init() {
+bool UvcCameraGrabber::onInit() {
 
   try {
     /* read profile */
-    json parameters = get_profile()->parameters();
+    json parameters = getProfile()->parameters();
 
     /* set video capture instance */
     int auto_id = 1;
@@ -37,19 +37,19 @@ bool uvc_camera_grabber::on_init() {
         dev["id"] = id; /* update camera id */
 
         /* assign grabber worker */
-        _grab_worker[id] = thread(&uvc_camera_grabber::_grab_task, this, id, dev);
+        grab_worker_[id] = thread(&UvcCameraGrabber::grabTask, this, id, dev);
       }
     } else {
-      logger::warn("[{}] Cannot found camera(s) available", get_name());
+      logger::warn("[{}] Cannot found camera(s) available", getName());
       return false;
     }
 
     /* configure data for data pipelining  */
-    _use_image_stream_monitoring.store(
+    use_image_stream_monitoring_.store(
         parameters.value("use_image_stream_monitoring", false));
-    _use_image_stream.store(parameters.value("use_image_stream", false));
-    _rotation_cw.store(parameters.value("rotation_cw", 0.0));
-    _worker_stop.store(false);
+    use_image_stream_.store(parameters.value("use_image_stream", false));
+    rotation_cw_.store(parameters.value("rotation_cw", 0.0));
+    worker_stop_.store(false);
 
     /* load calibration data */
     if (parameters.contains("calibration")) {
@@ -73,52 +73,33 @@ bool uvc_camera_grabber::on_init() {
           for (size_t i = 0; i < d.size() && i < 5; ++i)
             D.at<double>(0, i) = d[i];
 
-          /* pre-compute undistort maps (will initialize size later once
-           * resolution is known or assume port resolution) */
-          // Wait.. we need image resolution to init maps.
-          // Since resolution might depend on camera, we can defer map init or
-          // do it if we know resolution. Let's assume resolution from dataport
-          // or first frame. Better approach: In _grab_task, check if maps are
-          // empty and init them once. So here we store K and D, or just rely on
-          // parameters access in _grab_task? Storing K and D in member might be
-          // cleaner but thread safety? Let's parse here but compute maps in
-          // _grab_task to be safe with image size. Actually, simpler: Just
-          // enable flags here and parse in task or helper. Given the structure,
-          // parsing in on_init and storing locally to transfer to task or
-          // member variables is best. Let's just set the flag here and parse
-          // K/D inside the task or valid place. Actually, K and D are specific
-          // to camera. If multiple cameras, we need a map of K/D. The current
-          // json has "calibration" at root, implying one calibration for the
-          // component (likely single camera case). We will parse it into
-          // members (protected by mutex if needed or just read-only after
-          // init).
-          _use_undistortion.store(true);
+          use_undistortion_.store(true);
         }
       }
     }
   } catch (json::exception &e) {
-    logger::error("[{}] Component profile read exception : {}", get_name(),
+    logger::error("[{}] Component profile read exception : {}", getName(),
                   e.what());
     return false;
   } catch (cv::Exception::exception &e) {
-    logger::error("[{}] Device open exception : {}", get_name(), e.what());
+    logger::error("[{}] Device open exception : {}", getName(), e.what());
     return false;
   }
 
   return true;
 }
 
-void uvc_camera_grabber::on_loop() {
-  if (_worker_stop.load())
+void UvcCameraGrabber::onLoop() {
+  if (worker_stop_.load())
     return;
 
-  flame::component::zdata msg;
+  flame::component::ZData msg;
   msg.addstr("status");
   msg.addstr(""); // broadcast
   msg.addstr("json");
 
   json status;
-  status["component"] = get_name();
+  status["component"] = getName();
   status["state"] = "running";
   status["timestamp"] = chrono::duration_cast<chrono::milliseconds>(
                             chrono::system_clock::now().time_since_epoch())
@@ -126,68 +107,68 @@ void uvc_camera_grabber::on_loop() {
   msg.addstr(status.dump());
 
   if (!dispatch("status", msg)) {
-    logger::warn("[{}] status socket is not valid", get_name());
+    logger::warn("[{}] status socket is not valid", getName());
   }
 }
 
-void uvc_camera_grabber::on_close() {
+void UvcCameraGrabber::onClose() {
 
   /* stop worker */
-  _worker_stop.store(true);
+  worker_stop_.store(true);
 
   /* stop grabbing */
-  for_each(_grab_worker.begin(), _grab_worker.end(), [](auto &t) {
+  for_each(grab_worker_.begin(), grab_worker_.end(), [](auto &t) {
     if (t.second.joinable()) {
       t.second.join();
       logger::debug("Camera #{} grabber is successfully stopped", t.first);
     }
   });
-  _grab_worker.clear();
+  grab_worker_.clear();
 }
 
-void uvc_camera_grabber::on_data(flame::component::zdata& data) {
+void UvcCameraGrabber::onData(flame::component::ZData& data) {
   // data[0] = src_port, data[1] = dst_port, data[2] = type, data[3] = payload
 }
 
-void uvc_camera_grabber::_grab_task(int camera_id, json camera_param) {
+void UvcCameraGrabber::grabTask(int camera_id, json camera_param) {
 
   string device = camera_param.value("device", "");
 
   if (camera_id < 0 || device.empty()) {
     logger::warn("[{}] Undefined or Invalid Camera Configuration in the "
                  "Component Profile.",
-                 get_name());
+                 getName());
     return;
   }
 
-  cv::VideoCapture _cap; /* camera capture */
+  cv::VideoCapture cap; /* camera capture */
   try {
 
     /* camera open */
-    _cap.open(device, CAP_V4L2); /* for linux only */
-    _cap.set(cv::CAP_PROP_BUFFERSIZE, 1);
-    if (!_cap.isOpened()) {
-      logger::error("[{}] Camera #{} cannot be opened.", get_name(), camera_id);
+    cap.open(device, CAP_V4L2); /* for linux only */
+    cap.set(cv::CAP_PROP_BUFFERSIZE, 1);
+    if (!cap.isOpened()) {
+      logger::error("[{}] Camera #{} cannot be opened.", getName(), camera_id);
       return;
     }
 
     /* read port configurations */
     string stream_portname = camera_param.value("dataport", "");
     string monitoring_portname = camera_param.value("monitorport", "");
-    json dataport_config = get_profile()->dataport();
+    json dataport_config = getProfile()->dataPort();
 
     // Check socket for streaming original image
     if (stream_portname.empty() || !dataport_config.contains(stream_portname)) {
       logger::warn(
           "[{}] stream dataport for camera #{} is invalid or not defined",
-          get_name(), camera_id);
+          getName(), camera_id);
     }
 
     // Check socket for monitoring image
     if (monitoring_portname.empty() || !dataport_config.contains(monitoring_portname)) {
       logger::warn(
           "[{}] monitor dataport for camera #{} is invalid or not defined",
-          get_name(), camera_id);
+          getName(), camera_id);
     }
     int monitoring_width = 480;
     int monitoring_height = 270;
@@ -203,7 +184,7 @@ void uvc_camera_grabber::_grab_task(int camera_id, json camera_param) {
 
     json tag;
     auto last_time = chrono::high_resolution_clock::now();
-    logger::debug("[{}] Camera #{} grabbing is now working...", get_name(),
+    logger::debug("[{}] Camera #{} grabbing is now working...", getName(),
                   camera_id);
 
     cv::Mat raw_frame;
@@ -212,16 +193,13 @@ void uvc_camera_grabber::_grab_task(int camera_id, json camera_param) {
     cv::Mat monitor_image;
     std::vector<unsigned char> serialized_image;
     std::vector<unsigned char> serialized_monitor_image;
-    double rotation = _rotation_cw.load();
-    bool do_undistort = _use_undistortion.load();
+    double rotation = rotation_cw_.load();
+    bool do_undistort = use_undistortion_.load();
 
     /* init undistortion maps if needed */
     cv::Mat K, D;
     if (do_undistort) {
-      // Parse calibration again here or pass it? parsing here is safe for
-      // thread isolation Accessing get_profile() is thread safe? profile is
-      // unique_ptr, read-only usually.
-      json params = get_profile()->parameters();
+      json params = getProfile()->parameters();
       if (params.contains("calibration")) {
         json calib = params["calibration"];
         vector<double> f = calib["focal_length"];
@@ -238,28 +216,28 @@ void uvc_camera_grabber::_grab_task(int camera_id, json camera_param) {
       }
     }
 
-    while (!_worker_stop.load()) {
+    while (!worker_stop_.load()) {
 
       /* capture from camera */
-      _cap >> raw_frame;
+      cap >> raw_frame;
       if (raw_frame.empty()) {
-        logger::warn("[{}] Camera #{}({}) frame is empty", get_name(),
+        logger::warn("[{}] Camera #{}({}) frame is empty", getName(),
                      camera_id, device);
         continue;
       }
 
       /* apply undistortion */
       if (do_undistort && !K.empty()) {
-        if (_map1.empty() || _map1.size() != raw_frame.size()) {
-          unique_lock<mutex> lock(_calibration_mtx);
-          if (_map1.empty() || _map1.size() != raw_frame.size()) {
+        if (map1_.empty() || map1_.size() != raw_frame.size()) {
+          unique_lock<mutex> lock(calibration_mtx_);
+          if (map1_.empty() || map1_.size() != raw_frame.size()) {
             cv::initUndistortRectifyMap(K, D, cv::Mat(), K, raw_frame.size(),
-                                        CV_16SC2, _map1, _map2);
+                                        CV_16SC2, map1_, map2_);
             logger::info("[{}] Undistortion map initialized for {}x{}",
-                         get_name(), raw_frame.cols, raw_frame.rows);
+                         getName(), raw_frame.cols, raw_frame.rows);
           }
         }
-        cv::remap(raw_frame, undistorted_frame, _map1, _map2, cv::INTER_LINEAR);
+        cv::remap(raw_frame, undistorted_frame, map1_, map2_, cv::INTER_LINEAR);
       } else {
         undistorted_frame = raw_frame;
       }
@@ -293,39 +271,39 @@ void uvc_camera_grabber::_grab_task(int camera_id, json camera_param) {
       string tag_str = tag.dump();
 
       /* transfer original image to processs */
-      if (_use_image_stream.load()) {
+      if (use_image_stream_.load()) {
         /* image encoding */
         cv::imencode(".jpg", rotated_frame, serialized_image);
 
         /* Send via dispatch - addmem avoids string copy for binary data */
-        flame::component::zdata msg;
+        flame::component::ZData msg;
         msg.addstr(stream_portname);
         msg.addstr(""); // broadcast
         msg.addstr("binary");
         msg.addmem(serialized_image.data(), serialized_image.size());
 
         if (!dispatch(stream_portname, msg)) {
-          logger::warn("[{}] {} socket is not valid", get_name(),
+          logger::warn("[{}] {} socket is not valid", getName(),
                        stream_portname);
         }
       }
 
       /* transfer small image for monitoring */
-      if (_use_image_stream_monitoring.load()) {
+      if (use_image_stream_monitoring_.load()) {
 
         cv::resize(rotated_frame, monitor_image,
                    cv::Size(monitoring_width, monitoring_height));
         cv::imencode(".jpg", monitor_image, serialized_monitor_image);
 
         /* Send monitor image via dispatch - addmem for binary zero-copy */
-        flame::component::zdata msg;
+        flame::component::ZData msg;
         msg.addstr(monitoring_portname);
         msg.addstr(""); // broadcast
         msg.addstr("binary");
         msg.addmem(serialized_monitor_image.data(), serialized_monitor_image.size());
 
         if (!dispatch(monitoring_portname, msg)) {
-          logger::warn("[{}] {} socket is not valid", get_name(),
+          logger::warn("[{}] {} socket is not valid", getName(),
                        monitoring_portname);
         }
       }
@@ -333,19 +311,19 @@ void uvc_camera_grabber::_grab_task(int camera_id, json camera_param) {
     } /* end while */
 
     /* realse */
-    _cap.release();
-    logger::info("[{}] Camera #{}({}) is released", get_name(), camera_id,
+    cap.release();
+    logger::info("[{}] Camera #{}({}) is released", getName(), camera_id,
                  device);
   } catch (const cv::Exception &e) {
-    logger::error("[{}] Camera #{} CV Exception : {}", get_name(), camera_id,
+    logger::error("[{}] Camera #{} CV Exception : {}", getName(), camera_id,
                   e.err);
-    logger::debug("[{}] {}", get_name(), e.what());
-    _cap.release();
+    logger::debug("[{}] {}", getName(), e.what());
+    cap.release();
   } catch (const std::out_of_range &e) {
-    logger::error("[{}] Invalid parameter access", get_name());
+    logger::error("[{}] Invalid parameter access", getName());
   } catch (const zmq::error_t &e) {
-    logger::error("[{}] Piepeline Error : {}", get_name(), e.what());
+    logger::error("[{}] Piepeline Error : {}", getName(), e.what());
   } catch (const json::exception &e) {
-    logger::error("[{}] Data Parse Error : {}", get_name(), e.what());
+    logger::error("[{}] Data Parse Error : {}", getName(), e.what());
   }
 }

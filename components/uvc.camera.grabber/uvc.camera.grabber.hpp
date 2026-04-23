@@ -20,37 +20,37 @@
 
 using namespace std;
 
-class uvc_camera_grabber : public flame::component::object {
+class UvcCameraGrabber : public flame::component::Object {
 public:
-  uvc_camera_grabber() = default;
-  virtual ~uvc_camera_grabber() = default;
+  UvcCameraGrabber() = default;
+  virtual ~UvcCameraGrabber() = default;
 
   /* default interface functions */
-  bool on_init() override;
-  void on_loop() override;
-  void on_close() override;
-  void on_data(flame::component::zdata &data) override;
+  bool onInit() override;
+  void onLoop() override;
+  void onClose() override;
+  void onData(flame::component::ZData &data) override;
 
 private:
   /* grabber tasks */
-  void _grab_task(int camera_id, json camera_param);
+  void grabTask(int camera_id, json camera_param);
 
   /* private function */
-  vector<string> find_available_camera(int n_max = 10, const string prefix = "/dev/video");
+  vector<string> findAvailableCamera(int n_max = 10, const string prefix = "/dev/video");
 
 private:
   /* grabbing worker */
-  unordered_map<int, thread> _grab_worker;
+  unordered_map<int, thread> grab_worker_;
 
   /* zpipe */
   /* flag */
-  atomic<bool> _worker_stop{false};
-  atomic<bool> _use_image_stream_monitoring{false};
-  atomic<bool> _use_image_stream{false};
-  atomic<double> _rotation_cw{0.0};
-  mutex _calibration_mtx;
-  cv::Mat _map1, _map2;
-  atomic<bool> _use_undistortion{false};
+  atomic<bool> worker_stop_{false};
+  atomic<bool> use_image_stream_monitoring_{false};
+  atomic<bool> use_image_stream_{false};
+  atomic<double> rotation_cw_{0.0};
+  mutex calibration_mtx_;
+  cv::Mat map1_, map2_;
+  atomic<bool> use_undistortion_{false};
 
 }; /* class */
 
