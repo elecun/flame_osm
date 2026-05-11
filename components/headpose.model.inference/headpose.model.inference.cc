@@ -12,16 +12,16 @@ using namespace std;
 
 /* create component instance */
 static headpose_model_inference* _instance = nullptr;
-flame::component::object* create(){ if(!_instance) _instance = new headpose_model_inference(); return _instance; }
-void release(){ if(_instance){ delete _instance; _instance = nullptr; }}
+flame::component::Object* Create(){ if(!_instance) _instance = new headpose_model_inference(); return _instance; }
+void Release(){ if(_instance){ delete _instance; _instance = nullptr; }}
 
 
-bool headpose_model_inference::on_init(){
+bool headpose_model_inference::onInit(){
 
     try{
 
         /* read profile */
-        json parameters = get_profile()->parameters();
+        json parameters = getProfile()->parameters();
 
         /* Initialize ZMQ */
         zmq_endpoint_ = parameters.value("zmq_endpoint", "tcp://localhost:5555");
@@ -47,29 +47,29 @@ bool headpose_model_inference::on_init(){
         is_running_ = true;
         processing_thread_ = std::thread(&headpose_model_inference::processing_loop, this);
 
-        logger::info("[{}] Initialized successfully", get_name());
+        logger::info("[{}] Initialized successfully", getName());
 
     }
     catch(json::exception& e){
-        logger::error("[{}] Profile Error : {}", get_name(), e.what());
+        logger::error("[{}] Profile Error : {}", getName(), e.what());
         return false;
     }
     catch(std::exception& e){
-        logger::error("[{}] Initialization Error : {}", get_name(), e.what());
+        logger::error("[{}] Initialization Error : {}", getName(), e.what());
         return false;
     }
 
     return true;
 }
 
-void headpose_model_inference::on_loop(){
+void headpose_model_inference::onLoop(){
   
         
  
 }
 
 
-void headpose_model_inference::on_close(){
+void headpose_model_inference::onClose(){
     try{
         /* Stop processing thread */
         is_running_ = false;
@@ -95,14 +95,14 @@ void headpose_model_inference::on_close(){
             graph_.reset();
         }
 
-        logger::info("[{}] Closed successfully", get_name());
+        logger::info("[{}] Closed successfully", getName());
     }
     catch(std::exception& e){
-        logger::error("[{}] Close Error : {}", get_name(), e.what());
+        logger::error("[{}] Close Error : {}", getName(), e.what());
     }
 }
 
-void headpose_model_inference::on_message(const message_t& msg){
+void headpose_model_inference::onData(flame::component::ZData& data){
     // Note: The 'msg' parameter is currently unused.
 }
 
@@ -120,20 +120,20 @@ void headpose_model_inference::init_mediapipe(){
 
     absl::Status status = mediapipe::ParseTextProto(calculator_graph_config_contents, &graph_config_);
     if (!status.ok()) {
-        logger::error("[{}] Failed to parse graph config: {}", get_name(), status.ToString());
+        logger::error("[{}] Failed to parse graph config: {}", getName(), status.ToString());
         return;
     }
 
     graph_ = std::make_unique<mediapipe::CalculatorGraph>();
     status = graph_->Initialize(graph_config_);
     if (!status.ok()) {
-        logger::error("[{}] Failed to initialize graph: {}", get_name(), status.ToString());
+        logger::error("[{}] Failed to initialize graph: {}", getName(), status.ToString());
         return;
     }
 
     status = graph_->StartRun({});
     if (!status.ok()) {
-        logger::error("[{}] Failed to start graph: {}", get_name(), status.ToString());
+        logger::error("[{}] Failed to start graph: {}", getName(), status.ToString());
         return;
     }
 }
@@ -177,7 +177,7 @@ void headpose_model_inference::processing_loop(){
                         "input_video", mediapipe::Adopt(input_frame.release()).At(mediapipe::Timestamp(frame_timestamp_us)));
 
                     if(!status.ok()){
-                        logger::error("[{}] Failed to add packet: {}", get_name(), status.ToString());
+                        logger::error("[{}] Failed to add packet: {}", getName(), status.ToString());
                         continue;
                     }
 
@@ -220,7 +220,7 @@ void headpose_model_inference::processing_loop(){
 
         }
         catch(std::exception& e){
-            logger::error("[{}] Processing Error: {}", get_name(), e.what());
+            logger::error("[{}] Processing Error: {}", getName(), e.what());
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }

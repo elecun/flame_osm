@@ -12,41 +12,41 @@ using namespace std;
 
 /* create component instance */
 static os_model_inference* _instance = nullptr;
-flame::component::object* create(){ if(!_instance) _instance = new os_model_inference(); return _instance; }
-void release(){ if(_instance){ delete _instance; _instance = nullptr; }}
+flame::component::Object* Create(){ if(!_instance) _instance = new os_model_inference(); return _instance; }
+void Release(){ if(_instance){ delete _instance; _instance = nullptr; }}
 
 
-bool os_model_inference::on_init(){
+bool os_model_inference::onInit(){
 
     try{
 
         /* read profile */
-        json parameters = get_profile()->parameters();
+        json parameters = getProfile()->parameters();
 
         
     }
     catch(json::exception& e){
-        logger::error("[{}] Profile Error : {}", get_name(), e.what());
+        logger::error("[{}] Profile Error : {}", getName(), e.what());
         return false;
     }
 
     return true;
 }
 
-void os_model_inference::on_loop(){
+void os_model_inference::onLoop(){
   
         
  
 }
 
 
-void os_model_inference::on_close(){
+void os_model_inference::onClose(){
     
 
 
 
 }
 
-void os_model_inference::on_message(){
+void os_model_inference::onData(flame::component::ZData& data){
     
 }

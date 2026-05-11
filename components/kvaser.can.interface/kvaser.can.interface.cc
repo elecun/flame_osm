@@ -12,16 +12,16 @@ using namespace std;
 
 /* create component instance */
 static kvaser_can_interface* _instance = nullptr;
-flame::component::object* create(){ if(!_instance) _instance = new kvaser_can_interface(); return _instance; }
-void release(){ if(_instance){ delete _instance; _instance = nullptr; }}
+flame::component::Object* Create(){ if(!_instance) _instance = new kvaser_can_interface(); return _instance; }
+void Release(){ if(_instance){ delete _instance; _instance = nullptr; }}
 
 
-bool kvaser_can_interface::on_init(){
+bool kvaser_can_interface::onInit(){
 
     try{
 
         /* read profile */
-        json parameters = get_profile()->parameters();
+        json parameters = getProfile()->parameters();
 
         /* CAN device initialization */
         canInitializeLibrary();
@@ -32,10 +32,10 @@ bool kvaser_can_interface::on_init(){
         if(_status != canOK){
             char err[512] = {0,};
             canGetErrorText((canStatus)_status, err, sizeof(err));
-            logger::error("[{}] Cannot find CAN channel. Error code : {}", get_name(), err);
+            logger::error("[{}] Cannot find CAN channel. Error code : {}", getName(), err);
             return false;
         }
-        logger::debug("[{}] Found {} CAN channel(s) ", get_name(), _can_channels);
+        logger::debug("[{}] Found {} CAN channel(s) ", getName(), _can_channels);
 
         /* show channel info. */
         for(int i=0; i<_can_channels; i++){
@@ -45,7 +45,7 @@ bool kvaser_can_interface::on_init(){
             // read channel name
             _status = canGetChannelData(i, canCHANNELDATA_DEVDESCR_ASCII, device_name, sizeof(device_name));
             if (_status != canOK) {
-                logger::warn("[{}] Channel {} name retrieval failed. Error code : {}", get_name(), i, (int)_status);
+                logger::warn("[{}] Channel {} name retrieval failed. Error code : {}", getName(), i, (int)_status);
             }
             string str_device_name(device_name);
 
@@ -53,10 +53,10 @@ bool kvaser_can_interface::on_init(){
             _status = canGetChannelData(i, canCHANNELDATA_CHAN_NO_ON_CARD, &ch_on_card, sizeof(ch_on_card));
             if (_status != canOK) {
                 ch_on_card = -1;
-                logger::warn("[{}] Channel {} on card retrieval failed. Error code : {}", get_name(), i, (int)_status);
+                logger::warn("[{}] Channel {} on card retrieval failed. Error code : {}", getName(), i, (int)_status);
             }
         
-            logger::debug("[{}] CAN Channel {}: Device Name: {}\tDevice Channel: {}", get_name(), i, device_name, ch_on_card);
+            logger::debug("[{}] CAN Channel {}: Device Name: {}\tDevice Channel: {}", getName(), i, device_name, ch_on_card);
    
         }
 
@@ -66,7 +66,7 @@ bool kvaser_can_interface::on_init(){
         if(_can_handle<0){
             char err_buf[100];
             canGetErrorText((canStatus)_can_handle, err_buf, sizeof(err_buf));
-            logger::error("[{}] Error : {}", get_name(), err_buf);
+            logger::error("[{}] Error : {}", getName(), err_buf);
             return false;
         }
         else{
@@ -88,26 +88,26 @@ bool kvaser_can_interface::on_init(){
             if(_status!=canOK){
                 char err[512] = {0,};
                 canGetErrorText(_status, err, sizeof(err));
-                logger::error("[{}] Failed to go bus ON : {}", get_name(), err);
+                logger::error("[{}] Failed to go bus ON : {}", getName(), err);
                 return false;
             }
-            logger::debug("[{}] CAN channel {} opened & set BUS bitrate {} bps", get_name(), ch, bitrate);
+            logger::debug("[{}] CAN channel {} opened & set BUS bitrate {} bps", getName(), ch, bitrate);
 
             /* start channel 0 receiver */
-            logger::info("[{}] Listen for CAN frames...", get_name());
+            logger::info("[{}] Listen for CAN frames...", getName());
             _can_ch0_rcv_worker = thread(&kvaser_can_interface::_can_ch0_rcv_task, this);
             
         }   
     }
     catch(json::exception& e){
-        logger::error("[{}] Profile Error : {}", get_name(), e.what());
+        logger::error("[{}] Profile Error : {}", getName(), e.what());
         return false;
     }
 
     return true;
 }
 
-void kvaser_can_interface::on_loop(){
+void kvaser_can_interface::onLoop(){
   
         unsigned int id = 0x123;                   // Example CAN ID (Standard)
         unsigned char data[8] = {0};             // Data payload (8 bytes)
@@ -125,7 +125,7 @@ void kvaser_can_interface::on_loop(){
         data[6] = 0xFF;
         data[7] = 0x11;
 
-        logger::info("[{}] Sending CAN message, ID=0x{}, DLC={}", get_name(), id, dlc);
+        logger::info("[{}] Sending CAN message, ID=0x{}, DLC={}", getName(), id, dlc);
 
         // Send the message
         // canWrite() returns immediately after queuing the message.
@@ -136,15 +136,15 @@ void kvaser_can_interface::on_loop(){
             char err_buf[100];
             canGetErrorText(stat, err_buf, sizeof(err_buf));
             string str_err(err_buf, sizeof(err_buf));
-            logger::error("[{}] Error sending CAN message: {}", get_name(), str_err);
+            logger::error("[{}] Error sending CAN message: {}", getName(), str_err);
         } else {
-            logger::info("[{}] CAN message sent successfully", get_name());
+            logger::info("[{}] CAN message sent successfully", getName());
         }
  
 }
 
 
-void kvaser_can_interface::on_close(){
+void kvaser_can_interface::onClose(){
     
     /* close CAN */
     canBusOff(_can_handle);
@@ -154,8 +154,8 @@ void kvaser_can_interface::on_close(){
 
 }
 
-void kvaser_can_interface::on_message(const message_t& msg){
-    // Note: The 'msg' parameter is currently unused.
+void kvaser_can_interface::onData(flame::component::ZData& data){
+    // Note: The 'data' parameter is currently unused.
 }
 
 
@@ -176,7 +176,7 @@ void kvaser_can_interface::_can_ch0_rcv_task(){
                 for(unsigned char d:data){
                     oss << std::hex << std::uppercase << std::setfill('0') << std::setw(2) << static_cast<int>(d) << " ";
                 }
-                logger::debug("[{}] ID({}) | DLC({}) | Data({})", get_name(), id, dlc, oss.str());
+                logger::debug("[{}] ID({}) | DLC({}) | Data({})", getName(), id, dlc, oss.str());
 
                 /* for sample */
                 // if(id==(0x180+_node_id)){
@@ -187,7 +187,7 @@ void kvaser_can_interface::_can_ch0_rcv_task(){
                 //     double slope_z_deg = static_cast<double>(slope_z)*resolution;
                 //     double slope_y_deg = static_cast<double>(slope_y)*resolution;
 
-                //     logger::info("[{}] Y({:.3f}), Z({:.3f}), Temp({})", get_name(), slope_y_deg, slope_z_deg, to_string(temperature));
+                //     logger::info("[{}] Y({:.3f}), Z({:.3f}), Temp({})", getName(), slope_y_deg, slope_z_deg, to_string(temperature));
                 // }
             }
 
@@ -200,16 +200,16 @@ void kvaser_can_interface::_can_ch0_rcv_task(){
         canBusOff(_can_handle);
         canClose(_can_handle);
         canUnloadLibrary();
-        logger::info("[{}] Close Device", get_name());
+        logger::info("[{}] Close Device", getName());
     }
     catch(const std::out_of_range& e){
-        logger::error("[{}] Invalid parameter access", get_name());
+        logger::error("[{}] Invalid parameter access", getName());
     }
     catch(const zmq::error_t& e){
-        logger::error("[{}] Piepeline Error : {}", get_name(), e.what());
+        logger::error("[{}] Piepeline Error : {}", getName(), e.what());
     }
     catch(const json::exception& e){
-        logger::error("[{}] Data Parse Error : {}", get_name(), e.what());
+        logger::error("[{}] Data Parse Error : {}", getName(), e.what());
     }
 
 }

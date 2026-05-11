@@ -1,5 +1,5 @@
 
-#include "kps.holistic.inference"
+#include "kps.holistic.inference.hpp"
 #include <flame/log.hpp>
 #include <flame/def.hpp>
 #include <chrono>
@@ -11,52 +11,52 @@ using namespace flame;
 using namespace std;
 
 /* create component instance */
-static headpose_model_inference* _instance = nullptr;
-flame::component::object* create(){ if(!_instance) _instance = new headpose_model_inference(); return _instance; }
-void release(){ if(_instance){ delete _instance; _instance = nullptr; }}
+static kps_holistic_inference* _instance = nullptr;
+flame::component::Object* Create(){ if(!_instance) _instance = new kps_holistic_inference(); return _instance; }
+void Release(){ if(_instance){ delete _instance; _instance = nullptr; }}
 
 
-bool headpose_model_inference::on_init(){
+bool kps_holistic_inference::onInit(){
 
     try{
 
         /* read profile */
-        json parameters = get_profile()->parameters();
+        json parameters = getProfile()->parameters();
 
         
 
-        logger::info("[{}] Initialized successfully", get_name());
+        logger::info("[{}] Initialized successfully", getName());
 
     }
     catch(json::exception& e){
-        logger::error("[{}] Profile Error : {}", get_name(), e.what());
+        logger::error("[{}] Profile Error : {}", getName(), e.what());
         return false;
     }
     catch(std::exception& e){
-        logger::error("[{}] Initialization Error : {}", get_name(), e.what());
+        logger::error("[{}] Initialization Error : {}", getName(), e.what());
         return false;
     }
 
     return true;
 }
 
-void headpose_model_inference::on_loop(){
+void kps_holistic_inference::onLoop(){
   
         
  
 }
 
 
-void headpose_model_inference::on_close(){
+void kps_holistic_inference::onClose(){
     try{
         
-        logger::info("[{}] Closed successfully", get_name());
+        logger::info("[{}] Closed successfully", getName());
     }
     catch(std::exception& e){
-        logger::error("[{}] Close Error : {}", get_name(), e.what());
+        logger::error("[{}] Close Error : {}", getName(), e.what());
     }
 }
 
-void headpose_model_inference::on_message(const message_t& msg){
-    // Note: The 'msg' parameter is currently unused.
+void kps_holistic_inference::onData(flame::component::ZData& data){
+    // Note: The 'data' parameter is currently unused.
 }

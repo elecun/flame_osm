@@ -27,16 +27,16 @@ extern "C" {
     #include <canlib.h>
 }
 
-class kvaser_can_interface : public flame::component::object {
+class kvaser_can_interface : public flame::component::Object {
 public:
 kvaser_can_interface() = default;
     virtual ~kvaser_can_interface() = default;
 
     /* default interface functions */
-    bool on_init() override;
-    void on_loop() override;
-    void on_close() override;
-    void on_message(const message_t& msg) override;
+    bool onInit() override;
+    void onLoop() override;
+    void onClose() override;
+    void onData(flame::component::ZData& data) override;
 
 private: /* private functions */
     void _can_ch0_rcv_task();

@@ -11,8 +11,8 @@ namespace fs = std::filesystem;
 
 /* create component instance */
 static body_kps_inference* _instance = nullptr;
-flame::component::object* create(){ if(!_instance) _instance = new body_kps_inference(); return _instance; }
-void release(){ if(_instance){ delete _instance; _instance = nullptr; }}
+flame::component::Object* Create(){ if(!_instance) _instance = new body_kps_inference(); return _instance; }
+void Release(){ if(_instance){ delete _instance; _instance = nullptr; }}
 
 /* TensorRT Logger implementation */
 void Logger::log(Severity severity, const char* msg) noexcept {
@@ -37,19 +37,19 @@ body_kps_inference::body_kps_inference() {
     _output_size = (4 + _num_keypoints * 3) * 8400 * sizeof(float); // YOLO11 output format
 }
 
-bool body_kps_inference::on_init(){
+bool body_kps_inference::onInit(){
     try{
         /* read profile */
-        json parameters = get_profile()->parameters();
+        json parameters = getProfile()->parameters();
 
         _model_path = parameters.value("model_path", "");
         if(_model_path.empty()){
-            logger::error("[{}] TensorRT engine path is not defined", get_name());
+            logger::error("[{}] TensorRT engine path is not defined", getName());
             return false;
         }
 
         if(!fs::exists(_model_path)){
-            logger::error("[{}] TensorRT engine file not found: {}", get_name(), _model_path);
+            logger::error("[{}] TensorRT engine file not found: {}", getName(), _model_path);
             return false;
         }
 
@@ -62,10 +62,10 @@ bool body_kps_inference::on_init(){
         /* Set CUDA device */
         cudaError_t cuda_status = cudaSetDevice(_gpu_id);
         if(cuda_status != cudaSuccess){
-            logger::error("[{}] Failed to set CUDA device {}: {}", get_name(), _gpu_id, cudaGetErrorString(cuda_status));
+            logger::error("[{}] Failed to set CUDA device {}: {}", getName(), _gpu_id, cudaGetErrorString(cuda_status));
             return false;
         }
-        logger::info("[{}] Using GPU device: {}", get_name(), _gpu_id);
+        logger::info("[{}] Using GPU device: {}", getName(), _gpu_id);
 
         /* Recalculate buffer sizes based on parameters */
         _input_size = 3 * _input_width * _input_height * sizeof(float);
@@ -73,48 +73,48 @@ bool body_kps_inference::on_init(){
 
         /* Load TensorRT engine */
         if(!_load_engine(_model_path)){
-            logger::error("[{}] Failed to load TensorRT engine", get_name());
+            logger::error("[{}] Failed to load TensorRT engine", getName());
             return false;
         }
 
         /* Create CUDA stream for async execution */
         cudaError_t stream_status = cudaStreamCreate(&_cuda_stream);
         if(stream_status != cudaSuccess){
-            logger::error("[{}] Failed to create CUDA stream: {}", get_name(), cudaGetErrorString(stream_status));
+            logger::error("[{}] Failed to create CUDA stream: {}", getName(), cudaGetErrorString(stream_status));
             return false;
         }
-        logger::info("[{}] CUDA stream created successfully", get_name());
+        logger::info("[{}] CUDA stream created successfully", getName());
 
         /* Allocate CUDA memory */
         _allocate_buffers();
 
         /* Start inference thread */
         _inference_worker = thread(&body_kps_inference::_inference_process, this);
-        logger::info("[{}] Body keypoint inference component initialized successfully", get_name());
+        logger::info("[{}] Body keypoint inference component initialized successfully", getName());
 
     }
     catch(json::exception& e){
-        logger::error("[{}] Profile Error : {}", get_name(), e.what());
+        logger::error("[{}] Profile Error : {}", getName(), e.what());
         return false;
     }
     catch(const std::exception& e){
-        logger::error("[{}] Initialization Error : {}", get_name(), e.what());
+        logger::error("[{}] Initialization Error : {}", getName(), e.what());
         return false;
     }
 
     return true;
 }
 
-void body_kps_inference::on_loop(){
+void body_kps_inference::onLoop(){
     /* Main loop - can be used for periodic tasks */
-    // std::this_thread::sleep_for(std::chrono::milliseconds(100));
 }
 
-void body_kps_inference::on_close(){
-    logger::info("[{}] Shutting down body keypoint inference component", get_name());
+void body_kps_inference::onClose(){
+    logger::info("[{}] Shutting down body keypoint inference component", getName());
 
     /* Stop inference thread */
     _worker_stop.store(true);
+    _queue_cv.notify_all();
     if(_inference_worker.joinable()){
         _inference_worker.join();
     }
@@ -125,11 +125,23 @@ void body_kps_inference::on_close(){
     _engine.reset();
     _runtime.reset();
 
-    logger::info("[{}] Component successfully closed", get_name());
+    logger::info("[{}] Component successfully closed", getName());
 }
 
-void body_kps_inference::on_message(const message_t& msg){
-    /* Handle incoming messages if needed */
+void body_kps_inference::onData(flame::component::ZData& data){
+    /* Handle incoming messages: push to queue */
+    {
+        lock_guard<mutex> lock(_queue_mtx);
+        if(_data_queue.size() < _max_queue_size) {
+            _data_queue.push(std::move(data));
+        }
+        else {
+            // Drop oldest if queue is full
+            _data_queue.pop();
+            _data_queue.push(std::move(data));
+        }
+    }
+    _queue_cv.notify_one();
 }
 
 bool body_kps_inference::_load_engine(const std::string& engine_path){
@@ -137,7 +149,7 @@ bool body_kps_inference::_load_engine(const std::string& engine_path){
         /* Read engine file */
         std::ifstream file(engine_path, std::ios::binary);
         if(!file.good()){
-            logger::error("[{}] Failed to open engine file: {}", get_name(), engine_path);
+            logger::error("[{}] Failed to open engine file: {}", getName(), engine_path);
             return false;
         }
 
@@ -152,25 +164,25 @@ bool body_kps_inference::_load_engine(const std::string& engine_path){
         /* Create TensorRT runtime and engine */
         _runtime.reset(nvinfer1::createInferRuntime(_logger));
         if(!_runtime){
-            logger::error("[{}] Failed to create TensorRT runtime", get_name());
+            logger::error("[{}] Failed to create TensorRT runtime", getName());
             return false;
         }
 
         _engine.reset(_runtime->deserializeCudaEngine(engine_data.data(), size));
         if(!_engine){
-            logger::error("[{}] Failed to deserialize CUDA engine", get_name());
+            logger::error("[{}] Failed to deserialize CUDA engine", getName());
             return false;
         }
 
         _context.reset(_engine->createExecutionContext());
         if(!_context){
-            logger::error("[{}] Failed to create execution context", get_name());
+            logger::error("[{}] Failed to create execution context", getName());
             return false;
         }
 
         /* Print engine bindings info */
         int32_t num_bindings = _engine->getNbIOTensors();
-        logger::info("[{}] TensorRT engine has {} IO tensors", get_name(), num_bindings);
+        logger::info("[{}] TensorRT engine has {} IO tensors", getName(), num_bindings);
 
         for(int i = 0; i < num_bindings; i++){
             const char* name = _engine->getIOTensorName(i);
@@ -186,14 +198,14 @@ bool body_kps_inference::_load_engine(const std::string& engine_path){
             dim_str += "]";
 
             logger::info("[{}] Tensor {}: name='{}', shape={}, type={}, mode={}",
-                        get_name(), i, name, dim_str, (int)dtype, (int)mode);
+                        getName(), i, name, dim_str, (int)dtype, (int)mode);
         }
 
-        logger::info("[{}] TensorRT engine loaded successfully", get_name());
+        logger::info("[{}] TensorRT engine loaded successfully", getName());
         return true;
     }
     catch(const std::exception& e){
-        logger::error("[{}] Exception in _load_engine: {}", get_name(), e.what());
+        logger::error("[{}] Exception in _load_engine: {}", getName(), e.what());
         return false;
     }
 }
@@ -208,7 +220,7 @@ void body_kps_inference::_allocate_buffers(){
     cudaMalloc(&_gpu_output_buffer, _output_size);
 
     logger::info("[{}] CUDA buffers allocated - Input: {} bytes, Output: {} bytes", 
-                get_name(), _input_size, _output_size);
+                getName(), _input_size, _output_size);
 }
 
 void body_kps_inference::_free_buffers(){
@@ -238,7 +250,7 @@ void body_kps_inference::_free_buffers(){
         _gpu_output_buffer = nullptr;
     }
 
-    logger::debug("[{}] CUDA buffers and stream freed", get_name());
+    logger::debug("[{}] CUDA buffers and stream freed", getName());
 }
 
 cv::Mat body_kps_inference::_preprocess_image(const cv::Mat& image){
@@ -273,9 +285,6 @@ cv::Mat body_kps_inference::_preprocess_image(const cv::Mat& image){
     /* Convert to float and normalize */
     processed.convertTo(processed, CV_32F, 1.0/255.0);
 
-    // logger::info("Letterbox: orig={}x{}, scale={}, new={}x{}, pad=({},{})",
-    //              orig_width, orig_height, _letterbox_scale, new_width, new_height, _letterbox_pad_left, _letterbox_pad_top);
-
     return processed;
 }
 
@@ -287,12 +296,9 @@ std::vector<body_kps::PoseResult> body_kps_inference::_postprocess_output(float*
     const int num_channels = 4 + 1 + _num_keypoints * 3;  // 56 for YOLO11-pose
     const float conf_threshold = 0.5f;
 
-    // logger::info("Output format: [boxes={}, channels={}]", num_boxes, num_channels);
-
     /* Track best result */
     float best_confidence = 0.0f;
     int best_index = -1;
-    int count_above_threshold = 0;
 
     /* Find the detection with highest object confidence */
     for(int i = 0; i < num_boxes; i++){
@@ -301,31 +307,24 @@ std::vector<body_kps::PoseResult> body_kps_inference::_postprocess_output(float*
         /* Object confidence is at index 4 */
         float obj_conf = box_data[4];
 
-        if(obj_conf > conf_threshold){
-            count_above_threshold++;
-        }
-
         if(obj_conf > best_confidence){
             best_confidence = obj_conf;
             best_index = i;
         }
     }
 
-    // logger::info("Total detections above threshold ({}): {}, best_confidence: {:.4f}, best_index: {}", conf_threshold, count_above_threshold, best_confidence, best_index);
-
     /* Extract only the best detection */
-    if(best_index >= 0){
+    if(best_index >= 0 && best_confidence > conf_threshold){
         float* box_data = output + best_index * num_channels;
 
-        /* Extract bounding box - boxes-first format */
-        /* Format is [x1, y1, x2, y2] (xyxy format) not [cx, cy, w, h] */
+        /* Extract bounding box - xyxy format */
         float x1 = box_data[0];
         float y1 = box_data[1];
         float x2 = box_data[2];
         float y2 = box_data[3];
         float obj_conf = box_data[4];
 
-        /* Convert to center+size format and remove letterbox padding */
+        /* Remove letterbox padding and scale to original image coordinates */
         float x1_unpadded = (x1 - _letterbox_pad_left) / _letterbox_scale;
         float y1_unpadded = (y1 - _letterbox_pad_top) / _letterbox_scale;
         float x2_unpadded = (x2 - _letterbox_pad_left) / _letterbox_scale;
@@ -343,19 +342,17 @@ std::vector<body_kps::PoseResult> body_kps_inference::_postprocess_output(float*
             height_unpadded
         );
 
-        /* Extract keypoints - boxes-first format */
-        /* Keypoints start at index 5: [vis0, x0, y0, vis1, x1, y1, ...] */
+        /* Extract keypoints */
         for(int k = 0; k < _num_keypoints; k++){
             body_kps::KeyPoint kpt;
             int kpt_offset = 5 + k * 3;
-            float kpt_vis = box_data[kpt_offset + 0];  // visibility/confidence
+            float kpt_vis = box_data[kpt_offset + 0];
             float kpt_x = box_data[kpt_offset + 1];
             float kpt_y = box_data[kpt_offset + 2];
 
-            /* Remove letterbox padding and scale to original image coordinates */
             kpt.x = (kpt_x - _letterbox_pad_left) / _letterbox_scale;
             kpt.y = (kpt_y - _letterbox_pad_top) / _letterbox_scale;
-            kpt.confidence = kpt_vis;  // Use visibility as confidence
+            kpt.confidence = kpt_vis;
             result.keypoints.push_back(kpt);
         }
 
@@ -371,22 +368,18 @@ void body_kps_inference::_inference_process(){
     
     while(!_worker_stop.load()){
         try{
-            /* Receive image from ZMQ */
-            message_t msg_multipart;
+            flame::component::ZData msg_multipart;
+            {
+                unique_lock<mutex> lock(_queue_mtx);
+                _queue_cv.wait(lock, [this]{ return !_data_queue.empty() || _worker_stop.load(); });
+                
+                if(_worker_stop.load()) break;
 
-            if(get_port("image_stream_1")->handle() == nullptr){
-                logger::warn("[{}] image_stream_1 port handle is not valid", get_name());
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                continue;
+                msg_multipart = std::move(_data_queue.front());
+                _data_queue.pop();
             }
 
-            /* Receive multipart message with timeout */
-            if(!msg_multipart.recv(*get_port("image_stream_1"))){
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                continue;
-            }
-
-            if(msg_multipart.size()==3){
+            if(msg_multipart.size() >= 3){
 
                 auto process_start = chrono::high_resolution_clock::now();
 
@@ -403,11 +396,9 @@ void body_kps_inference::_inference_process(){
                 cv::Mat decoded = cv::imdecode(image, cv::IMREAD_COLOR);
 
                 if(decoded.empty()){
-                    logger::warn("[{}] Failed to decode image", get_name());
+                    logger::warn("[{}] Failed to decode image", getName());
                     continue;
                 }
-
-                // logger::debug("[{}] Received image on port {}: {}x{}, tag: {}", get_name(), portname, decoded.cols, decoded.rows, tag_str);
 
                 /* Preprocess image */
                 cv::Mat processed_image = _preprocess_image(decoded);
@@ -426,16 +417,15 @@ void body_kps_inference::_inference_process(){
                 cudaMemcpyAsync(_gpu_input_buffer, _cpu_input_buffer, _input_size, cudaMemcpyHostToDevice, _cuda_stream);
 
                 /* Set input shape for dynamic shape engine */
-                // Input shape: [batch_size, channels, height, width] = [1, 3, 640, 640]
                 nvinfer1::Dims input_dims;
                 input_dims.nbDims = 4;
-                input_dims.d[0] = 1;  // batch size
-                input_dims.d[1] = 3;  // channels (RGB)
-                input_dims.d[2] = _input_height;  // height
-                input_dims.d[3] = _input_width;   // width
+                input_dims.d[0] = 1;
+                input_dims.d[1] = 3;
+                input_dims.d[2] = _input_height;
+                input_dims.d[3] = _input_width;
 
                 if(!_context->setInputShape("images", input_dims)){
-                    logger::error("[{}] Failed to set input shape", get_name());
+                    logger::error("[{}] Failed to set input shape", getName());
                     continue;
                 }
 
@@ -451,57 +441,18 @@ void body_kps_inference::_inference_process(){
                     cudaMemcpyAsync(_cpu_output_buffer, _gpu_output_buffer, _output_size, cudaMemcpyDeviceToHost, _cuda_stream);
                     cudaStreamSynchronize(_cuda_stream);
 
-                    /* Postprocess results (pass actual image dimensions) */
+                    /* Postprocess results */
                     std::vector<body_kps::PoseResult> results = _postprocess_output(_cpu_output_buffer, 1, decoded.cols, decoded.rows);
 
                     auto process_end = chrono::high_resolution_clock::now();
                     auto total_time = chrono::duration_cast<chrono::milliseconds>(process_end - process_start).count();
-                    logger::info("[{}] Frame {}: processing time = {}ms, detected {} poses", get_name(), frame_count, total_time, results.size());
+                    logger::info("[{}] Frame {}: processing time = {}ms, detected {} poses", getName(), frame_count, total_time, (int)results.size());
 
-
-                    /* Create JSON output */
-                    // json output;
-                    // output["id"] = 1;
-                    // output["timestamp"] = chrono::duration_cast<chrono::milliseconds>(process_start.time_since_epoch()).count();
-                    // output["fps"] = 0;
-                    // output["num_poses"] = results.size();
-
-                    // json poses_array = json::array();
-                    // for(const auto& result : results){
-                    //     json pose_obj;
-                    //     pose_obj["bbox"] = {
-                    //         {"x", result.bbox.x},
-                    //         {"y", result.bbox.y},
-                    //         {"width", result.bbox.width},
-                    //         {"height", result.bbox.height}
-                    //     };
-                    //     pose_obj["confidence"] = result.bbox_confidence;
-
-                    //     json keypoints_array = json::array();
-                    //     for(size_t i = 0; i < result.keypoints.size(); i++){
-                    //         const auto& kpt = result.keypoints[i];
-                    //         keypoints_array.push_back({
-                    //             {"id", i},
-                    //             {"x", kpt.x},
-                    //             {"y", kpt.y},
-                    //             {"confidence", kpt.confidence}
-                    //         });
-                    //     }
-                    //     pose_obj["keypoints"] = keypoints_array;
-                    //     poses_array.push_back(pose_obj);
-                    // }
-                    // output["poses"] = poses_array;
 
                     /* Draw keypoints on image */
                     for(const auto& result : results){
-                        // logger::info("[{}] Result bbox: ({}, {}, {}, {}), confidence: {}", get_name(), result.bbox.x, result.bbox.y, result.bbox.width, result.bbox.height, result.bbox_confidence);
-
-                        /* Draw bounding box */
                         cv::rectangle(decoded, result.bbox, cv::Scalar(0, 255, 0), 2);
-
-                        /* Draw keypoints */
-                        for(size_t i = 0; i < result.keypoints.size(); i++){
-                            const auto& kpt = result.keypoints[i];
+                        for(const auto& kpt : result.keypoints){
                             if(kpt.confidence > 0.5f){
                                 cv::circle(decoded, cv::Point(kpt.x, kpt.y), 5, cv::Scalar(0, 255, 0), -1);
                             }
@@ -509,51 +460,34 @@ void body_kps_inference::_inference_process(){
                     }
 
                     /* Send annotated image via ZMQ */
-                    if(get_port("image_stream_1_monitor")->handle() != nullptr){
-                        /* Resize for monitoring */
-                        cv::Mat resized;
-                        cv::resize(decoded, resized, cv::Size(540, 960));
+                    string monitor_portname = "image_stream_1_monitor";
+                    /* Resize for monitoring */
+                    cv::Mat resized;
+                    cv::resize(decoded, resized, cv::Size(540, 960));
 
-                        /* Encode image */
-                        std::vector<unsigned char> encoded_image;
-                        cv::imencode(".jpg", resized, encoded_image);
+                    /* Encode image */
+                    std::vector<unsigned char> encoded_image;
+                    cv::imencode(".jpg", resized, encoded_image);
 
-                        /* Create tag */
-                        json monitor_tag;
-                        monitor_tag["id"] = 1;
-                        monitor_tag["fps"] = 0;
-                        monitor_tag["timestamp"] = total_time;
-                        monitor_tag["width"] = resized.cols;
-                        monitor_tag["height"] = resized.rows;
+                    /* Create tag */
+                    json monitor_tag;
+                    monitor_tag["id"] = 1;
+                    monitor_tag["fps"] = 0;
+                    monitor_tag["timestamp"] = total_time;
+                    monitor_tag["width"] = resized.cols;
+                    monitor_tag["height"] = resized.rows;
 
-                        /* Send multipart message */
-                        message_t monitor_msg;
-                        monitor_msg.addstr("image_stream_1_monitor");
-                        monitor_msg.addstr(monitor_tag.dump());
-                        monitor_msg.addmem(encoded_image.data(), encoded_image.size());
+                    /* Send multipart message */
+                    flame::component::ZData monitor_msg;
+                    monitor_msg.addstr(monitor_portname);
+                    monitor_msg.addstr(monitor_tag.dump());
+                    monitor_msg.addmem(encoded_image.data(), encoded_image.size());
 
-                        if(!monitor_msg.send(*get_port("image_stream_1_monitor"), ZMQ_DONTWAIT)){
-                            if(!_worker_stop.load()){
-                                logger::warn("[{}] Failed to send annotated image", get_name());
-                            }
-                        }
-                        monitor_msg.clear();
+                    if(!dispatch(monitor_portname, monitor_msg)){
+                        logger::warn("[{}] Failed to send annotated image via port {}", getName(), monitor_portname);
                     }
-
-                    /* Send JSON result via ZMQ */
-                    // if(get_port("pose_result")->handle() != nullptr){
-                    //     std::string json_str = output.dump();
-                    //     zmq::message_t result_msg(json_str.data(), json_str.size());
-                    //     if(!result_msg.send(*get_port("pose_result"), ZMQ_DONTWAIT)){
-                    //         if(!_worker_stop.load()){
-                    //             logger::warn("[{}] Failed to send pose result", get_name());
-                    //         }
-                    //     }
-                    // }
-
-
                 } else {
-                    logger::error("[{}] TensorRT inference failed", get_name());
+                    logger::error("[{}] TensorRT inference failed", getName());
                 }
             }          
 
@@ -561,17 +495,17 @@ void body_kps_inference::_inference_process(){
 
         }
         catch(const zmq::error_t& e){
-            logger::error("[{}] ZMQ error in inference thread: {}", get_name(), e.what());
+            logger::error("[{}] ZMQ error in inference thread: {}", getName(), e.what());
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
         catch(const json::exception& e){
-            logger::error("[{}] JSON parsing error: {}", get_name(), e.what());
+            logger::error("[{}] JSON parsing error: {}", getName(), e.what());
         }
         catch(const std::exception& e){
-            logger::error("[{}] Exception in inference thread: {}", get_name(), e.what());
+            logger::error("[{}] Exception in inference thread: {}", getName(), e.what());
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         }
     }
 
-    logger::info("[{}] Inference thread stopped", get_name());
+    logger::info("[{}] Inference thread stopped", getName());
 }

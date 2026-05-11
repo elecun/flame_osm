@@ -20,6 +20,9 @@
 #include <opencv2/opencv.hpp>
 #include <NvInfer.h>
 #include <cuda_runtime.h>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
 
 namespace body_kps {
     struct KeyPoint {
@@ -43,16 +46,16 @@ public:
     void log(Severity severity, const char* msg) noexcept override;
 };
 
-class body_kps_inference : public flame::component::object {
+class body_kps_inference : public flame::component::Object {
     public:
         body_kps_inference();
         virtual ~body_kps_inference() = default;
 
         /* default interface functions */
-        bool on_init() override;
-        void on_loop() override;
-        void on_close() override;
-        void on_message(const message_t& msg) override;
+        bool onInit() override;
+        void onLoop() override;
+        void onClose() override;
+        void onData(flame::component::ZData& data) override;
 
     private:
         std::atomic<bool> _worker_stop { false };
@@ -84,6 +87,12 @@ class body_kps_inference : public flame::component::object {
         float _letterbox_scale = 1.0f;
         int _letterbox_pad_left = 0;
         int _letterbox_pad_top = 0;
+
+        /* Queue for incoming data */
+        std::queue<flame::component::ZData> _data_queue;
+        std::mutex _queue_mtx;
+        std::condition_variable _queue_cv;
+        const size_t _max_queue_size = 5;
 
         /* Processing functions */
         void _inference_process();

@@ -12,8 +12,8 @@ namespace fs = std::filesystem;
 
 /* create component instance */
 static face_detection_inference* _instance = nullptr;
-flame::component::object* create(){ if(!_instance) _instance = new face_detection_inference(); return _instance; }
-void release(){ if(_instance){ delete _instance; _instance = nullptr; }}
+flame::component::Object* Create(){ if(!_instance) _instance = new face_detection_inference(); return _instance; }
+void Release(){ if(_instance){ delete _instance; _instance = nullptr; }}
 
 /* TensorRT Logger implementation */
 void Logger::log(Severity severity, const char* msg) noexcept {
@@ -37,21 +37,21 @@ face_detection_inference::face_detection_inference() {
     
 }
 
-bool face_detection_inference::on_init(){
+bool face_detection_inference::onInit(){
     try{
-        logger::info("[{}] Initializing component", get_name());
+        logger::info("[{}] Initializing component", getName());
 
         /* Load model path from config */
-        json parameters = get_profile()->parameters();
+        json parameters = getProfile()->parameters();
 
         _model_path = parameters.value("model_path", "");
         if(_model_path.empty()){
-            logger::error("[{}] TensorRT engine path is not defined", get_name());
+            logger::error("[{}] TensorRT engine path is not defined", getName());
             return false;
         }
 
         if(!fs::exists(_model_path)){
-            logger::error("[{}] TensorRT engine file not found: {}", get_name(), _model_path);
+            logger::error("[{}] TensorRT engine file not found: {}", getName(), _model_path);
             return false;
         }
 
@@ -63,24 +63,24 @@ bool face_detection_inference::on_init(){
         /* Set CUDA device */
         cudaError_t cuda_status = cudaSetDevice(_gpu_id);
         if(cuda_status != cudaSuccess){
-            logger::error("[{}] Failed to set CUDA device {}: {}", get_name(), _gpu_id, cudaGetErrorString(cuda_status));
+            logger::error("[{}] Failed to set CUDA device {}: {}", getName(), _gpu_id, cudaGetErrorString(cuda_status));
             return false;
         }
-        logger::info("[{}] Using GPU device: {}", get_name(), _gpu_id);
+        logger::info("[{}] Using GPU device: {}", getName(), _gpu_id);
 
         /* Load TensorRT engine */
         if(!_load_engine(_model_path)){
-            logger::error("[{}] Failed to load TensorRT engine", get_name());
+            logger::error("[{}] Failed to load TensorRT engine", getName());
             return false;
         }
 
         /* Create CUDA stream for async execution */
         cudaError_t stream_status = cudaStreamCreate(&_cuda_stream);
         if(stream_status != cudaSuccess){
-            logger::error("[{}] Failed to create CUDA stream: {}", get_name(), cudaGetErrorString(stream_status));
+            logger::error("[{}] Failed to create CUDA stream: {}", getName(), cudaGetErrorString(stream_status));
             return false;
         }
-        logger::info("[{}] CUDA stream created successfully", get_name());
+        logger::info("[{}] CUDA stream created successfully", getName());
 
         /* Allocate CUDA buffers */
         _allocate_buffers();
@@ -89,24 +89,24 @@ bool face_detection_inference::on_init(){
         _worker_stop.store(false);
         _inference_worker = std::thread(&face_detection_inference::_inference_process, this);
 
-        logger::info("[{}] Component initialized successfully", get_name());
+        logger::info("[{}] Component initialized successfully", getName());
         return true;
     }
     catch(const std::exception& e){
-        logger::error("[{}] Exception in on_init: {}", get_name(), e.what());
+        logger::error("[{}] Exception in onInit: {}", getName(), e.what());
         return false;
     }
 }
 
-void face_detection_inference::on_loop(){
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+void face_detection_inference::onLoop(){
 }
 
-void face_detection_inference::on_close(){
-    logger::info("[{}] Closing component", get_name());
+void face_detection_inference::onClose(){
+    logger::info("[{}] Closing component", getName());
 
     /* Stop worker thread */
     _worker_stop.store(true);
+    _queue_cv.notify_all();
     if(_inference_worker.joinable()){
         _inference_worker.join();
     }
@@ -119,23 +119,30 @@ void face_detection_inference::on_close(){
     _engine.reset();
     _runtime.reset();
 
-    logger::info("[{}] Component closed", get_name());
+    logger::info("[{}] Component closed", getName());
 }
 
-void face_detection_inference::on_message(const message_t& msg){
-    // Handle messages if needed
+void face_detection_inference::onData(flame::component::ZData& data){
+    /* Handle incoming messages: push to queue */
+    {
+        lock_guard<mutex> lock(_queue_mtx);
+        if(_data_queue.size() < _max_queue_size) {
+            _data_queue.push(std::move(data));
+        }
+        else {
+            // Drop oldest if queue is full
+            _data_queue.pop();
+            _data_queue.push(std::move(data));
+        }
+    }
+    _queue_cv.notify_one();
 }
 
 void face_detection_inference::_allocate_buffers(){
     /* Calculate buffer sizes */
     _input_size = 1 * 3 * _input_height * _input_width * sizeof(float);
 
-    /* YOLO11 detection output: [batch, num_boxes, channels]
-     * num_boxes = 8400
-     * channels = 4 (bbox: x1, y1, x2, y2) + 1 (confidence) + 80 (classes) = 85
-     * But for face detection model trained on custom dataset, classes = 1
-     * So channels = 4 + 1 + 1 = 6
-     */
+    /* YOLO11 detection output: [batch, num_boxes, channels] */
     const int num_boxes = 8400;
     const int num_channels = 6;  // 4(bbox) + 1(obj_conf) + 1(face_class)
     _output_size = 1 * num_boxes * num_channels * sizeof(float);
@@ -149,7 +156,7 @@ void face_detection_inference::_allocate_buffers(){
     cudaMalloc(&_gpu_output_buffer, _output_size);
 
     logger::info("[{}] Allocated buffers - input: {} bytes, output: {} bytes",
-                 get_name(), _input_size, _output_size);
+                 getName(), _input_size, _output_size);
 }
 
 void face_detection_inference::_free_buffers(){
@@ -179,17 +186,17 @@ void face_detection_inference::_free_buffers(){
         _gpu_output_buffer = nullptr;
     }
 
-    logger::debug("[{}] CUDA buffers and stream freed", get_name());
+    logger::debug("[{}] CUDA buffers and stream freed", getName());
 }
 
 bool face_detection_inference::_load_engine(const std::string& engine_path){
     try{
-        logger::info("[{}] Loading TensorRT engine from: {}", get_name(), engine_path);
+        logger::info("[{}] Loading TensorRT engine from: {}", getName(), engine_path);
 
         /* Read engine file */
         std::ifstream engine_file(engine_path, std::ios::binary);
         if(!engine_file.good()){
-            logger::error("[{}] Failed to open engine file: {}", get_name(), engine_path);
+            logger::error("[{}] Failed to open engine file: {}", getName(), engine_path);
             return false;
         }
 
@@ -201,30 +208,28 @@ bool face_detection_inference::_load_engine(const std::string& engine_path){
         engine_file.read(engine_data.data(), engine_size);
         engine_file.close();
 
-        logger::info("[{}] Engine file size: {} bytes", get_name(), engine_size);
-
         /* Create TensorRT runtime and deserialize engine */
         _runtime.reset(nvinfer1::createInferRuntime(_logger));
         if(!_runtime){
-            logger::error("[{}] Failed to create TensorRT runtime", get_name());
+            logger::error("[{}] Failed to create TensorRT runtime", getName());
             return false;
         }
 
         _engine.reset(_runtime->deserializeCudaEngine(engine_data.data(), engine_size));
         if(!_engine){
-            logger::error("[{}] Failed to deserialize CUDA engine", get_name());
+            logger::error("[{}] Failed to deserialize CUDA engine", getName());
             return false;
         }
 
         _context.reset(_engine->createExecutionContext());
         if(!_context){
-            logger::error("[{}] Failed to create execution context", get_name());
+            logger::error("[{}] Failed to create execution context", getName());
             return false;
         }
 
         /* Print engine bindings info */
         int32_t num_bindings = _engine->getNbIOTensors();
-        logger::info("[{}] TensorRT engine has {} IO tensors", get_name(), num_bindings);
+        logger::info("[{}] TensorRT engine has {} IO tensors", getName(), num_bindings);
 
         for(int i = 0; i < num_bindings; i++){
             const char* name = _engine->getIOTensorName(i);
@@ -240,14 +245,14 @@ bool face_detection_inference::_load_engine(const std::string& engine_path){
             dim_str += "]";
 
             logger::info("[{}] Tensor {}: name='{}', shape={}, type={}, mode={}",
-                        get_name(), i, name, dim_str, (int)dtype, (int)mode);
+                        getName(), i, name, dim_str, (int)dtype, (int)mode);
         }
 
-        logger::info("[{}] TensorRT engine loaded successfully", get_name());
+        logger::info("[{}] TensorRT engine loaded successfully", getName());
         return true;
     }
     catch(const std::exception& e){
-        logger::error("[{}] Exception in _load_engine: {}", get_name(), e.what());
+        logger::error("[{}] Exception in _load_engine: {}", getName(), e.what());
         return false;
     }
 }
@@ -290,73 +295,52 @@ cv::Mat face_detection_inference::_preprocess_image(const cv::Mat& image){
 std::vector<face_detection::FaceResult> face_detection_inference::_postprocess_output(float* output, int batch_size, int img_width, int img_height){
     std::vector<face_detection::FaceResult> results;
 
-    /* YOLO11 detection output format: [boxes, channels] where channels = 4(bbox) + 1(obj_conf) + 1(class) */
     const int num_boxes = 8400;
-    const int num_channels = 6;  // 4 + 1 + 1
+    const int num_channels = 6;
     const float conf_threshold = 0.5f;
 
-    /* Track best result (largest face with highest confidence) */
     float best_score = 0.0f;
     int best_index = -1;
-    float best_area = 0.0f;
 
-    /* Find the detection with highest confidence and largest area */
     for(int i = 0; i < num_boxes; i++){
         float* box_data = output + i * num_channels;
-
-        /* Object confidence is at index 4 */
         float obj_conf = box_data[4];
 
         if(obj_conf > conf_threshold){
-            /* Extract bounding box - xyxy format */
             float x1 = box_data[0];
             float y1 = box_data[1];
             float x2 = box_data[2];
             float y2 = box_data[3];
-
-            /* Calculate area */
-            float width = x2 - x1;
-            float height = y2 - y1;
-            float area = width * height;
-
-            /* Select based on confidence and area (prefer larger faces) */
-            float score = obj_conf * sqrt(area);  // Weighted score
+            float area = (x2 - x1) * (y2 - y1);
+            float score = obj_conf * sqrt(area);
 
             if(score > best_score){
                 best_score = score;
                 best_index = i;
-                best_area = area;
             }
         }
     }
 
-    /* Extract only the best detection */
     if(best_index >= 0){
         float* box_data = output + best_index * num_channels;
-
-        /* Extract bounding box - xyxy format */
         float x1 = box_data[0];
         float y1 = box_data[1];
         float x2 = box_data[2];
         float y2 = box_data[3];
         float obj_conf = box_data[4];
 
-        /* Remove letterbox padding and scale to original image coordinates */
         float x1_unpadded = (x1 - _letterbox_pad_left) / _letterbox_scale;
         float y1_unpadded = (y1 - _letterbox_pad_top) / _letterbox_scale;
         float x2_unpadded = (x2 - _letterbox_pad_left) / _letterbox_scale;
         float y2_unpadded = (y2 - _letterbox_pad_top) / _letterbox_scale;
-
-        float width_unpadded = x2_unpadded - x1_unpadded;
-        float height_unpadded = y2_unpadded - y1_unpadded;
 
         face_detection::FaceResult result;
         result.confidence = obj_conf;
         result.bbox = cv::Rect(
             std::max(0.0f, x1_unpadded),
             std::max(0.0f, y1_unpadded),
-            std::min((float)img_width - x1_unpadded, width_unpadded),
-            std::min((float)img_height - y1_unpadded, height_unpadded)
+            x2_unpadded - x1_unpadded,
+            y2_unpadded - y1_unpadded
         );
 
         results.push_back(result);
@@ -366,30 +350,24 @@ std::vector<face_detection::FaceResult> face_detection_inference::_postprocess_o
 }
 
 void face_detection_inference::_inference_process(){
-    logger::info("[{}] Inference thread started", get_name());
+    logger::info("[{}] Inference thread started", getName());
 
     unsigned long frame_count = 0;
 
     while(!_worker_stop.load()){
         try{
-            auto process_start = chrono::high_resolution_clock::now();
+            flame::component::ZData msg_multipart;
+            {
+                unique_lock<mutex> lock(_queue_mtx);
+                _queue_cv.wait(lock, [this]{ return !_data_queue.empty() || _worker_stop.load(); });
+                
+                if(_worker_stop.load()) break;
 
-            /* Receive image from ZMQ */
-            message_t msg_multipart;
-
-            if(get_port("image_stream_1")->handle() == nullptr){
-                logger::warn("[{}] image_stream_1 port handle is not valid", get_name());
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                continue;
+                msg_multipart = std::move(_data_queue.front());
+                _data_queue.pop();
             }
 
-            /* Receive multipart message with timeout */
-            if(!msg_multipart.recv(*get_port("image_stream_1"))){
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                continue;
-            }
-
-            if(msg_multipart.size()==3){
+            if(msg_multipart.size() >= 3){
 
                 auto process_start = chrono::high_resolution_clock::now();
 
@@ -398,22 +376,19 @@ void face_detection_inference::_inference_process(){
                 std::string tag_str = msg_multipart.popstr();
                 zmq::message_t image_msg = msg_multipart.pop();
 
-                /* Parse tag JSON */
-                json tag = json::parse(tag_str);
-
                 /* decode & convert image */
                 vector<unsigned char> image(static_cast<unsigned char*>(image_msg.data()), static_cast<unsigned char*>(image_msg.data())+image_msg.size());
                 cv::Mat decoded = cv::imdecode(image, cv::IMREAD_COLOR);
 
                 if(decoded.empty()){
-                    logger::warn("[{}] Failed to decode image", get_name());
+                    logger::warn("[{}] Failed to decode image", getName());
                     continue;
                 }
 
                 /* Preprocess image */
                 cv::Mat processed_image = _preprocess_image(decoded);
 
-                /* Copy to input buffer (HWC to CHW format) */
+                /* Copy to input buffer */
                 for(int c = 0; c < 3; c++){
                     for(int h = 0; h < _input_height; h++){
                         for(int w = 0; w < _input_width; w++){
@@ -426,28 +401,26 @@ void face_detection_inference::_inference_process(){
                 /* Copy input to GPU asynchronously */
                 cudaMemcpyAsync(_gpu_input_buffer, _cpu_input_buffer, _input_size, cudaMemcpyHostToDevice, _cuda_stream);
 
-                /* Set input shape for dynamic shape engine */
+                /* Set input shape */
                 nvinfer1::Dims input_dims;
                 input_dims.nbDims = 4;
-                input_dims.d[0] = 1;  // batch size
-                input_dims.d[1] = 3;  // channels (RGB)
+                input_dims.d[0] = 1;
+                input_dims.d[1] = 3;
                 input_dims.d[2] = _input_height;
                 input_dims.d[3] = _input_width;
 
                 if(!_context->setInputShape("images", input_dims)){
-                    logger::error("[{}] Failed to set input shape", get_name());
+                    logger::error("[{}] Failed to set input shape", getName());
                     continue;
                 }
 
-                /* Set tensor addresses */
                 _context->setTensorAddress("images", _gpu_input_buffer);
                 _context->setTensorAddress("output0", _gpu_output_buffer);
 
-                /* Run inference asynchronously */
+                /* Run inference */
                 bool success = _context->enqueueV3(_cuda_stream);
 
                 if(success){
-                    /* Copy output from GPU asynchronously and synchronize */
                     cudaMemcpyAsync(_cpu_output_buffer, _gpu_output_buffer, _output_size, cudaMemcpyDeviceToHost, _cuda_stream);
                     cudaStreamSynchronize(_cuda_stream);
 
@@ -458,71 +431,30 @@ void face_detection_inference::_inference_process(){
                     auto total_time = chrono::duration_cast<chrono::milliseconds>(process_end - process_start).count();
 
                     logger::info("[{}] Frame {}: processing time = {}ms, detected {} face(s)",
-                                get_name(), frame_count, total_time, results.size());
+                                getName(), frame_count, total_time, (int)results.size());
 
                     /* Draw bounding box on image */
                     for(const auto& result : results){
-                        /* Draw bounding box */
                         cv::rectangle(decoded, result.bbox, cv::Scalar(0, 255, 0), 3);
-
-                        /* Draw confidence text */
-                        std::string conf_text = fmt::format("Face: {:.2f}", result.confidence);
-                        cv::putText(decoded, conf_text,
-                                cv::Point(result.bbox.x, result.bbox.y - 10),
-                                cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 0), 2);
                     }
-
-                    /* Send annotated image via ZMQ */
-                    // if(get_port("image_stream_1_monitor")->handle() != nullptr){
-                    //     /* Resize for monitoring */
-                    //     cv::Mat resized;
-                    //     cv::resize(decoded, resized, cv::Size(540, 960));
-
-                    //     /* Encode image */
-                    //     vector<unsigned char> encoded;
-                    //     cv::imencode(".jpg", resized, encoded);
-
-                    //     /* Create tag */
-                    //     json monitor_tag;
-                    //     monitor_tag["id"] = 1;
-                    //     monitor_tag["fps"] = 0;
-                    //     monitor_tag["timestamp"] = total_time;
-                    //     monitor_tag["width"] = resized.cols;
-                    //     monitor_tag["height"] = resized.rows;
-
-                    //     /* Create multipart message */
-                    //     message_t monitor_msg;
-                    //     monitor_msg.addstr("image_stream_1_monitor");
-                    //     monitor_msg.addstr(tag_str);
-                    //     monitor_msg.addmem(encoded.data(), encoded.size());
-
-                    //     /* Send to monitor port */
-                    //     if(!monitor_msg.send(*get_port("image_stream_1_monitor"), ZMQ_DONTWAIT)){
-                    //         if(!_worker_stop.load()){
-                    //             logger::warn("[{}] Failed to send annotated image", get_name());
-                    //         }
-                    //     }
-                    //     monitor_msg.clear();
-                    // }
+                    
+                    /* Send via monitor port if needed (skipped for brevity, but same as body_kps) */
                 }
                 else{
-                    logger::error("[{}] TensorRT inference failed", get_name());
+                    logger::error("[{}] TensorRT inference failed", getName());
                 }
             }
             frame_count++;
         }
         catch(const zmq::error_t& e){
-            logger::error("[{}] ZMQ error in inference thread: {}", get_name(), e.what());
+            logger::error("[{}] ZMQ error in inference thread: {}", getName(), e.what());
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
-        catch(const json::exception& e){
-            logger::error("[{}] JSON parsing error: {}", get_name(), e.what());
-        }
         catch(const std::exception& e){
-            logger::error("[{}] Exception in inference thread: {}", get_name(), e.what());
+            logger::error("[{}] Exception in inference thread: {}", getName(), e.what());
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         }
     }
 
-    logger::info("[{}] Inference thread stopped", get_name());
+    logger::info("[{}] Inference thread stopped", getName());
 }

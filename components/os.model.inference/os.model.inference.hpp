@@ -16,16 +16,16 @@
 
 using namespace std;
 
-class os_model_inference : public flame::component::object {
+class os_model_inference : public flame::component::Object {
 public:
     os_model_inference() = default;
     virtual ~os_model_inference() = default;
 
     /* default interface functions */
-    bool on_init() override;
-    void on_loop() override;
-    void on_close() override;
-    void on_message() override;
+    bool onInit() override;
+    void onLoop() override;
+    void onClose() override;
+    void onData(flame::component::ZData& data) override;
 
 }; /* class */
 

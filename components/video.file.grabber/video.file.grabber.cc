@@ -10,23 +10,23 @@ using namespace cv;
 
 /* create component instance */
 static video_file_grabber* _instance = nullptr;
-flame::component::object* create(){ if(!_instance) _instance = new video_file_grabber(); return _instance; }
-void release(){ if(_instance){ delete _instance; _instance = nullptr; }}
+flame::component::Object* Create(){ if(!_instance) _instance = new video_file_grabber(); return _instance; }
+void Release(){ if(_instance){ delete _instance; _instance = nullptr; }}
 
 
-bool video_file_grabber::on_init(){
+bool video_file_grabber::onInit(){
 
     try{
 
         /* read profile */
-        json parameters = get_profile()->parameters();
+        json parameters = getProfile()->parameters();
 
         /* check parameters */
         if(!parameters.contains("camera") || !parameters["camera"].is_array()){
-            logger::warn("[{}] Not found or Invalid 'camera' parameters. It must be valid.", get_name());
+            logger::warn("[{}] Not found or Invalid 'camera' parameters. It must be valid.", getName());
             return false;
         }
-        logger::info("[{}] {} camera parameter is defined.", get_name(), parameters["camera"].size());
+        logger::info("[{}] {} camera parameter is defined.", getName(), parameters["camera"].size());
 
         /* setup pipeline */
         _use_image_stream.store(parameters.value("use_image_stream", false));
@@ -37,7 +37,7 @@ bool video_file_grabber::on_init(){
         if(camera_parameters.is_array() && !camera_parameters.empty()){
             string video_file = camera_parameters[0].value("file", "");
             if(video_file.empty()){
-                logger::error("[{}] No video file specified in 'file' parameter", get_name());
+                logger::error("[{}] No video file specified in 'file' parameter", getName());
                 return false;
             }
 
@@ -45,13 +45,13 @@ bool video_file_grabber::on_init(){
             _video_capture = make_unique<cv::VideoCapture>(video_file);
 
             if(!_video_capture->isOpened()){
-                logger::error("[{}] Failed to open video file: {}", get_name(), video_file);
+                logger::error("[{}] Failed to open video file: {}", getName(), video_file);
                 return false;
             }
 
-            logger::info("[{}] Video file opened successfully: {}", get_name(), video_file);
+            logger::info("[{}] Video file opened successfully: {}", getName(), video_file);
             logger::info("[{}] Video properties - Width: {}, Height: {}, FPS: {}, Total Frames: {}",
-                get_name(),
+                getName(),
                 (int)_video_capture->get(cv::CAP_PROP_FRAME_WIDTH),
                 (int)_video_capture->get(cv::CAP_PROP_FRAME_HEIGHT),
                 _video_capture->get(cv::CAP_PROP_FPS),
@@ -62,7 +62,7 @@ bool video_file_grabber::on_init(){
             _grab_worker = thread(&video_file_grabber::_grab_task, this, camera_parameters);
         }
         else{
-            logger::error("[{}] Camera parameters array is empty", get_name());
+            logger::error("[{}] Camera parameters array is empty", getName());
             return false;
         }
 
@@ -79,12 +79,12 @@ bool video_file_grabber::on_init(){
     return true;
 }
 
-void video_file_grabber::on_loop(){
+void video_file_grabber::onLoop(){
     /* nothing loop */
 }
 
 
-void video_file_grabber::on_close(){
+void video_file_grabber::onClose(){
 
     /* stop worker */
     _worker_stop.store(true);
@@ -92,7 +92,7 @@ void video_file_grabber::on_close(){
     /* stop grabbing thread */
     if(_grab_worker.joinable()){
         _grab_worker.join();
-        logger::debug("[{}] grabber is now successfully stopped", get_name());
+        logger::debug("[{}] grabber is now successfully stopped", getName());
     }
 
     /* close video capture */
@@ -102,7 +102,7 @@ void video_file_grabber::on_close(){
 
 }
 
-void video_file_grabber::on_message(const message_t& msg){
+void video_file_grabber::onData(flame::component::ZData& data){
     /* reserved function */
 }
 
@@ -125,18 +125,13 @@ void video_file_grabber::_grab_task(json camera_parameters){
             cv::Mat captured;
 
             if(!_video_capture->read(captured)){
-                logger::info("[{}] End of video file reached, restarting from beginning", get_name());
+                logger::info("[{}] End of video file reached, restarting from beginning", getName());
                 _video_capture->set(cv::CAP_PROP_POS_FRAMES, 0);
                 continue;
             }
 
-            // /* calc capture time */
-            // auto now = chrono::high_resolution_clock::now();
-            // chrono::duration<double> elapsed = now - last_time;
-            // last_time = now;
-
             if (!captured.empty()) {
-                logger::debug("[{}] Captured #{} image: {}x{}, channels: {}", get_name(), frame_count, captured.cols, captured.rows, captured.channels());
+                logger::debug("[{}] Captured #{} image: {}x{}, channels: {}", getName(), frame_count, captured.cols, captured.rows, captured.channels());
 
                 /* generate meta tag */
                 json tag;
@@ -168,18 +163,13 @@ void video_file_grabber::_grab_task(json camera_parameters){
                     tag["width"] = captured.cols;
 
                     /* send data */
-                    if(get_port(portname.c_str())->handle()!=nullptr){
-                        message_t msg_multipart;
-                        msg_multipart.addstr(portname);
-                        msg_multipart.addstr(tag.dump());
-                        msg_multipart.addmem(serialized_image.data(), serialized_image.size());
-                        if(!msg_multipart.send(*get_port(portname.c_str()), ZMQ_DONTWAIT)){
-                            logger::warn("[{}] Failed to send message, queue may be full", get_name());
-                        }
-                        msg_multipart.clear(); 
-                    }
-                    else{
-                        logger::warn("[{}] socket handle is not valid ", get_name());
+                    flame::component::ZData msg_multipart;
+                    msg_multipart.addstr(portname);
+                    msg_multipart.addstr(tag.dump());
+                    msg_multipart.addmem(serialized_image.data(), serialized_image.size());
+                    
+                    if(!dispatch(portname, msg_multipart)){
+                        logger::warn("[{}] Failed to send message via port {}", getName(), portname);
                     }
                     serialized_image.clear();
                 }
@@ -205,15 +195,13 @@ void video_file_grabber::_grab_task(json camera_parameters){
 
                     /* send monitoring data */
                     string monitor_portname = fmt::format("{}_monitor", portname);
-                    if(get_port(monitor_portname.c_str())->handle()!=nullptr){
-                        message_t msg_multipart;
-                        msg_multipart.addstr(monitor_portname);
-                        msg_multipart.addstr(tag.dump());
-                        msg_multipart.addmem(serialized_monitoring_image.data(), serialized_monitoring_image.size());
-                        if(!msg_multipart.send(*get_port(monitor_portname.c_str()), ZMQ_DONTWAIT)){
-                            logger::warn("[{}] Failed to send message, queue may be full", get_name());
-                        }
-                        msg_multipart.clear(); 
+                    flame::component::ZData msg_multipart_monitor;
+                    msg_multipart_monitor.addstr(monitor_portname);
+                    msg_multipart_monitor.addstr(tag.dump());
+                    msg_multipart_monitor.addmem(serialized_monitoring_image.data(), serialized_monitoring_image.size());
+
+                    if(!dispatch(monitor_portname, msg_multipart_monitor)){
+                        logger::warn("[{}] Failed to send monitoring message via port {}", getName(), monitor_portname);
                     }
                     serialized_monitoring_image.clear();
                 }
@@ -223,16 +211,16 @@ void video_file_grabber::_grab_task(json camera_parameters){
             frame_count++;
         }
         catch(const cv::Exception& e){
-            logger::debug("[{}] CV Exception {}", get_name(), e.what());
+            logger::debug("[{}] CV Exception {}", getName(), e.what());
         }
         catch(const zmq::error_t& e){
-            logger::error("[{}] Pipeline Error : {}", get_name(), e.what());
+            logger::error("[{}] Pipeline Error : {}", getName(), e.what());
         }
         catch(const json::exception& e){
-            logger::error("[{}] Data Parse Error : {}", get_name(), e.what());
+            logger::error("[{}] Data Parse Error : {}", getName(), e.what());
         }
         catch(const std::exception& e){
-            logger::error("[{}] Standard Exception : {}", get_name(), e.what());
+            logger::error("[{}] Standard Exception : {}", getName(), e.what());
         }
 
         /* frame rate control - sleep to maintain video fps */
@@ -243,10 +231,8 @@ void video_file_grabber::_grab_task(json camera_parameters){
             this_thread::sleep_for(frame_duration - elapsed);
         }
 
-        
-
     }
 
-    logger::debug("[{}] Stopped grab task..", get_name());
+    logger::debug("[{}] Stopped grab task..", getName());
 
 }
