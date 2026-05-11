@@ -3,9 +3,9 @@
  * Focused on --card 0 --channel 4 -d0x1e -l8 parameters
  */
 
-#include "include/sxpf.h""
-#include "include/csi-2.h"
-#include "include/sxpftypes.h"
+#include <sxpf.h>
+#include <csi-2.h>
+#include <sxpftypes.h>
 #include <opencv2/opencv.hpp>
 #include <cstdint>
 #include <cstring>

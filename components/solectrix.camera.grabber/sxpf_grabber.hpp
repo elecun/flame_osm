@@ -12,8 +12,8 @@
 #ifndef FLAME_SOLECTRIX_CAMERA_GRABBER_DEVICE_HPP_INCLUDED
 #define FLAME_SOLECTRIX_CAMERA_GRABBER_DEVICE_HPP_INCLUDED
 
-#include <sxpf/sxpf.h>
-#include <sxpf/csi-2.h>
+#include <sxpf.h>
+#include <csi-2.h>
 #include <map>
 #include <vector>
 #include <opencv2/opencv.hpp>

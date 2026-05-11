@@ -58,12 +58,12 @@ else ifeq ($(ARCH), armhf)
 else ifeq ($(ARCH), aarch64) 
 	# AARCH64
 	INCLUDE_DIR = $(INCLUDE_BASE) -I$(FLAME_PATH)/include -I$(CURRENT_DIR)/include/dep -I/usr/local/include -I/usr/include/opencv4
-	LIBDIR = -L/usr/local/lib -L$(CURRENT_DIR)/lib/aarch64-linux-gnu/
+	LIBDIR = -L/usr/local/lib -L$(CURRENT_DIR)/lib/aarch64/ -L$(CURRENT_DIR)/lib/aarch64-linux-gnu/
 
 else
 	# x86_64 (Default)
 	INCLUDE_DIR = $(INCLUDE_BASE) -I$(FLAME_PATH)/include -I$(FLAME_PATH)/include/dep -I$(FLAME_PATH)/include/dep/libzmq -I/usr/local/include -I/usr/include/opencv4 -I/usr/local/cuda/include
-	LIBDIR = -L/usr/local/lib -L$(FLAME_PATH)/lib/x86_64/ -L/usr/lib/x86-64-linux-gnu -L/usr/local/cuda/lib64
+	LIBDIR = -L/usr/local/lib -L$(CURRENT_DIR)/lib/x86_64/ -L$(FLAME_PATH)/lib/x86_64/ -L/usr/lib/x86-64-linux-gnu -L/usr/local/cuda/lib64
 endif
 
 # LDFLAGS definition
@@ -111,6 +111,7 @@ $(BUILDDIR)support.o: $(CURRENT_DIR)/components/uvc.camera.grabber/support.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
 
 # Solectrix Camera Grabber
+SOLECTRIX_INC = -I$(CURRENT_DIR)/components/solectrix.camera.grabber/include
 SOLECTRIX_OBJS = \
 	$(BUILDDIR)solectrix.camera.grabber.o \
 	$(BUILDDIR)sxpf_grabber.o \
@@ -121,16 +122,16 @@ solectrix_camera_grabber.comp: $(SOLECTRIX_OBJS)
 	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio -lsxpf_ll
 
 $(BUILDDIR)solectrix.camera.grabber.o: $(CURRENT_DIR)/components/solectrix.camera.grabber/solectrix.camera.grabber.cc
-	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
+	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) $(SOLECTRIX_INC) -c $< -o $@
 
 $(BUILDDIR)sxpf_grabber.o: $(CURRENT_DIR)/components/solectrix.camera.grabber/sxpf_grabber.cc
-	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
+	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) $(SOLECTRIX_INC) -c $< -o $@
 
 $(BUILDDIR)img_decode.o: $(CURRENT_DIR)/components/solectrix.camera.grabber/img_decode.cc
-	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
+	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) $(SOLECTRIX_INC) -c $< -o $@
 
 $(BUILDDIR)core_frame_processing.o: $(CURRENT_DIR)/components/solectrix.camera.grabber/core_frame_processing.cpp
-	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
+	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) $(SOLECTRIX_INC) -c $< -o $@
 
 # Kvaser CAN Interface
 kvaser_can_interface.comp: $(BUILDDIR)kvaser.can.interface.o

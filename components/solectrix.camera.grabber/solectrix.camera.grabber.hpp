@@ -24,16 +24,16 @@ using namespace std;
 using namespace cv;
 using namespace flame::component;
 
-class solectrix_camera_grabber : public flame::component::object {
+class solectrix_camera_grabber : public flame::component::Object {
     public:
         solectrix_camera_grabber() = default;
         virtual ~solectrix_camera_grabber() = default;
 
         /* default interface functions */
-        bool on_init() override;
-        void on_loop() override;
-        void on_close() override;
-        void on_message(const message_t& msg) override;
+        bool onInit() override;
+        void onLoop() override;
+        void onClose() override;
+        void onData(flame::component::ZData& data) override;
 
         /* device control functions */
         bool open_device(int endpoint_id = 0, int channel_id = 4, uint32_t decode_csi2_datatype = 0x1e, int left_shift = 8);

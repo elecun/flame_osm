@@ -12,23 +12,23 @@ using namespace cv;
 
 /* create component instance */
 static solectrix_camera_grabber* _instance = nullptr;
-flame::component::object* create(){ if(!_instance) _instance = new solectrix_camera_grabber(); return _instance; }
-void release(){ if(_instance){ delete _instance; _instance = nullptr; }}
+flame::component::Object* Create(){ if(!_instance) _instance = new solectrix_camera_grabber(); return _instance; }
+void Release(){ if(_instance){ delete _instance; _instance = nullptr; }}
 
 
-bool solectrix_camera_grabber::on_init(){
+bool solectrix_camera_grabber::onInit(){
 
     try{
 
         /* read profile */
-        json parameters = get_profile()->parameters();
+        json parameters = getProfile()->parameters();
 
         /* check parameters */
         if(!parameters.contains("camera") || !parameters["camera"].is_array()){
-            logger::warn("[{}] Not found or Invalid 'camera' parameters. It must be valid.", get_name());
+            logger::warn("[{}] Not found or Invalid 'camera' parameters. It must be valid.", getName());
             return false;
         }
-        logger::info("[{}] {} camera parameter is defined.", get_name(), parameters["camera"].size());
+        logger::info("[{}] {} camera parameter is defined.", getName(), parameters["camera"].size());
 
         /* setup pipeline */
         _use_image_stream.store(parameters.value("use_image_stream", false));
@@ -38,27 +38,28 @@ bool solectrix_camera_grabber::on_init(){
         _frame_grabber = make_unique<sxpf_grabber>(parameters);
 
         /* device open */
-        if(_frame_grabber->open()){
-            json camera_parameters = parameters["camera"];
-            _grab_worker = thread(&solectrix_camera_grabber::_grab_task, this, camera_parameters);
-
+        if(!_frame_grabber->open()){
+            logger::error("[{}] Failed to open frame grabber device", getName());
+            return false;
         }
 
+        /* start worker */
+        _grab_worker = thread(&solectrix_camera_grabber::_grab_task, this, parameters["camera"]);
+
     }
-    catch(json::exception& e){
-        logger::error("Profile Error : {}", e.what());
+    catch(const std::exception& e){
+        logger::error("[{}] Exception : {}", getName(), e.what());
         return false;
     }
 
     return true;
 }
 
-void solectrix_camera_grabber::on_loop(){
+void solectrix_camera_grabber::onLoop(){
     /* nothing loop */
 }
 
-
-void solectrix_camera_grabber::on_close(){
+void solectrix_camera_grabber::onClose(){
 
     /* stop worker */
     _worker_stop.store(true);
@@ -66,7 +67,7 @@ void solectrix_camera_grabber::on_close(){
     /* stop grabbing thread */
     if(_grab_worker.joinable()){
         _grab_worker.join();
-        logger::debug("[{}] grabber is now successfully stopped", get_name());
+        logger::debug("[{}] grabber is now successfully stopped", getName());
     }
 
     /* device close */
@@ -74,7 +75,8 @@ void solectrix_camera_grabber::on_close(){
 
 }
 
-void solectrix_camera_grabber::on_message(const message_t& msg){
+
+void solectrix_camera_grabber::onData(flame::component::ZData& data){
     /* reserved function */
 }
 
@@ -88,7 +90,7 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
         try{
             cv::Mat captured = _frame_grabber->capture();
             if (!captured.empty()) {
-                logger::debug("[{}] Captured image: {}x{}, channels: {}", get_name(), captured.cols, captured.rows, captured.channels());
+                logger::debug("[{}] Captured image: {}x{}, channels: {}", getName(), captured.cols, captured.rows, captured.channels());
 
                 /* image rotate (0=cw_90, 1=180, 2=ccw_90)*/
                 int rotate_flag = -1;
@@ -117,53 +119,17 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
                     tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
 
                     /* send data */
-                    if(get_port(portname.c_str())->handle()!=nullptr){
-                        message_t tag;
-                        zmq::multipart_t msg_multipart_image;
-                        msg_multipart_image.addstr(portname.c_str());
-                        msg_multipart_image.addmem(serialized_image.data(), serialized_image.size());
-                        msg_multipart_image.send(*get_port(portname.c_str()), ZMQ_DONTWAIT);
-                        msg_multipart_image.clear();
-                    }
-                    else{
-                        logger::warn("[{}] socket handle is not valid ", get_name());
+                    flame::component::ZData msg_multipart_image;
+                    msg_multipart_image.addstr(portname);
+                    msg_multipart_image.addstr(tag.dump());
+                    msg_multipart_image.addmem(serialized_image.data(), serialized_image.size());
+                    
+                    if(!dispatch(portname, msg_multipart_image)){
+                        logger::warn("[{}] socket handle is not valid ", getName());
                     }
                     serialized_image.clear();
 
                 }
-
-                /* push image */
-                // if(_use_image_stream.load()){
-
-                //     /* image encoding */
-                //     std::vector<unsigned char> serialized_image;
-                //     cv::imencode(".jpg", captured, serialized_image);
-
-                //     /* generate data meta tag */
-                //     json tag;
-                //     auto now = chrono::high_resolution_clock::now();
-                //     chrono::duration<double> elapsed = now - last_time;
-                //     last_time = now;
-
-                //     tag["fps"] = 1.0/elapsed.count();
-                //     tag["height"] = raw_frame.rows;
-                //     tag["width"] = raw_frame.cols;
-                //     tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
-
-                //     /* send data */
-                //     if(get_port("image_stream_1")->handle()!=nullptr){
-                //         message_t tag;
-                //         zmq::multipart_t msg_multipart_image;
-                //         msg_multipart_image.addstr(tag.dump());
-                //         msg_multipart_image.addmem(serialized_image.data(), serialized_image.size());
-                //         msg_multipart_image.send(*get_port("image_stream_1"), ZMQ_DONTWAIT);
-                //         msg_multipart_image.clear();
-                //     }
-                //     else{
-                //         logger::warn("[{}] socket handle is not valid ", get_name());
-                //     }
-                //     serialized_image.clear();
-                // }
 
                 /* publish monitoring image */
                 if(_use_image_stream_monitoring.load()){
@@ -176,79 +142,66 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
             }
         }
         catch(const cv::Exception& e){
-            logger::debug("[{}] CV Exception {}", get_name(), e.what());
+            logger::debug("[{}] CV Exception {}", getName(), e.what());
         }
         catch(const zmq::error_t& e){
-            logger::error("[{}] Piepeline Error : {}", get_name(), e.what());
+            logger::error("[{}] Piepeline Error : {}", getName(), e.what());
         }
         catch(const json::exception& e){
-            logger::error("[{}] Data Parse Error : {}", get_name(), e.what());
+            logger::error("[{}] Data Parse Error : {}", getName(), e.what());
         }
         catch(const std::exception& e){
-            logger::error("[{}] Standard Exception : {}", get_name(), e.what());
+            logger::error("[{}] Standard Exception : {}", getName(), e.what());
         }
     
     }
 
-    logger::debug("[{}] Stopped grab task..", get_name());
+    logger::debug("[{}] Stopped grab task..", getName());
 
 }
 
 bool solectrix_camera_grabber::open_device(int endpoint_id, int channel_id, uint32_t decode_csi2_datatype, int left_shift) {
     if (_device_opened) {
-        logger::warn("[{}] Device already opened", get_name());
+        logger::warn("[{}] Device already opened", getName());
         return true;
     }
-    
+
     _endpoint_id = endpoint_id;
     _channel_id = channel_id;
     _decode_csi2_datatype = decode_csi2_datatype;
     _left_shift = left_shift;
-    
-    // Use simplified device initialization
-    bool success = initialize_device(_endpoint_id, _channel_id, &_fg, &_devfd);
-    
-    if (success) {
+
+    if(_frame_grabber->open()){
         _device_opened = true;
-        logger::info("[{}] Device opened successfully (endpoint:{}, channel:{})", get_name(), _endpoint_id, _channel_id);
-    } else {
-        logger::error("[{}] Failed to initialize device", get_name());
+        logger::info("[{}] Device opened successfully (endpoint:{}, channel:{})", getName(), _endpoint_id, _channel_id);
+        return true;
     }
-    
-    return success;
+    else {
+        logger::error("[{}] Failed to initialize device", getName());
+        return false;
+    }
 }
 
 void solectrix_camera_grabber::close_device() {
-    if (!_device_opened || !_fg) {
-        return;
-    }
-    
-    // Use simplified cleanup
-    cleanup_device(_fg);
-    
-    _fg = 0;
-    _devfd = 0;
+    _frame_grabber->close();
     _device_opened = false;
-    
-    logger::info("[{}] Device closed", get_name());
+    logger::info("[{}] Device closed", getName());
 }
 
 cv::Mat solectrix_camera_grabber::grab() {
-    if (!_device_opened || !_fg) {
-        logger::error("[{}] Device not opened. Call open_device() first", get_name());
+    if (!_device_opened) {
+        logger::error("[{}] Device not opened. Call open_device() first", getName());
         return cv::Mat();
     }
+
+    cv::Mat result = _frame_grabber->capture();
     
-    cv::Mat result;
-    
-    // Use simplified wait and process function
-    bool success = wait_and_process_frame(_fg, _devfd, result);
-    
-    if (success && !result.empty()) {
-        logger::debug("[{}] Frame grabbed successfully: {}x{}, channels: {}", get_name(), result.cols, result.rows, result.channels());
-    } else {
-        logger::debug("[{}] No frame available", get_name());
+    if(!result.empty()){
+        logger::debug("[{}] Frame grabbed successfully: {}x{}, channels: {}", getName(), result.cols, result.rows, result.channels());
     }
-    
+    else {
+        logger::debug("[{}] No frame available", getName());
+    }
+
     return result;
 }

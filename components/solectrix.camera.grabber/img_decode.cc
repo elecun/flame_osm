@@ -2,7 +2,7 @@
  *
  * Implementation of CSI-2 image decoding.
  */
-#include <sxpf/csi-2.h>
+#include <csi-2.h>
 #include <string.h>
 
 /** Limited Range BT.601 color conversion matrix from YCbCr to full range RGB */
