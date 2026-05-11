@@ -60,10 +60,11 @@ class sxpf_grabber {
         /* support functions */
         int get_num_cards();    /* get number of grabber cards */
         bool open();            /* grabber card open */
+        bool init();            /* initialization sequence */
         void close();           /* grabber card close */
         int wait_event();       /* wait for event */
 
-        Mat capture();          /* capture frame and return cv::Mat*/
+        pair<int, Mat> capture();          /* capture frame and return cam_id and cv::Mat*/
         Mat _process_yuv422_frame(sxpf_image_header_t* img_hdr, uint32_t left_shift);
 
         const vector<camera_param_t>& get_parameter_container() const { return _parameter_container; } /* access parameter container */
@@ -71,6 +72,11 @@ class sxpf_grabber {
         
 
     private:
+        string _init_device = "/dev/sxpf0";
+        int _init_port = 0;
+        string _init_ini_file = "ti954_OV2778-FPDLINKIII.ini";
+        string _init_event_ids = "0,1,2";
+
         unsigned int _stream_channel_mask = 0;    /* stream channel SXPF_STREAM_VIDEOX*/
         int _decode_csi2_datatype = 0x1e;
         int _bits_per_component = 16;       //default is 16

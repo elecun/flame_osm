@@ -3,6 +3,7 @@
 #include <flame/log.hpp>
 #include <fcntl.h>
 #include <errno.h>
+#include <cstring>
 #include "core_frame_processing.h"
 
 using namespace flame;
@@ -36,6 +37,12 @@ bool solectrix_camera_grabber::onInit(){
 
         /* device instance */
         _frame_grabber = make_unique<sxpf_grabber>(parameters);
+
+        /* device initialization */
+        if(!_frame_grabber->init()){
+            logger::error("[{}] Failed to initialize frame grabber device", getName());
+            return false;
+        }
 
         /* device open */
         if(!_frame_grabber->open()){
@@ -83,62 +90,79 @@ void solectrix_camera_grabber::onData(flame::component::ZData& data){
 void solectrix_camera_grabber::_grab_task(json camera_parameters){
 
     auto last_time = chrono::high_resolution_clock::now();
+    const auto& params = _frame_grabber->get_parameter_container();
 
     while(!_worker_stop.load()){
+        auto loop_start = chrono::high_resolution_clock::now();
 
         /* do grab */
         try{
-            cv::Mat captured = _frame_grabber->capture();
+            pair<int, cv::Mat> captured_data = _frame_grabber->capture();
+            int cam_id = captured_data.first;
+            cv::Mat captured = captured_data.second;
+
             if (!captured.empty()) {
-                logger::debug("[{}] Captured image: {}x{}, channels: {}", getName(), captured.cols, captured.rows, captured.channels());
+                /* find matching camera parameter by channel (cam_id) */
+                string portname = "";
+                string cam_name = "";
+                int rotate_flag = -1;
+
+                for(const auto& p : params){
+                    if(p.channel == cam_id){
+                        portname = p.portname;
+                        cam_name = p.name;
+                        rotate_flag = p.rotate_flag;
+                        break;
+                    }
+                }
+
+                if(portname.empty()){
+                    logger::warn("[{}] Received frame from unknown cam_id: {}", getName(), cam_id);
+                    continue;
+                }
 
                 /* image rotate (0=cw_90, 1=180, 2=ccw_90)*/
-                int rotate_flag = -1;
-                string portname = "";
-                if(camera_parameters.is_array() && !camera_parameters.empty()){
-                    rotate_flag = camera_parameters[0].value("rotate_flag", -1); // only single image
-                    portname = camera_parameters[0].value("portname", "image_stream_1");
-                }
-
                 if(rotate_flag >= 0 && rotate_flag <= 2){
                     cv::rotate(captured, captured, rotate_flag);
-
-                    /* image encoding */
-                    std::vector<unsigned char> serialized_image;
-                    cv::imencode(".jpg", captured, serialized_image);
-
-                    /* generate data meta tag */
-                    json tag;
-                    auto now = chrono::high_resolution_clock::now();
-                    chrono::duration<double> elapsed = now - last_time;
-                    last_time = now;
-
-                    tag["fps"] = 1.0/elapsed.count();
-                    tag["height"] = captured.rows;
-                    tag["width"] = captured.cols;
-                    tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
-
-                    /* send data */
-                    flame::component::ZData msg_multipart_image;
-                    msg_multipart_image.addstr(portname);
-                    msg_multipart_image.addstr(tag.dump());
-                    msg_multipart_image.addmem(serialized_image.data(), serialized_image.size());
-                    
-                    if(!dispatch(portname, msg_multipart_image)){
-                        logger::warn("[{}] socket handle is not valid ", getName());
-                    }
-                    serialized_image.clear();
-
                 }
 
-                /* publish monitoring image */
-                if(_use_image_stream_monitoring.load()){
-
-                    /* resize image */
-                    
-
+                /* show image */
+                if(!cam_name.empty()){
+                    cv::imshow(cam_name, captured);
+                    cv::waitKey(1);
                 }
 
+                /* image encoding */
+                // std::vector<unsigned char> serialized_image;
+                // cv::imencode(".jpg", captured, serialized_image);
+
+                // /* generate data meta tag */
+                // json tag;
+                // auto now = chrono::high_resolution_clock::now();
+                // chrono::duration<double> elapsed = now - last_time;
+                // last_time = now;
+
+                // tag["fps"] = 1.0/elapsed.count();
+                // tag["height"] = captured.rows;
+                // tag["width"] = captured.cols;
+                // tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
+                // tag["cam_id"] = cam_id;
+
+                // /* send data */
+                // flame::component::ZData msg_multipart_image;
+                // msg_multipart_image.addstr(portname);
+                // msg_multipart_image.addstr(tag.dump());
+                // msg_multipart_image.addmem(serialized_image.data(), serialized_image.size());
+                
+                // if(!dispatch(portname, msg_multipart_image)){
+                //     logger::warn("[{}] socket handle is not valid for port {}", getName(), portname);
+                // }
+                // serialized_image.clear();
+
+                // /* publish monitoring image */
+                // if(_use_image_stream_monitoring.load()){
+                //     // TODO: Implement monitoring stream if needed
+                // }
             }
         }
         catch(const cv::Exception& e){
@@ -153,6 +177,10 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
         catch(const std::exception& e){
             logger::error("[{}] Standard Exception : {}", getName(), e.what());
         }
+
+        auto loop_end = chrono::high_resolution_clock::now();
+        chrono::duration<double, milli> loop_ms = loop_end - loop_start;
+        logger::debug("[{}] Loop elapsed time: {:.2f} ms", getName(), loop_ms.count());
     
     }
 
@@ -188,19 +216,19 @@ void solectrix_camera_grabber::close_device() {
     logger::info("[{}] Device closed", getName());
 }
 
-cv::Mat solectrix_camera_grabber::grab() {
+pair<int, Mat> solectrix_camera_grabber::grab() {
     if (!_device_opened) {
         logger::error("[{}] Device not opened. Call open_device() first", getName());
-        return cv::Mat();
+        return make_pair(-1, cv::Mat());
     }
 
-    cv::Mat result = _frame_grabber->capture();
+    pair<int, Mat> result = _frame_grabber->capture();
     
-    if(!result.empty()){
-        logger::debug("[{}] Frame grabbed successfully: {}x{}, channels: {}", getName(), result.cols, result.rows, result.channels());
+    if(!result.second.empty()){
+        logger::debug("[{}] Frame grabbed successfully from cam_id {}: {}x{}, channels: {}", getName(), result.first, result.second.cols, result.second.rows, result.second.channels());
     }
     else {
-        logger::debug("[{}] No frame available", getName());
+        logger::debug("[{}] No frame available");
     }
 
     return result;

@@ -39,6 +39,11 @@ sxpf_grabber::sxpf_grabber(json parameters){
     _decode_csi2_datatype = strtol(parameters.at("csi2_datatype").get<string>().c_str(), NULL, 16);
     _rotate_flag = parameters.value("rotate_flag", -1);
 
+    _init_device = parameters.value("device", parameters.value("device", "/dev/sxpf0"));
+    _init_port = parameters.value("port", parameters.value("port", 0));
+    _init_ini_file = parameters.value("sxpf_ini", parameters.value("sxpf_ini", "ti954_OV2778-FPDLINKIII.ini"));
+    _init_event_ids = parameters.value("event_ids", parameters.value("event_ids", "0,1,2"));
+
     /* show the applied camera parameters */
     logger::info("(sxpf_grabber) {} camera device will be attached", _parameter_container.size());
     for(const auto& camera:_parameter_container){
@@ -65,7 +70,15 @@ bool sxpf_grabber::open(){
     }
     
     /* open grabber card & get the handle (only single card )*/
-    _grabber_handle = sxpf_open(0); //0=card index
+    if(!_grabber_handle) {
+        _grabber_handle = sxpf_open(0); //0=card index, not port
+    }
+
+    if(!_grabber_handle) {
+        logger::error("(sxpf_grabber) Failed to open grabber card");
+        return false;
+    }
+
     sxpf_get_device_fd(_grabber_handle, &_devfd);
     // sxpf_get_timestamp(_grabber_handle, &_last_time); // HW time at start
     sxpf_get_single_card_info(_grabber_handle, &_grabber_info);
@@ -88,19 +101,69 @@ bool sxpf_grabber::open(){
     if(sxpf_start_record(_grabber_handle, _stream_channel_mask)){ // only channel 4
         logger::error("(sxpf_grabber) failed to start grab");
         sxpf_close(_grabber_handle);
+        _grabber_handle = NULL;
         return false;
     }
         
     return true;
 }
 
+bool sxpf_grabber::init() {
+    int dev_number = -1;
+    if(_init_device.size() == 10 && _init_device.substr(0, 9) == "/dev/sxpf") {
+        dev_number = _init_device[9] - '0';
+    } else {
+        logger::error("(sxpf_grabber) Invalid device name: {}", _init_device);
+        return false;
+    }
+
+    if(!_grabber_handle) {
+        _grabber_handle = sxpf_open(dev_number);
+    }
+
+    if(!_grabber_handle) {
+        logger::error("(sxpf_grabber) Failed to open device {}", dev_number);
+        return false;
+    }
+
+    uint32_t data_size = 0;
+    uint8_t* data = sxpf_load_init_sequence(_init_ini_file.c_str(), &data_size);
+    if(!data) {
+        logger::error("(sxpf_grabber) Failed to load init sequence from {}", _init_ini_file);
+        // Note: We keep the handle open as per requirement
+        return false;
+    }
+
+    bool success = true;
+    char* ids = strdup(_init_event_ids.c_str());
+    char* ptr = strtok(ids, ",");
+    while(ptr != NULL) {
+        int ret = sxpf_send_init_sequence(_grabber_handle, data, data_size, _init_port, atoi(ptr));
+        if(ret != 0) {
+            logger::error("(sxpf_grabber) Failed to send init sequence for event id {}", ptr);
+            success = false;
+            break;
+        }
+        logger::info("(sxpf_grabber) Successfully sent init sequence for event id {}", ptr);
+        ptr = strtok(NULL, ",");
+    }
+
+    free(ids);
+    free(data);
+
+    return success;
+}
+
 void sxpf_grabber::close(){
 
     /* record stop */
-    sxpf_stop(_grabber_handle, _stream_channel_mask);
+    if(_grabber_handle) {
+        sxpf_stop(_grabber_handle, _stream_channel_mask);
 
-    /* close sxpf channels */
-    sxpf_close(_grabber_handle);
+        /* close sxpf channels */
+        sxpf_close(_grabber_handle);
+        _grabber_handle = NULL;
+    }
 
     logger::debug("(sxpf_grabber) stop & close frame grabber device");
 }
@@ -225,15 +288,16 @@ Mat sxpf_grabber::_process_yuv422_frame(sxpf_image_header_t* img_hdr, uint32_t l
     return result;
 }
 
-Mat sxpf_grabber::capture(){
+pair<int, Mat> sxpf_grabber::capture(){
 
     cv::Mat captured_image;
+    int cam_id = -1;
     
     /* wait & read grab event */
     int len = sxpf_wait_events(1, &this->_devfd, 100 /* ms */);
     if(len <= 0){
-        logger::debug("(sxpf_grabber) No events received");
-        return captured_image; // return empty Mat
+        // logger::debug("(sxpf_grabber) No events received");
+        return make_pair(cam_id, captured_image); // return empty Mat
     }
     
     len = sxpf_read_event(_grabber_handle, _events, NELEMENTS(_events));
@@ -251,11 +315,10 @@ Mat sxpf_grabber::capture(){
                     continue;
                 }
                 else {
+                    cam_id = (int)img_hdr->cam_id;
                     captured_image = _process_yuv422_frame(img_hdr, _left_shift);
                     sxpf_release_frame(_grabber_handle, frame_slot, 0);
                 }
-
-                // logger::debug("(sxpf_grabber) Event: SXPF_EVENT_FRAME_RECEIVED on slot {}", frame_slot);
 
             }
                 break;
@@ -278,7 +341,8 @@ Mat sxpf_grabber::capture(){
         }
     }
     
-    return captured_image; // return empty Mat if no valid frame was captured
+    //logger::info("(sxpf_grabber) Capture complete, returning image ({}x{}, channels: {})", captured_image.cols, captured_image.rows, captured_image.channels());
+    return make_pair(cam_id, captured_image); // return empty Mat if no valid frame was captured
 
 }
 

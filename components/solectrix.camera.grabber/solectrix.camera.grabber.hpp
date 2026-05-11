@@ -40,7 +40,7 @@ class solectrix_camera_grabber : public flame::component::Object {
         void close_device();
         
         /* grab function */
-        cv::Mat grab();
+        pair<int, Mat> grab();
 
     private:
         /* grabber tasks */

@@ -72,7 +72,7 @@ LDFLAGS = $(LIBDIR)
 
 # OS Specific Flags
 ifeq ($(OS),Linux)
-	LDFLAGS += -Wl,--export-dynamic -Wl,-rpath=. 
+	LDFLAGS += -Wl,--export-dynamic -Wl,-rpath=. -Wl,-rpath=$(CURRENT_DIR)/lib/x86_64
 	LDLIBS = -pthread -lrt -ldl -lm -lzmq
 endif
 
