@@ -53,7 +53,7 @@ class solectrix_camera_grabber : public flame::component::Object {
         /* flags */
         atomic<bool> _worker_stop { false };
         atomic<bool> _use_image_stream { false };
-        atomic<bool> _use_image_stream_monitoring { false };
+        unordered_map<int, chrono::time_point<chrono::high_resolution_clock>> _last_capture_times;
 
         /* grabber device */
         unique_ptr<sxpf_grabber> _frame_grabber;

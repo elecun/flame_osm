@@ -32,8 +32,7 @@
         ],
         "csi2_datatype": "0x1e",
         "left_shift": 8,
-        "use_image_stream": true,
-        "use_image_stream_monitoring": true
+        "use_image_stream": true
     },
     "dataport": {
         "status": {
@@ -48,32 +47,10 @@
             "socket_type": "push",
             "queue_size": 100
         },
-        "image_stream_1_monitor": {
-            "transport": "tcp",
-            "host": "*",
-            "port": 5110,
-            "socket_type": "pub",
-            "queue_size": 10,
-            "resolution": {
-                "width": 540,
-                "height": 960
-            }
-        },
         "image_stream_2": {
             "transport": "inproc",
             "socket_type": "push",
             "queue_size": 10
-        },
-        "image_stream_2_monitor": {
-            "transport": "tcp",
-            "host": "*",
-            "port": 5111,
-            "socket_type": "pub",
-            "queue_size": 10,
-            "resolution": {
-                "width": 540,
-                "height": 960
-            }
         }
     }
 }

@@ -289,14 +289,11 @@ Mat sxpf_grabber::_process_yuv422_frame(sxpf_image_header_t* img_hdr, uint32_t l
 
 pair<int, Mat> sxpf_grabber::capture(){
 
-    cv::Mat captured_image;
-    int cam_id = -1;
-    
     /* wait & read grab event */
     int len = sxpf_wait_events(1, &this->_devfd, 100 /* ms */);
     if(len <= 0){
         logger::warn("(sxpf_grabber) No events received");
-        return make_pair(cam_id, captured_image); // return empty Mat
+        return make_pair(-1, cv::Mat()); 
     }
     
     len = sxpf_read_event(_grabber_handle, _events, NELEMENTS(_events));
@@ -314,9 +311,10 @@ pair<int, Mat> sxpf_grabber::capture(){
                     continue;
                 }
                 else {
-                    cam_id = (int)img_hdr->cam_id;
-                    captured_image = _process_yuv422_frame(img_hdr, _left_shift);
+                    int cam_id = (int)img_hdr->cam_id;
+                    cv::Mat captured_image = _process_yuv422_frame(img_hdr, _left_shift);
                     sxpf_release_frame(_grabber_handle, frame_slot, 0);
+                    return make_pair(cam_id, captured_image);
                 }
 
             }
@@ -339,7 +337,7 @@ pair<int, Mat> sxpf_grabber::capture(){
                 break;
         }
     }
-    return make_pair(cam_id, captured_image); // return empty Mat if no valid frame was captured
+    return make_pair(-1, cv::Mat()); 
 
 }
 

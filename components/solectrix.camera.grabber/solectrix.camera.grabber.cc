@@ -32,7 +32,6 @@ bool solectrix_camera_grabber::onInit(){
 
         /* setup pipeline */
         _use_image_stream.store(parameters.value("use_image_stream", false));
-        _use_image_stream_monitoring.store(parameters.value("use_image_stream_monitoring", false));
 
         /* device instance */
         _frame_grabber = make_unique<sxpf_grabber>(parameters);
@@ -49,6 +48,12 @@ bool solectrix_camera_grabber::onInit(){
             return false;
         }
 
+        /* set last capture times */
+        for(const auto& cam_param : parameters["camera"]){
+            int cam_channel = cam_param["channel"].get<int>();
+            _last_capture_times[cam_channel] = chrono::high_resolution_clock::now();
+        }
+
         /* start worker */
         _grab_worker = thread(&solectrix_camera_grabber::_grab_task, this, parameters["camera"]);
 
@@ -59,7 +64,7 @@ bool solectrix_camera_grabber::onInit(){
     }
 
     return true;
-}
+}   
 
 void solectrix_camera_grabber::onLoop(){
     /* nothing loop */
@@ -78,7 +83,6 @@ void solectrix_camera_grabber::onClose(){
 
     /* device close */
     _frame_grabber->close();
-
 }
 
 
@@ -88,77 +92,88 @@ void solectrix_camera_grabber::onData(flame::component::ZData& data){
 
 void solectrix_camera_grabber::_grab_task(json camera_parameters){
 
-    auto last_time = chrono::high_resolution_clock::now();
-    const auto& params = _frame_grabber->get_parameter_container();
-
     while(!_worker_stop.load()){
         auto loop_start = chrono::high_resolution_clock::now();
 
         /* do grab */
         try{
             pair<int, cv::Mat> captured_data = _frame_grabber->capture();
-            int cam_id = captured_data.first;
+            int cam_channel = captured_data.first;
             cv::Mat captured = captured_data.second;
 
-            if (!captured.empty()) {
-                /* find matching camera parameter by channel (cam_id) */
-                string portname = "";
-                string cam_name = "";
+            logger::debug("[{}] Captured frame from cam_id {}: {}x{}, channels: {}", getName(), cam_channel, captured.cols, captured.rows, captured.channels());
 
-                for(const auto& p : params){
-                    if(p.channel == cam_id){
-                        portname = p.portname;
-                        cam_name = p.name;
-                        break;
-                    }
-                }
-
-                if(portname.empty()){
-                    logger::warn("[{}] Received frame from unknown cam_id: {}", getName(), cam_id);
-                    continue;
-                }
-
-                /* image encoding and transmission */
+            // If valid
+            if(cam_channel>=0){
                 if(_use_image_stream.load()){
+
+                    // 1. encode image to jpg format
                     std::vector<unsigned char> serialized_image;
                     cv::imencode(".jpg", captured, serialized_image);
+                    logger::debug("[{}] Encoded image size: {} bytes", getName(), serialized_image.size());
 
-                    /* generate data meta tag */
+                    //2. generate data meta tag
                     json tag;
                     auto now = chrono::high_resolution_clock::now();
-                    chrono::duration<double> elapsed = now - last_time;
-                    last_time = now;
+                    chrono::duration<double> elapsed = now - _last_capture_times[cam_channel];
+                    _last_capture_times[cam_channel] = now;
 
                     tag["fps"] = (elapsed.count() > 0) ? 1.0/elapsed.count() : 0.0;
                     tag["height"] = captured.rows;
                     tag["width"] = captured.cols;
                     tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
-                    tag["cam_id"] = cam_id;
+                    tag["cam_channel"] = cam_channel;
 
-                    /* send data */
-                    flame::component::ZData msg_multipart_image;
-                    msg_multipart_image.addstr(portname);
-                    msg_multipart_image.addstr(tag.dump());
-                    msg_multipart_image.addmem(serialized_image.data(), serialized_image.size());
-                    
-                    /* publish monitoring image */
-                    if(_use_image_stream_monitoring.load()){
-                        string monitor_port = portname + "_monitor";
-                        flame::component::ZData monitor_msg = msg_multipart_image.clone();
-                        monitor_msg.pop(); // remove original portname topic
-                        monitor_msg.pushstr(monitor_port); // push monitor_port as new topic
-                        
-                        if(!dispatch(monitor_port, monitor_msg)){
-                            // logger::debug("[{}] monitoring port {} is not active", getName(), monitor_port);
-                        }
-                    }
-
-                    if(!dispatch(portname, msg_multipart_image)){
-                        logger::warn("[{}] socket handle is not valid for port {}", getName(), portname);
-                    }
-                    serialized_image.clear();
+                    logger::debug("[{}] cam channel {}, fps : {}", getName(), cam_channel, tag["fps"].get<double>());
                 }
             }
+            // if (!captured.empty()) {
+            //     /* dispatch */
+            //     if(_camera_port_map.contains(cam_id)){
+            //         string portname = _camera_port_map[cam_id];
+
+            //         /* image encoding and transmission */
+            //         if(_use_image_stream.load()){
+            //             std::vector<unsigned char> serialized_image;
+            //             cv::imencode(".jpg", captured, serialized_image);
+
+            //             /* generate data meta tag */
+            //             json tag;
+            //             auto now = chrono::high_resolution_clock::now();
+            //             chrono::duration<double> elapsed = now - _last_capture_times[cam_id];
+            //             _last_capture_times[cam_id] = now;
+
+            //             tag["fps"] = (elapsed.count() > 0) ? 1.0/elapsed.count() : 0.0;
+            //             tag["height"] = captured.rows;
+            //             tag["width"] = captured.cols;
+            //             tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
+            //             tag["cam_id"] = cam_id;
+
+            //             /* send data */
+            //             flame::component::ZData msg_multipart_image;
+            //             msg_multipart_image.addstr(portname);
+            //             msg_multipart_image.addstr(tag.dump());
+            //             msg_multipart_image.addmem(serialized_image.data(), serialized_image.size());
+                        
+            //             /* publish monitoring image */
+            //             if(_use_image_stream_monitoring.load()){
+            //                 string monitor_port = portname + "_monitor";
+            //                 flame::component::ZData monitor_msg = msg_multipart_image.clone();
+            //                 monitor_msg.pop(); // remove original portname topic
+            //                 monitor_msg.pushstr(monitor_port); // push monitor_port as new topic
+            //                 dispatch(monitor_port, monitor_msg);
+            //             }
+
+            //             if(!dispatch(portname, msg_multipart_image)){
+            //                 logger::warn("[{}] socket handle is not valid for port {}", getName(), portname);
+            //             }
+            //             serialized_image.clear();
+            //         }
+            //     }
+            //     else {
+            //         logger::warn("[{}] Received frame from unknown cam_id: {}", getName(), cam_id);
+            //     }
+            // }
         }
         catch(const cv::Exception& e){
             logger::debug("[{}] CV Exception {}", getName(), e.what());
