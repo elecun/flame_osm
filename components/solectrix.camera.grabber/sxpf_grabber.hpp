@@ -39,14 +39,11 @@ typedef struct camera_param {
     string portname;
     int card_endpoint = 0;
     int channel = 0;
-    double rotate_cw = 0.0;
-    int rotate_flag = -1;
     camera_param(const json& param){
         name = param.at("name").get<string>();
         portname = param.at("portname").get<string>();
         card_endpoint = param.at("card").get<int>();
         channel = param.at("channel").get<int>();
-        rotate_flag = param.value("rotate_flag", -1);
     }
 } camera_param_t;
 
@@ -68,7 +65,6 @@ class sxpf_grabber {
         Mat _process_yuv422_frame(sxpf_image_header_t* img_hdr, uint32_t left_shift);
 
         const vector<camera_param_t>& get_parameter_container() const { return _parameter_container; } /* access parameter container */
-        int get_rotate_flag() const { return _rotate_flag; }
         
 
     private:
@@ -81,7 +77,6 @@ class sxpf_grabber {
         int _decode_csi2_datatype = 0x1e;
         int _bits_per_component = 16;       //default is 16
         int _left_shift = 8;                //default is 8
-        int _rotate_flag = -1;              //default is -1 (no rotation)
 
 
         vector<camera_param_t> _parameter_container;

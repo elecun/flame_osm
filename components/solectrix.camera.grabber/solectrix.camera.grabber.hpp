@@ -46,9 +46,6 @@ class solectrix_camera_grabber : public flame::component::Object {
         /* grabber tasks */
         void _grab_task(json parameters);
 
-        /* envelop and trasnmit data */
-        void _transmit(const char* portname, void* data);
-
     private:
         /* grabbing worker */
         thread _grab_worker;

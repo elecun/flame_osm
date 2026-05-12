@@ -11,7 +11,8 @@
     "parameters": {
         "device":"/dev/sxpf0",
         "port":0,
-        "sxpf_ini":"./osm/ti954_OV2778-FPDLINKIII.ini",
+        "show_window": false,
+        "sxpf_ini":"/home/osm/dev/flame_osm/bin/x86_64/osm/ti954_OV2778-FPDLINKIII.ini",
         "event_ids":"0,1,2",
         "camera": [
             {
@@ -19,16 +20,14 @@
                 "name": "Left A Pillar",
                 "portname": "image_stream_1",
                 "card": 0,
-                "channel": 0,
-                "rotate_flag": 0
+                "channel": 0
             },
             {
                 "id": 2,
                 "name": "Right A Pillar",
                 "portname": "image_stream_2",
                 "card": 0,
-                "channel": 2,
-                "rotate_flag": 0
+                "channel": 2
             }
         ],
         "csi2_datatype": "0x1e",
@@ -63,7 +62,7 @@
         "image_stream_2": {
             "transport": "inproc",
             "socket_type": "push",
-            "queue_size": 100
+            "queue_size": 10
         },
         "image_stream_2_monitor": {
             "transport": "tcp",

@@ -37,7 +37,6 @@ sxpf_grabber::sxpf_grabber(json parameters){
     }
 
     _decode_csi2_datatype = strtol(parameters.at("csi2_datatype").get<string>().c_str(), NULL, 16);
-    _rotate_flag = parameters.value("rotate_flag", -1);
 
     _init_device = parameters.value("device", parameters.value("device", "/dev/sxpf0"));
     _init_port = parameters.value("port", parameters.value("port", 0));
@@ -296,7 +295,7 @@ pair<int, Mat> sxpf_grabber::capture(){
     /* wait & read grab event */
     int len = sxpf_wait_events(1, &this->_devfd, 100 /* ms */);
     if(len <= 0){
-        // logger::debug("(sxpf_grabber) No events received");
+        logger::warn("(sxpf_grabber) No events received");
         return make_pair(cam_id, captured_image); // return empty Mat
     }
     
@@ -340,8 +339,6 @@ pair<int, Mat> sxpf_grabber::capture(){
                 break;
         }
     }
-    
-    //logger::info("(sxpf_grabber) Capture complete, returning image ({}x{}, channels: {})", captured_image.cols, captured_image.rows, captured_image.channels());
     return make_pair(cam_id, captured_image); // return empty Mat if no valid frame was captured
 
 }

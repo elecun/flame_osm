@@ -20,7 +20,6 @@ void Release(){ if(_instance){ delete _instance; _instance = nullptr; }}
 bool solectrix_camera_grabber::onInit(){
 
     try{
-
         /* read profile */
         json parameters = getProfile()->parameters();
 
@@ -105,13 +104,11 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
                 /* find matching camera parameter by channel (cam_id) */
                 string portname = "";
                 string cam_name = "";
-                int rotate_flag = -1;
 
                 for(const auto& p : params){
                     if(p.channel == cam_id){
                         portname = p.portname;
                         cam_name = p.name;
-                        rotate_flag = p.rotate_flag;
                         break;
                     }
                 }
@@ -121,48 +118,46 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
                     continue;
                 }
 
-                /* image rotate (0=cw_90, 1=180, 2=ccw_90)*/
-                if(rotate_flag >= 0 && rotate_flag <= 2){
-                    cv::rotate(captured, captured, rotate_flag);
+                /* image encoding and transmission */
+                if(_use_image_stream.load()){
+                    std::vector<unsigned char> serialized_image;
+                    cv::imencode(".jpg", captured, serialized_image);
+
+                    /* generate data meta tag */
+                    json tag;
+                    auto now = chrono::high_resolution_clock::now();
+                    chrono::duration<double> elapsed = now - last_time;
+                    last_time = now;
+
+                    tag["fps"] = (elapsed.count() > 0) ? 1.0/elapsed.count() : 0.0;
+                    tag["height"] = captured.rows;
+                    tag["width"] = captured.cols;
+                    tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
+                    tag["cam_id"] = cam_id;
+
+                    /* send data */
+                    flame::component::ZData msg_multipart_image;
+                    msg_multipart_image.addstr(portname);
+                    msg_multipart_image.addstr(tag.dump());
+                    msg_multipart_image.addmem(serialized_image.data(), serialized_image.size());
+                    
+                    /* publish monitoring image */
+                    if(_use_image_stream_monitoring.load()){
+                        string monitor_port = portname + "_monitor";
+                        flame::component::ZData monitor_msg = msg_multipart_image.clone();
+                        monitor_msg.pop(); // remove original portname topic
+                        monitor_msg.pushstr(monitor_port); // push monitor_port as new topic
+                        
+                        if(!dispatch(monitor_port, monitor_msg)){
+                            // logger::debug("[{}] monitoring port {} is not active", getName(), monitor_port);
+                        }
+                    }
+
+                    if(!dispatch(portname, msg_multipart_image)){
+                        logger::warn("[{}] socket handle is not valid for port {}", getName(), portname);
+                    }
+                    serialized_image.clear();
                 }
-
-                /* show image */
-                if(!cam_name.empty()){
-                    cv::imshow(cam_name, captured);
-                    cv::waitKey(1);
-                }
-
-                /* image encoding */
-                // std::vector<unsigned char> serialized_image;
-                // cv::imencode(".jpg", captured, serialized_image);
-
-                // /* generate data meta tag */
-                // json tag;
-                // auto now = chrono::high_resolution_clock::now();
-                // chrono::duration<double> elapsed = now - last_time;
-                // last_time = now;
-
-                // tag["fps"] = 1.0/elapsed.count();
-                // tag["height"] = captured.rows;
-                // tag["width"] = captured.cols;
-                // tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
-                // tag["cam_id"] = cam_id;
-
-                // /* send data */
-                // flame::component::ZData msg_multipart_image;
-                // msg_multipart_image.addstr(portname);
-                // msg_multipart_image.addstr(tag.dump());
-                // msg_multipart_image.addmem(serialized_image.data(), serialized_image.size());
-                
-                // if(!dispatch(portname, msg_multipart_image)){
-                //     logger::warn("[{}] socket handle is not valid for port {}", getName(), portname);
-                // }
-                // serialized_image.clear();
-
-                // /* publish monitoring image */
-                // if(_use_image_stream_monitoring.load()){
-                //     // TODO: Implement monitoring stream if needed
-                // }
             }
         }
         catch(const cv::Exception& e){
