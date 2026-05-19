@@ -175,8 +175,15 @@ video_file_grabber.comp: $(BUILDDIR)video.file.grabber.o
 $(BUILDDIR)video.file.grabber.o: $(CURRENT_DIR)/components/video.file.grabber/video.file.grabber.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
 
+# Camera Monitor
+camera_monitor.comp: $(BUILDDIR)camera.monitor.o
+	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS)
+
+$(BUILDDIR)camera.monitor.o: $(CURRENT_DIR)/components/camera.monitor/camera.monitor.cc
+	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
+
 # OSM Group Target
-osm : flame uvc_camera_grabber.comp solectrix_camera_grabber.comp body_kps_inference.comp os_model_inference.comp headpose_model_inference.comp video_file_grabber.comp face_detection_inference.comp
+osm : flame uvc_camera_grabber.comp solectrix_camera_grabber.comp body_kps_inference.comp os_model_inference.comp headpose_model_inference.comp video_file_grabber.comp face_detection_inference.comp camera_monitor.comp
 
 deploy : FORCE
 	cp $(BUILDDIR)/*.comp $(BUILDDIR)/flame $(BINDIR)

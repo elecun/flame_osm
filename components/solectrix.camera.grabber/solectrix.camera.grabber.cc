@@ -185,7 +185,6 @@ void solectrix_camera_grabber::_dispatch_task(int channel){
 
             if(data){
                 flame::component::ZData msg;
-                msg.addstr(data->portname);
                 msg.addstr(data->tag);
                 msg.addmem(data->image.data(), data->image.size());
 

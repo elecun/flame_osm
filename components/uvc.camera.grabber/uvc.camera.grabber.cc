@@ -94,10 +94,6 @@ void UvcCameraGrabber::onLoop() {
     return;
 
   flame::component::ZData msg;
-  msg.addstr("status");
-  msg.addstr(""); // broadcast
-  msg.addstr("json");
-
   json status;
   status["component"] = getName();
   status["state"] = "running";
@@ -277,9 +273,7 @@ void UvcCameraGrabber::grabTask(int camera_id, json camera_param) {
 
         /* Send via dispatch - addmem avoids string copy for binary data */
         flame::component::ZData msg;
-        msg.addstr(stream_portname);
-        msg.addstr(""); // broadcast
-        msg.addstr("binary");
+        msg.addstr(tag_str);
         msg.addmem(serialized_image.data(), serialized_image.size());
 
         if (!dispatch(stream_portname, msg)) {
@@ -297,9 +291,7 @@ void UvcCameraGrabber::grabTask(int camera_id, json camera_param) {
 
         /* Send monitor image via dispatch - addmem for binary zero-copy */
         flame::component::ZData msg;
-        msg.addstr(monitoring_portname);
-        msg.addstr(""); // broadcast
-        msg.addstr("binary");
+        msg.addstr(tag_str);
         msg.addmem(serialized_monitor_image.data(), serialized_monitor_image.size());
 
         if (!dispatch(monitoring_portname, msg)) {
