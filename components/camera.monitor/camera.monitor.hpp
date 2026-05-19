@@ -35,13 +35,8 @@ class camera_monitor : public flame::component::Object {
         void onData(flame::component::ZData& data) override;
 
     private:
-        void _subscriber_worker(string portname);
-        void _on_message(const string& portname, flame::component::ZData& data);
-
-    private:
-        std::atomic<bool> _worker_stop { false };
-        unordered_map<string, thread> _subscriber_workers;
         unordered_map<string, chrono::time_point<chrono::high_resolution_clock>> _last_received_times;
+        mutex _mtx;
 };
 
 EXPORT_COMPONENT_API

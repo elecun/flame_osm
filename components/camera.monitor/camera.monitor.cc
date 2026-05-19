@@ -10,37 +10,6 @@ camera_monitor::camera_monitor() {
 }
 
 bool camera_monitor::onInit(){
-    try{
-        /* read profile */
-        json dataport = getProfile()->dataPort();
-
-        // for(auto& [portname, config] : dataport.items()){
-        //     if(portname == "status") continue;
-
-        //     /* Check if it's a subscriber type (socket_type: sub) */
-        //     string socket_type = config.value("socket_type", "");
-        //     if(socket_type == "sub"){
-        //         logger::info("[{}] Setting up callback for port: {}", getName(), portname);
-                
-        //         auto port = getPort(portname);
-        //         if(port){
-        //             _last_received_times[portname] = chrono::high_resolution_clock::now();
-        //             port->setMessageCallback([this, portname](flame::component::ZData& data){
-        //                 this->_on_message(portname, data);
-        //             });
-        //         }
-        //     }
-        // }
-    }
-    catch(json::exception& e){
-        logger::error("[{}] Profile Error : {}", getName(), e.what());
-        return false;
-    }
-    catch(const std::exception& e){
-        logger::error("[{}] Initialization Error : {}", getName(), e.what());
-        return false;
-    }
-
     return true;
 }
 
@@ -48,26 +17,36 @@ void camera_monitor::onLoop(){
 }
 
 void camera_monitor::onClose(){
-    logger::info("[{}] Component closing", getName());
 }
 
 void camera_monitor::onData(flame::component::ZData& data){
+    /* 
+       Note: ZData for SUB sockets has the topic frame stripped by the engine.
+       We need to identify the camera channel from the metadata tag.
+    */
+    try {
+        if(data.size() >= 1){
+            string tag_str = data.popstr();
+            json tag = json::parse(tag_str);
 
-    logger::info("[{}] Received data with {} parts", getName(), data.size());
-}
+            int cam_channel = tag.value("cam_channel", -1);
+            if(cam_channel == -1) cam_channel = tag.value("cam_id", -1);
 
-void camera_monitor::_on_message(const string& portname, flame::component::ZData& data){
-    auto now = chrono::high_resolution_clock::now();
-    chrono::duration<double> elapsed = now - _last_received_times[portname];
-    _last_received_times[portname] = now;
+            if(cam_channel != -1){
+                string channel_key = fmt::format("channel_{}", cam_channel);
+                auto now = chrono::high_resolution_clock::now();
 
-    double fps = (elapsed.count() > 0) ? 1.0 / elapsed.count() : 0.0;
-    
-    /* ZData received here already has topic stripped for SUB pattern */
-    if(data.size() >= 1){
-        string tag_str = data.popstr();
-        // zmq::message_t image_data = data.pop();
-        
-        logger::info("[{}] Received data from {}: fps={:.2f}", getName(), portname, fps);
+                lock_guard<mutex> lock(_mtx);
+                if(_last_received_times.contains(channel_key)){
+                    chrono::duration<double> elapsed = now - _last_received_times[channel_key];
+                    double fps = (elapsed.count() > 0) ? 1.0 / elapsed.count() : 0.0;
+                    logger::info("[{}] Received data from channel {}: fps={:.2f}", getName(), cam_channel, fps);
+                }
+                _last_received_times[channel_key] = now;
+            }
+        }
+    }
+    catch(const std::exception& e){
+        logger::error("[{}] Error in onData: {}", getName(), e.what());
     }
 }

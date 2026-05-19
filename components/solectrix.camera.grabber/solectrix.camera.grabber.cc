@@ -210,14 +210,9 @@ bool solectrix_camera_grabber::open_device(int endpoint_id, int channel_id, uint
         return true;
     }
 
-    _endpoint_id = endpoint_id;
-    _channel_id = channel_id;
-    _decode_csi2_datatype = decode_csi2_datatype;
-    _left_shift = left_shift;
-
     if(_frame_grabber->open()){
         _device_opened = true;
-        logger::info("[{}] Device opened successfully (endpoint:{}, channel:{})", getName(), _endpoint_id, _channel_id);
+        logger::info("[{}] Device opened successfully (endpoint:{}, channel:{})", getName(), endpoint_id, channel_id);
         return true;
     }
     else {
