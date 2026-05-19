@@ -169,28 +169,36 @@ void solectrix_camera_grabber::_dispatch_task(int channel){
     logger::debug("[{}] Started dispatch task for channel {}", getName(), channel);
     
     while(!_worker_stop.load()){
-        shared_ptr<DispatchData> data = nullptr;
-        {
-            unique_lock<mutex> lock(_queue_mtxs[channel]);
-            _queue_cvs[channel].wait(lock, [this, channel]{ return !_dispatch_queues[channel].empty() || _worker_stop.load(); });
-            
-            if(_worker_stop.load() && _dispatch_queues[channel].empty()) break;
+        try {
+            shared_ptr<DispatchData> data = nullptr;
+            {
+                unique_lock<mutex> lock(_queue_mtxs[channel]);
+                _queue_cvs[channel].wait(lock, [this, channel]{ return !_dispatch_queues[channel].empty() || _worker_stop.load(); });
+                
+                if(_worker_stop.load() && _dispatch_queues[channel].empty()) break;
 
-            if(!_dispatch_queues[channel].empty()){
-                data = _dispatch_queues[channel].front();
-                _dispatch_queues[channel].pop();
+                if(!_dispatch_queues[channel].empty()){
+                    data = _dispatch_queues[channel].front();
+                    _dispatch_queues[channel].pop();
+                }
+            }
+
+            if(data){
+                flame::component::ZData msg;
+                msg.addstr(data->portname);
+                msg.addstr(data->tag);
+                msg.addmem(data->image.data(), data->image.size());
+
+                if(!dispatch(data->portname, msg)){
+                    logger::warn("[{}] Failed to dispatch image to port {}", getName(), data->portname);
+                }
             }
         }
-
-        if(data){
-            flame::component::ZData msg;
-            msg.addstr(data->portname);
-            msg.addstr(data->tag);
-            msg.addmem(data->image.data(), data->image.size());
-
-            if(!dispatch(data->portname, msg)){
-                logger::warn("[{}] Failed to dispatch image to port {}", getName(), data->portname);
+        catch(const std::exception& e){
+            if(!_worker_stop.load()){
+                logger::error("[{}] Exception in dispatch task for channel {}: {}", getName(), channel, e.what());
             }
+            break;
         }
     }
     logger::debug("[{}] Stopped dispatch task for channel {}", getName(), channel);
