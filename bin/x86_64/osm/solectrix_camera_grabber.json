@@ -16,14 +16,12 @@
         "event_ids":"0,1,2",
         "camera": [
             {
-                "id": 1,
                 "name": "Left A Pillar",
                 "portname": "image_stream_1",
                 "card": 0,
                 "channel": 0
             },
             {
-                "id": 2,
                 "name": "Right A Pillar",
                 "portname": "image_stream_2",
                 "card": 0,
@@ -42,14 +40,14 @@
             "socket_type": "pub",
             "queue_size": 10
         },
-        "image_stream_1": {
+        "image_stream_0": {
             "transport": "inproc",
-            "socket_type": "push",
-            "queue_size": 100
+            "socket_type": "pub",
+            "queue_size": 10
         },
         "image_stream_2": {
             "transport": "inproc",
-            "socket_type": "push",
+            "socket_type": "pub",
             "queue_size": 10
         }
     }

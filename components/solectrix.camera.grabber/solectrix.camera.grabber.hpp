@@ -45,10 +45,24 @@ class solectrix_camera_grabber : public flame::component::Object {
     private:
         /* grabber tasks */
         void _grab_task(json parameters);
+        void _dispatch_task(int channel);
+
+    private:
+        /* data for dispatching */
+        struct DispatchData {
+            string portname;
+            string tag;
+            vector<unsigned char> image;
+        };
 
     private:
         /* grabbing worker */
         thread _grab_worker;
+        unordered_map<int, thread> _dispatch_workers;
+        unordered_map<int, queue<shared_ptr<DispatchData>>> _dispatch_queues;
+        unordered_map<int, mutex> _queue_mtxs;
+        unordered_map<int, condition_variable> _queue_cvs;
+        const size_t _max_queue_size = 5;
 
         /* flags */
         atomic<bool> _worker_stop { false };

@@ -48,10 +48,11 @@ bool solectrix_camera_grabber::onInit(){
             return false;
         }
 
-        /* set last capture times */
+        /* set last capture times and start dispatch workers */
         for(const auto& cam_param : parameters["camera"]){
             int cam_channel = cam_param["channel"].get<int>();
             _last_capture_times[cam_channel] = chrono::high_resolution_clock::now();
+            _dispatch_workers[cam_channel] = thread(&solectrix_camera_grabber::_dispatch_task, this, cam_channel);
         }
 
         /* start worker */
@@ -75,11 +76,24 @@ void solectrix_camera_grabber::onClose(){
     /* stop worker */
     _worker_stop.store(true);
 
+    /* notify all dispatch workers */
+    for(auto& [channel, cv] : _queue_cvs){
+        cv.notify_all();
+    }
+
     /* stop grabbing thread */
     if(_grab_worker.joinable()){
         _grab_worker.join();
         logger::debug("[{}] grabber is now successfully stopped", getName());
     }
+
+    /* stop dispatch workers */
+    for(auto& [channel, worker] : _dispatch_workers){
+        if(worker.joinable()){
+            worker.join();
+        }
+    }
+    logger::debug("[{}] all dispatch workers are now successfully stopped", getName());
 
     /* device close */
     _frame_grabber->close();
@@ -93,24 +107,19 @@ void solectrix_camera_grabber::onData(flame::component::ZData& data){
 void solectrix_camera_grabber::_grab_task(json camera_parameters){
 
     while(!_worker_stop.load()){
-        auto loop_start = chrono::high_resolution_clock::now();
-
         /* do grab */
         try{
             pair<int, cv::Mat> captured_data = _frame_grabber->capture();
             int cam_channel = captured_data.first;
             cv::Mat captured = captured_data.second;
 
-            logger::debug("[{}] Captured frame from cam_id {}: {}x{}, channels: {}", getName(), cam_channel, captured.cols, captured.rows, captured.channels());
-
             // If valid
             if(cam_channel>=0){
                 if(_use_image_stream.load()){
 
                     // 1. encode image to jpg format
-                    std::vector<unsigned char> serialized_image;
-                    cv::imencode(".jpg", captured, serialized_image);
-                    logger::debug("[{}] Encoded image size: {} bytes", getName(), serialized_image.size());
+                    auto data = make_shared<DispatchData>();
+                    cv::imencode(".jpg", captured, data->image);
 
                     //2. generate data meta tag
                     json tag;
@@ -125,77 +134,66 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
                     tag["cam_channel"] = cam_channel;
 
                     logger::debug("[{}] cam channel {}, fps : {}", getName(), cam_channel, tag["fps"].get<double>());
+
+                    data->portname = fmt::format("image_stream_{}", cam_channel);
+                    data->tag = tag.dump();
+
+                    /* push to channel queue */
+                    {
+                        lock_guard<mutex> lock(_queue_mtxs[cam_channel]);
+                        if(_dispatch_queues[cam_channel].size() < _max_queue_size){
+                            _dispatch_queues[cam_channel].push(data);
+                        }
+                        else {
+                            _dispatch_queues[cam_channel].pop();
+                            _dispatch_queues[cam_channel].push(data);
+                        }
+                    }
+                    _queue_cvs[cam_channel].notify_one();
                 }
             }
-            // if (!captured.empty()) {
-            //     /* dispatch */
-            //     if(_camera_port_map.contains(cam_id)){
-            //         string portname = _camera_port_map[cam_id];
-
-            //         /* image encoding and transmission */
-            //         if(_use_image_stream.load()){
-            //             std::vector<unsigned char> serialized_image;
-            //             cv::imencode(".jpg", captured, serialized_image);
-
-            //             /* generate data meta tag */
-            //             json tag;
-            //             auto now = chrono::high_resolution_clock::now();
-            //             chrono::duration<double> elapsed = now - _last_capture_times[cam_id];
-            //             _last_capture_times[cam_id] = now;
-
-            //             tag["fps"] = (elapsed.count() > 0) ? 1.0/elapsed.count() : 0.0;
-            //             tag["height"] = captured.rows;
-            //             tag["width"] = captured.cols;
-            //             tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
-            //             tag["cam_id"] = cam_id;
-
-            //             /* send data */
-            //             flame::component::ZData msg_multipart_image;
-            //             msg_multipart_image.addstr(portname);
-            //             msg_multipart_image.addstr(tag.dump());
-            //             msg_multipart_image.addmem(serialized_image.data(), serialized_image.size());
-                        
-            //             /* publish monitoring image */
-            //             if(_use_image_stream_monitoring.load()){
-            //                 string monitor_port = portname + "_monitor";
-            //                 flame::component::ZData monitor_msg = msg_multipart_image.clone();
-            //                 monitor_msg.pop(); // remove original portname topic
-            //                 monitor_msg.pushstr(monitor_port); // push monitor_port as new topic
-            //                 dispatch(monitor_port, monitor_msg);
-            //             }
-
-            //             if(!dispatch(portname, msg_multipart_image)){
-            //                 logger::warn("[{}] socket handle is not valid for port {}", getName(), portname);
-            //             }
-            //             serialized_image.clear();
-            //         }
-            //     }
-            //     else {
-            //         logger::warn("[{}] Received frame from unknown cam_id: {}", getName(), cam_id);
-            //     }
-            // }
         }
         catch(const cv::Exception& e){
             logger::debug("[{}] CV Exception {}", getName(), e.what());
         }
-        catch(const zmq::error_t& e){
-            logger::error("[{}] Piepeline Error : {}", getName(), e.what());
-        }
-        catch(const json::exception& e){
-            logger::error("[{}] Data Parse Error : {}", getName(), e.what());
-        }
         catch(const std::exception& e){
-            logger::error("[{}] Standard Exception : {}", getName(), e.what());
+            logger::error("[{}] Standard Exception in grab task : {}", getName(), e.what());
         }
-
-        auto loop_end = chrono::high_resolution_clock::now();
-        chrono::duration<double, milli> loop_ms = loop_end - loop_start;
-        logger::debug("[{}] Loop elapsed time: {:.2f} ms", getName(), loop_ms.count());
-    
     }
 
     logger::debug("[{}] Stopped grab task..", getName());
 
+}
+
+void solectrix_camera_grabber::_dispatch_task(int channel){
+    logger::debug("[{}] Started dispatch task for channel {}", getName(), channel);
+    
+    while(!_worker_stop.load()){
+        shared_ptr<DispatchData> data = nullptr;
+        {
+            unique_lock<mutex> lock(_queue_mtxs[channel]);
+            _queue_cvs[channel].wait(lock, [this, channel]{ return !_dispatch_queues[channel].empty() || _worker_stop.load(); });
+            
+            if(_worker_stop.load() && _dispatch_queues[channel].empty()) break;
+
+            if(!_dispatch_queues[channel].empty()){
+                data = _dispatch_queues[channel].front();
+                _dispatch_queues[channel].pop();
+            }
+        }
+
+        if(data){
+            flame::component::ZData msg;
+            msg.addstr(data->portname);
+            msg.addstr(data->tag);
+            msg.addmem(data->image.data(), data->image.size());
+
+            if(!dispatch(data->portname, msg)){
+                logger::warn("[{}] Failed to dispatch image to port {}", getName(), data->portname);
+            }
+        }
+    }
+    logger::debug("[{}] Stopped dispatch task for channel {}", getName(), channel);
 }
 
 bool solectrix_camera_grabber::open_device(int endpoint_id, int channel_id, uint32_t decode_csi2_datatype, int left_shift) {
