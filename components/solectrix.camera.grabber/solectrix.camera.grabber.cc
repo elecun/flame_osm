@@ -118,8 +118,9 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
                 if(_use_image_stream.load()){
 
                     // 1. encode image to jpg format
-                    auto data = make_shared<DispatchData>();
-                    cv::imencode(".jpg", captured, data->image);
+                    auto msg = make_shared<flame::component::ZData>();
+                    vector<unsigned char> image_buf;
+                    cv::imencode(".jpg", captured, image_buf);
 
                     //2. generate data meta tag
                     json tag;
@@ -135,18 +136,22 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
 
                     logger::debug("[{}] cam channel {}, fps : {}", getName(), cam_channel, tag["fps"].get<double>());
 
-                    data->portname = fmt::format("image_stream_{}", cam_channel);
-                    data->tag = tag.dump();
+                    msg->from = fmt::format("image_stream_{}", cam_channel);
+                    msg->meta = tag.dump();
+
+                    // 3. populate multipart frames (first: metadata/tag, second: image data)
+                    msg->addstr(msg->meta);
+                    msg->addmem(image_buf.data(), image_buf.size());
 
                     /* push to channel queue */
                     {
                         lock_guard<mutex> lock(_queue_mtxs[cam_channel]);
                         if(_dispatch_queues[cam_channel].size() < _max_queue_size){
-                            _dispatch_queues[cam_channel].push(data);
+                            _dispatch_queues[cam_channel].push(msg);
                         }
                         else {
                             _dispatch_queues[cam_channel].pop();
-                            _dispatch_queues[cam_channel].push(data);
+                            _dispatch_queues[cam_channel].push(msg);
                         }
                     }
                     _queue_cvs[cam_channel].notify_one();
@@ -170,7 +175,7 @@ void solectrix_camera_grabber::_dispatch_task(int channel){
     
     while(!_worker_stop.load()){
         try {
-            shared_ptr<DispatchData> data = nullptr;
+            shared_ptr<flame::component::ZData> msg = nullptr;
             {
                 unique_lock<mutex> lock(_queue_mtxs[channel]);
                 _queue_cvs[channel].wait(lock, [this, channel]{ return !_dispatch_queues[channel].empty() || _worker_stop.load(); });
@@ -178,18 +183,14 @@ void solectrix_camera_grabber::_dispatch_task(int channel){
                 if(_worker_stop.load() && _dispatch_queues[channel].empty()) break;
 
                 if(!_dispatch_queues[channel].empty()){
-                    data = _dispatch_queues[channel].front();
+                    msg = _dispatch_queues[channel].front();
                     _dispatch_queues[channel].pop();
                 }
             }
 
-            if(data){
-                flame::component::ZData msg;
-                msg.addstr(data->tag);
-                msg.addmem(data->image.data(), data->image.size());
-
-                if(!dispatch(data->portname, msg)){
-                    logger::warn("[{}] Failed to dispatch image to port {}", getName(), data->portname);
+            if(msg){
+                if(!dispatch(msg->from, *msg)){
+                    logger::warn("[{}] Failed to dispatch image to port {}", getName(), msg->from);
                 }
             }
         }
