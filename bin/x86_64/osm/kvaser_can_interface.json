@@ -3,7 +3,8 @@
     "verbose": 1,
     "parameters": {
         "use_channel": 0,
-        "can_bitrate": 500000
+        "can_bitrate": 500000,
+        "can_fd_data_bitrate": 2000000
     },
     "dataport": {
         "status": {
