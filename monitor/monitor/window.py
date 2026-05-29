@@ -69,14 +69,19 @@ class AppWindow(QMainWindow):
                     raise Exception(f"Cannot found UI file : {ui_path}")
                 
                 # ui components event callback def.
-                self.chk_option_disable_camera_monitoring_stream.stateChanged.connect(self.on_check_option_disable_camera_monitor_stream)
-                self.chk_option_show_frame_info.stateChanged.connect(self.on_check_option_show_frame_info)
-                self.chk_option_show_body_keypoints.stateChanged.connect(self.on_check_show_body_keypoints)
+                # self.chk_option_disable_camera_monitoring_stream.stateChanged.connect(self.on_check_option_disable_camera_monitor_stream)
+                if hasattr(self, 'chk_option_show_frame_info'):
+                    self.chk_option_show_frame_info.stateChanged.connect(self.on_check_option_show_frame_info)
+                if hasattr(self, 'chk_option_show_body_keypoints'):
+                    self.chk_option_show_body_keypoints.stateChanged.connect(self.on_check_show_body_keypoints)
+                elif hasattr(self, 'chk_show_body_kps'):
+                    self.chk_show_body_kps.stateChanged.connect(self.on_check_show_body_keypoints)
                 self.btn_video_open.clicked.connect(self.on_btn_video_open)
 
                 # set options
                 if self.__config.get("option_show_frame_info", False):
-                    self.chk_option_show_frame_info.setChecked(True)
+                    if hasattr(self, 'chk_option_show_frame_info'):
+                        self.chk_option_show_frame_info.setChecked(True)
                     self.on_check_option_show_frame_info()
 
                 # map between camera device and windows
@@ -112,8 +117,10 @@ class AppWindow(QMainWindow):
 
     def on_update_camera_image(self, image:np.ndarray, tags:dict):
 
-        id = tags["id"]
-        fps = round(tags["fps"], 1)
+        id = tags.get("id", tags.get("camera_id", tags.get("cam_id", tags.get("cam_channel", 1))))
+        if id not in self.__frame_window_map and self.__frame_window_map:
+            id = list(self.__frame_window_map.keys())[0]
+        fps = round(tags.get("fps", 0.0), 1)
 
         print(tags)
 
@@ -158,7 +165,10 @@ class AppWindow(QMainWindow):
         pass
 
     def on_check_option_show_frame_info(self):
-        self.__show_frame_info = self.chk_option_show_frame_info.isChecked()
+        if hasattr(self, 'chk_option_show_frame_info'):
+            self.__show_frame_info = self.chk_option_show_frame_info.isChecked()
+        else:
+            self.__show_frame_info = self.__config.get("option_show_frame_info", False)
 
     def on_check_show_body_keypoints(self):
         pass
