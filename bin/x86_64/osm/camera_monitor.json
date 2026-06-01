@@ -30,14 +30,22 @@
             "host": "*",
             "port": 5201,
             "socket_type": "pub",
-            "queue_size": 10
+            "queue_size": 10,
+            "resolution": {
+                "width": 800,
+                "height": 450
+            }
         },
         "image_stream_2_monitor":{
             "transport": "tcp",
             "host": "*",
             "port": 5202,
             "socket_type": "pub",
-            "queue_size": 10
+            "queue_size": 10,
+            "resolution": {
+                "width": 800,
+                "height": 450
+            }
         }
     }
 }

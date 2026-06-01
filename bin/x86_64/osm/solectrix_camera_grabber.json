@@ -43,12 +43,14 @@
         "image_stream_0": {
             "transport": "inproc",
             "socket_type": "pub",
-            "queue_size": 10
+            "queue_size": 10,
+            "rotate":true
         },
         "image_stream_2": {
             "transport": "inproc",
             "socket_type": "pub",
-            "queue_size": 10
+            "queue_size": 10,
+            "rotate":true
         }
     }
 }

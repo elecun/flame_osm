@@ -52,6 +52,11 @@ class AppWindow(QMainWindow):
         # option flags
         self.__show_frame_info = False
 
+        # recording state
+        self.__is_recording = False
+        self.__record_start_time = ""
+        self.__video_writers = {}
+
         # device/service control interfaces
         self.__camera_image_subscriber_map = {}
 
@@ -77,6 +82,12 @@ class AppWindow(QMainWindow):
                 elif hasattr(self, 'chk_show_body_kps'):
                     self.chk_show_body_kps.stateChanged.connect(self.on_check_show_body_keypoints)
                 self.btn_video_open.clicked.connect(self.on_btn_video_open)
+
+                if hasattr(self, 'btn_record_start'):
+                    self.btn_record_start.clicked.connect(self.on_btn_record_start)
+                if hasattr(self, 'btn_record_stop'):
+                    self.btn_record_stop.clicked.connect(self.on_btn_record_stop)
+                    self.btn_record_stop.setEnabled(False)
 
                 # set options
                 if self.__config.get("option_show_frame_info", False):
@@ -118,6 +129,23 @@ class AppWindow(QMainWindow):
     def on_update_camera_image(self, image:np.ndarray, tags:dict):
 
         id = tags.get("id", tags.get("camera_id", tags.get("cam_id", tags.get("cam_channel", 1))))
+        
+        # Robust ID lookup: try type conversions to match key types in self.__frame_window_map
+        if id not in self.__frame_window_map and self.__frame_window_map:
+            try:
+                int_id = int(id)
+                if int_id in self.__frame_window_map:
+                    id = int_id
+            except (ValueError, TypeError):
+                pass
+        if id not in self.__frame_window_map and self.__frame_window_map:
+            try:
+                str_id = str(id)
+                if str_id in self.__frame_window_map:
+                    id = str_id
+            except (ValueError, TypeError):
+                pass
+                
         if id not in self.__frame_window_map and self.__frame_window_map:
             id = list(self.__frame_window_map.keys())[0]
         fps = round(tags.get("fps", 0.0), 1)
@@ -132,6 +160,19 @@ class AppWindow(QMainWindow):
             cv2.putText(color_image, t.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3], (5, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 1, cv2.LINE_AA)
         h, w, ch = color_image.shape
         
+        # Write to video if recording is active
+        if self.__is_recording:
+            if id not in self.__video_writers:
+                fourcc = cv2.VideoWriter_fourcc(*'XVID')
+                writer_fps = fps if fps > 0 else 30.0
+                filename = f"{self.__record_start_time}_cam{id}.avi"
+                self.__video_writers[id] = cv2.VideoWriter(filename, fourcc, writer_fps, (w, h))
+                self.__console.info(f"Started video recording for Camera {id} to {filename}")
+            
+            try:
+                self.__video_writers[id].write(rotated_image)
+            except Exception as e:
+                self.__console.error(f"Error writing frame to Camera {id} video: {e}")
 
         qt_image = QImage(color_image.data, w, h, ch*w, QImage.Format.Format_RGB888)
         pixmap = QPixmap.fromImage(qt_image)
@@ -149,6 +190,12 @@ class AppWindow(QMainWindow):
     def closeEvent(self, event:QCloseEvent) -> None: 
         """ terminate main window """      
 
+        # close video writers
+        if hasattr(self, '__video_writers'):
+            for id, writer in self.__video_writers.items():
+                writer.release()
+            self.__video_writers.clear()
+
         # close camera stream monitoring subscriber
         if len(self.__camera_image_subscriber_map.keys())>0:
             with ThreadPoolExecutor(max_workers=10) as executor:
@@ -163,6 +210,29 @@ class AppWindow(QMainWindow):
             
         return super().closeEvent(event)
     
+    def on_btn_record_start(self):
+        if not self.__is_recording:
+            self.__is_recording = True
+            self.__record_start_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.__video_writers = {}
+            self.__console.info(f"Video recording started at {self.__record_start_time}")
+            if hasattr(self, 'btn_record_start'):
+                self.btn_record_start.setEnabled(False)
+            if hasattr(self, 'btn_record_stop'):
+                self.btn_record_stop.setEnabled(True)
+
+    def on_btn_record_stop(self):
+        if self.__is_recording:
+            self.__is_recording = False
+            for id, writer in self.__video_writers.items():
+                writer.release()
+            self.__video_writers.clear()
+            self.__console.info("Video recording stopped.")
+            if hasattr(self, 'btn_record_start'):
+                self.btn_record_start.setEnabled(True)
+            if hasattr(self, 'btn_record_stop'):
+                self.btn_record_stop.setEnabled(False)
+
     def on_check_option_disable_camera_monitor_stream(self):
         pass
 
