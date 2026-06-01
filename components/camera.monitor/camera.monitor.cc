@@ -96,7 +96,7 @@ void camera_monitor::onData(flame::component::ZData& data)
                 }
             }
             _queue_cvs[portname].notify_one();
-            logger::info("[{}] Received data from port: {}, frames count: {}", getName(), portname, msg->size());
+            // logger::info("[{}] Received data from port: {}, frames count: {}", getName(), portname, msg->size());
         }
     } catch (const std::exception& e) {
         logger::error("[{}] Error in onData: {}", getName(), e.what());
@@ -149,7 +149,7 @@ void camera_monitor::_monitor_task(string stream_name, string monitor_portname)
 
                 auto end_time = chrono::high_resolution_clock::now();
                 chrono::duration<double, std::milli> elapsed = end_time - start_time;
-                logger::info("[{}] [{}] Processing loop time: {:.3f} ms", getName(), stream_name, elapsed.count());
+                // logger::info("[{}] [{}] Processing loop time: {:.3f} ms", getName(), stream_name, elapsed.count());
             }
         } catch (const std::exception& e) {
             if (!_stop_threads.load()) {
