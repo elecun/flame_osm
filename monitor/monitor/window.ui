@@ -51,70 +51,6 @@
      <attribute name="title">
       <string>Online OSM Monitoring</string>
      </attribute>
-     <widget class="QGroupBox" name="groupBox">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>810</y>
-        <width>996</width>
-        <height>171</height>
-       </rect>
-      </property>
-      <property name="title">
-       <string>Options</string>
-      </property>
-      <property name="checkable">
-       <bool>true</bool>
-      </property>
-      <widget class="QCheckBox" name="chk_show_body_kps">
-       <property name="geometry">
-        <rect>
-         <x>10</x>
-         <y>25</y>
-         <width>181</width>
-         <height>20</height>
-        </rect>
-       </property>
-       <property name="text">
-        <string>Show Body Keypoints</string>
-       </property>
-      </widget>
-     </widget>
-     <widget class="QGroupBox" name="groupBox_3">
-      <property name="geometry">
-       <rect>
-        <x>1010</x>
-        <y>5</y>
-        <width>456</width>
-        <height>976</height>
-       </rect>
-      </property>
-      <property name="sizePolicy">
-       <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-        <horstretch>0</horstretch>
-        <verstretch>0</verstretch>
-       </sizepolicy>
-      </property>
-      <property name="baseSize">
-       <size>
-        <width>0</width>
-        <height>0</height>
-       </size>
-      </property>
-      <property name="title">
-       <string>Systsem Dashboard</string>
-      </property>
-      <widget class="QTableView" name="table_osm_dashboard">
-       <property name="geometry">
-        <rect>
-         <x>0</x>
-         <y>635</y>
-         <width>451</width>
-         <height>336</height>
-        </rect>
-       </property>
-      </widget>
-     </widget>
      <widget class="QLabel" name="window_camera_1">
       <property name="geometry">
        <rect>
@@ -157,6 +93,32 @@ border: 1px solid white;</string>
       </property>
       <property name="alignment">
        <set>Qt::AlignCenter</set>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="btn_record_start">
+      <property name="geometry">
+       <rect>
+        <x>20</x>
+        <y>830</y>
+        <width>113</width>
+        <height>41</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Start Record</string>
+      </property>
+     </widget>
+     <widget class="QPushButton" name="btn_record_stop">
+      <property name="geometry">
+       <rect>
+        <x>140</x>
+        <y>830</y>
+        <width>113</width>
+        <height>41</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Stop Record</string>
       </property>
      </widget>
     </widget>
