@@ -124,10 +124,12 @@ class AppWindow(QMainWindow):
 
         print(tags)
 
-        color_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        # Rotate received image 90 degrees clockwise
+        rotated_image = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        color_image = cv2.cvtColor(rotated_image, cv2.COLOR_BGR2RGB)
         if self.__show_frame_info:
             t = datetime.now()
-            cv2.putText(color_image, t.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3], (5, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1, cv2.LINE_AA)
+            cv2.putText(color_image, t.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3], (5, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 1, cv2.LINE_AA)
         h, w, ch = color_image.shape
         
 
