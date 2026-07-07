@@ -1,332 +1,489 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" ?>
 <ui version="4.0">
- <author>IAE</author>
- <class>MainWindow</class>
- <widget class="QMainWindow" name="MainWindow">
-  <property name="geometry">
-   <rect>
-    <x>0</x>
-    <y>0</y>
-    <width>1480</width>
-    <height>1050</height>
-   </rect>
-  </property>
-  <property name="windowTitle">
-   <string>Occupant Status Monitoring (Remote)</string>
-  </property>
-  <property name="windowIcon">
-   <iconset theme="document-save-as">
-    <normaloff>.</normaloff>.</iconset>
-  </property>
-  <property name="toolTip">
-   <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Save as...&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-  </property>
-  <property name="styleSheet">
-   <string notr="true"/>
-  </property>
-  <widget class="QWidget" name="centralwidget">
-   <widget class="QTabWidget" name="tab_monitor">
+  <author>Antigravity</author>
+  <class>MainWindow</class>
+  <widget class="QMainWindow" name="MainWindow">
     <property name="geometry">
-     <rect>
-      <x>0</x>
-      <y>0</y>
-      <width>1480</width>
-      <height>1020</height>
-     </rect>
-    </property>
-    <property name="font">
-     <font>
-      <family>Arial</family>
-      <weight>75</weight>
-      <bold>true</bold>
-     </font>
-    </property>
-    <property name="tabPosition">
-     <enum>QTabWidget::South</enum>
-    </property>
-    <property name="currentIndex">
-     <number>0</number>
-    </property>
-    <widget class="QWidget" name="tab_monitoring">
-     <attribute name="title">
-      <string>Online OSM Monitoring</string>
-     </attribute>
-     <widget class="QLabel" name="window_camera_1">
-      <property name="geometry">
-       <rect>
-        <x>5</x>
-        <y>5</y>
-        <width>450</width>
-        <height>800</height>
-       </rect>
-      </property>
-      <property name="styleSheet">
-       <string notr="true">background-color: rgb(0, 0, 0);
-color:rgb(255,255,255);
-border-color: rgb(255, 255, 255);
-border: 1px solid white;</string>
-      </property>
-      <property name="text">
-       <string>Camera #1</string>
-      </property>
-      <property name="alignment">
-       <set>Qt::AlignCenter</set>
-      </property>
-     </widget>
-     <widget class="QLabel" name="window_camera_2">
-      <property name="geometry">
-       <rect>
-        <x>460</x>
-        <y>5</y>
-        <width>450</width>
-        <height>800</height>
-       </rect>
-      </property>
-      <property name="styleSheet">
-       <string notr="true">background-color: rgb(0, 0, 0);
-color:rgb(255,255,255);
-border-color: rgb(255, 255, 255);
-border: 1px solid white;</string>
-      </property>
-      <property name="text">
-       <string>Camera #2</string>
-      </property>
-      <property name="alignment">
-       <set>Qt::AlignCenter</set>
-      </property>
-     </widget>
-     <widget class="QPushButton" name="btn_record_start">
-      <property name="geometry">
-       <rect>
-        <x>20</x>
-        <y>830</y>
-        <width>113</width>
-        <height>41</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Start Record</string>
-      </property>
-     </widget>
-     <widget class="QPushButton" name="btn_record_stop">
-      <property name="geometry">
-       <rect>
-        <x>140</x>
-        <y>830</y>
-        <width>113</width>
-        <height>41</height>
-       </rect>
-      </property>
-      <property name="text">
-       <string>Stop Record</string>
-      </property>
-     </widget>
-    </widget>
-    <widget class="QWidget" name="tab_simulation">
-     <attribute name="title">
-      <string>Offline Simulation</string>
-     </attribute>
-     <widget class="QGroupBox" name="groupBox_2">
-      <property name="geometry">
-       <rect>
-        <x>545</x>
-        <y>670</y>
-        <width>926</width>
-        <height>286</height>
-       </rect>
-      </property>
-      <property name="title">
-       <string>Experimental</string>
-      </property>
-      <widget class="QLabel" name="label">
-       <property name="geometry">
-        <rect>
-         <x>15</x>
-         <y>30</y>
-         <width>81</width>
-         <height>26</height>
-        </rect>
-       </property>
-       <property name="text">
-        <string>Video File :</string>
-       </property>
-       <property name="alignment">
-        <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-       </property>
-      </widget>
-      <widget class="QLabel" name="label_video_filepath">
-       <property name="geometry">
-        <rect>
-         <x>105</x>
-         <y>30</y>
-         <width>711</width>
-         <height>26</height>
-        </rect>
-       </property>
-       <property name="font">
-        <font>
-         <family>Arial</family>
-        </font>
-       </property>
-       <property name="styleSheet">
-        <string notr="true">background-color:#fff;</string>
-       </property>
-       <property name="text">
-        <string/>
-       </property>
-      </widget>
-      <widget class="QPushButton" name="btn_video_open">
-       <property name="geometry">
-        <rect>
-         <x>830</x>
-         <y>30</y>
-         <width>71</width>
-         <height>26</height>
-        </rect>
-       </property>
-       <property name="font">
-        <font>
-         <family>Arial</family>
-        </font>
-       </property>
-       <property name="text">
-        <string>Open</string>
-       </property>
-      </widget>
-      <widget class="QPushButton" name="btn_video_start_analysis">
-       <property name="geometry">
-        <rect>
-         <x>620</x>
-         <y>240</y>
-         <width>141</width>
-         <height>36</height>
-        </rect>
-       </property>
-       <property name="styleSheet">
-        <string notr="true"/>
-       </property>
-       <property name="text">
-        <string>Start Analysis</string>
-       </property>
-      </widget>
-      <widget class="QPushButton" name="btn_video_stop_analysis">
-       <property name="geometry">
-        <rect>
-         <x>770</x>
-         <y>240</y>
-         <width>141</width>
-         <height>36</height>
-        </rect>
-       </property>
-       <property name="styleSheet">
-        <string notr="true"/>
-       </property>
-       <property name="text">
-        <string>Stop Analysis</string>
-       </property>
-      </widget>
-     </widget>
-     <widget class="QLabel" name="window_video_1">
-      <property name="geometry">
-       <rect>
+      <rect>
         <x>0</x>
         <y>0</y>
-        <width>540</width>
-        <height>960</height>
-       </rect>
-      </property>
-      <property name="styleSheet">
-       <string notr="true">background-color: rgb(0, 0, 0);
-color:rgb(255,255,255);
-border-color: rgb(255, 255, 255);
-border: 1px solid white;</string>
-      </property>
-      <property name="text">
-       <string>Video #1</string>
-      </property>
-      <property name="alignment">
-       <set>Qt::AlignCenter</set>
-      </property>
-     </widget>
-     <widget class="QGroupBox" name="groupBox_4">
-      <property name="geometry">
-       <rect>
-        <x>545</x>
-        <y>0</y>
-        <width>921</width>
-        <height>661</height>
-       </rect>
-      </property>
-      <property name="sizePolicy">
-       <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-        <horstretch>0</horstretch>
-        <verstretch>0</verstretch>
-       </sizepolicy>
-      </property>
-      <property name="baseSize">
-       <size>
-        <width>0</width>
-        <height>0</height>
-       </size>
-      </property>
-      <property name="title">
-       <string>Occupant Status Analysis</string>
-      </property>
-      <widget class="QFrame" name="frame_2">
-       <property name="geometry">
-        <rect>
-         <x>5</x>
-         <y>25</y>
-         <width>911</width>
-         <height>626</height>
-        </rect>
-       </property>
-       <property name="autoFillBackground">
-        <bool>false</bool>
-       </property>
-       <property name="styleSheet">
-        <string notr="true">background-color: rgb(255, 255, 255);</string>
-       </property>
-       <property name="frameShape">
-        <enum>QFrame::StyledPanel</enum>
-       </property>
-       <property name="frameShadow">
-        <enum>QFrame::Raised</enum>
-       </property>
-      </widget>
-     </widget>
+        <width>1060</width>
+        <height>1000</height>
+      </rect>
+    </property>
+    <property name="windowTitle">
+      <string>Occupant Status Monitoring (Remote)</string>
+    </property>
+    <property name="styleSheet">
+      <string notr="true">
+QMainWindow {
+    background-color: #151518;
+}
+QWidget#centralwidget {
+    background-color: #0f0f11;
+}
+QFrame {
+    border: none;
+}
+QLabel {
+    color: #d1d1d6;
+    font-family: 'Segoe UI', 'Roboto', 'Arial';
+    font-size: 13px;
+}
+QLabel#label_main_title {
+    color: #00d2ff;
+    font-size: 18px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    margin-bottom: 2px;
+}
+QLabel#label_subtitle {
+    color: #8e8e93;
+    font-size: 11px;
+    margin-bottom: 10px;
+}
+QLabel#label_cam1_title {
+    color: #00d2ff;
+    font-weight: bold;
+    font-size: 12px;
+    background-color: #1a1a1f;
+    padding: 6px;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    border: 1px solid #2e2e38;
+    border-bottom: none;
+}
+QLabel#window_camera_1 {
+    background-color: #000000;
+    border: 1px solid #2e2e38;
+    border-bottom-left-radius: 6px;
+    border-bottom-right-radius: 6px;
+}
+QGroupBox {
+    color: #00d2ff;
+    font-weight: bold;
+    font-size: 12px;
+    border: 1px solid #2e2e38;
+    border-radius: 6px;
+    margin-top: 12px;
+    padding: 12px 8px 8px 8px;
+    background-color: #151518;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 10px;
+    padding: 0 5px;
+}
+QPushButton {
+    background-color: #24242b;
+    color: #ffffff;
+    border: 1px solid #3a3a45;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-weight: bold;
+    font-size: 12px;
+    min-height: 24px;
+}
+QPushButton:hover {
+    background-color: #2e2e38;
+    border-color: #00d2ff;
+}
+QPushButton:pressed {
+    background-color: #00d2ff;
+    color: #0f0f11;
+}
+QPushButton:disabled {
+    background-color: #121215;
+    color: #555560;
+    border-color: #202025;
+}
+QPushButton#btn_record_start {
+    background-color: #1e3d2f;
+    border-color: #2d5c47;
+    color: #3df2a5;
+}
+QPushButton#btn_record_start:hover {
+    background-color: #274f3d;
+    border-color: #3df2a5;
+}
+QPushButton#btn_record_stop {
+    background-color: #4a1d1d;
+    border-color: #702b2b;
+    color: #ff5c5c;
+}
+QPushButton#btn_record_stop:hover {
+    background-color: #5e2424;
+    border-color: #ff5c5c;
+}
+QTableWidget {
+    background-color: #1a1a1f;
+    color: #d1d1d6;
+    gridline-color: #2e2e38;
+    border: 1px solid #2e2e38;
+    border-radius: 4px;
+    alternate-background-color: #202025;
+    font-size: 11px;
+}
+QHeaderView::section {
+    background-color: #24242b;
+    color: #00d2ff;
+    padding: 6px;
+    border: 1px solid #151518;
+    font-weight: bold;
+    font-size: 11px;
+}
+QTableWidget::item {
+    padding: 4px;
+}
+QTableWidget::item:selected {
+    background-color: #00d2ff;
+    color: #0f0f11;
+}
+QScrollBar:vertical {
+    border: none;
+    background: #151518;
+    width: 8px;
+    margin: 0px;
+}
+QScrollBar::handle:vertical {
+    background: #2e2e38;
+    min-height: 20px;
+    border-radius: 4px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #00d2ff;
+}
+QCheckBox {
+    color: #d1d1d6;
+    spacing: 6px;
+    font-size: 12px;
+}
+QCheckBox::indicator {
+    width: 14px;
+    height: 14px;
+    border: 1px solid #3a3a45;
+    border-radius: 3px;
+    background-color: #1a1a1f;
+}
+QCheckBox::indicator:checked {
+    background-color: #00d2ff;
+    border-color: #00d2ff;
+}
+</string>
+    </property>
+    <widget class="QWidget" name="centralwidget">
+      <layout class="QHBoxLayout" name="horizontalLayout_main">
+        <property name="spacing">
+          <number>12</number>
+        </property>
+        <property name="leftMargin">
+          <number>12</number>
+        </property>
+        <property name="topMargin">
+          <number>12</number>
+        </property>
+        <property name="rightMargin">
+          <number>12</number>
+        </property>
+        <property name="bottomMargin">
+          <number>12</number>
+        </property>
+        <item>
+          <widget class="QWidget" name="camera_area">
+            <layout class="QHBoxLayout" name="horizontalLayout_cam">
+              <property name="spacing">
+                <number>12</number>
+              </property>
+              <property name="leftMargin">
+                <number>0</number>
+              </property>
+              <property name="topMargin">
+                <number>0</number>
+              </property>
+              <property name="rightMargin">
+                <number>0</number>
+              </property>
+              <property name="bottomMargin">
+                <number>0</number>
+              </property>
+              <item>
+                <widget class="QWidget" name="cam1_box">
+                  <layout class="QVBoxLayout" name="verticalLayout_cam1">
+                    <property name="spacing">
+                      <number>0</number>
+                    </property>
+                    <property name="leftMargin">
+                      <number>0</number>
+                    </property>
+                    <property name="topMargin">
+                      <number>0</number>
+                    </property>
+                    <property name="rightMargin">
+                      <number>0</number>
+                    </property>
+                    <property name="bottomMargin">
+                      <number>0</number>
+                    </property>
+                    <item>
+                      <widget class="QLabel" name="label_cam1_title">
+                        <property name="text">
+                          <string>CAMERA 1 (DRIVER VIEW)</string>
+                        </property>
+                        <property name="alignment">
+                          <set>Qt::AlignCenter</set>
+                        </property>
+                      </widget>
+                    </item>
+                    <item>
+                      <widget class="QLabel" name="window_camera_1">
+                        <property name="text">
+                          <string>Camera #1 Stream Wait...</string>
+                        </property>
+                        <property name="alignment">
+                          <set>Qt::AlignCenter</set>
+                        </property>
+                        <property name="minimumSize">
+                          <size>
+                            <width>540</width>
+                            <height>920</height>
+                          </size>
+                        </property>
+                      </widget>
+                    </item>
+                  </layout>
+                </widget>
+              </item>
+            </layout>
+          </widget>
+        </item>
+        <item>
+          <widget class="QWidget" name="control_panel">
+            <property name="maximumSize">
+              <size>
+                <width>480</width>
+                <height>16777215</height>
+              </size>
+            </property>
+            <layout class="QVBoxLayout" name="verticalLayout_ctrl">
+              <property name="spacing">
+                <number>10</number>
+              </property>
+              <property name="leftMargin">
+                <number>0</number>
+              </property>
+              <property name="topMargin">
+                <number>0</number>
+              </property>
+              <property name="rightMargin">
+                <number>0</number>
+              </property>
+              <property name="bottomMargin">
+                <number>0</number>
+              </property>
+              <item>
+                <widget class="QLabel" name="label_main_title">
+                  <property name="text">
+                    <string>Driver Monitor System</string>
+                  </property>
+                </widget>
+              </item>
+              <item>
+                <widget class="QLabel" name="label_subtitle">
+                  <property name="text">
+                    <string>Driver Readiness Assessment &amp; System Monitoring Dashboard</string>
+                  </property>
+                </widget>
+              </item>
+              <item>
+                <widget class="QGroupBox" name="group_control">
+                  <property name="title">
+                    <string>Control</string>
+                  </property>
+                  <layout class="QVBoxLayout" name="verticalLayout_control">
+                    <property name="spacing">
+                      <number>8</number>
+                    </property>
+                    <item>
+                      <widget class="QCheckBox" name="chk_dms_enable">
+                        <property name="text">
+                          <string>DMS Enable</string>
+                        </property>
+                      </widget>
+                    </item>
+                  </layout>
+                </widget>
+              </item>
+              <item>
+                <widget class="QGroupBox" name="group_record">
+                  <property name="title">
+                    <string>Stream Recording</string>
+                  </property>
+                  <layout class="QGridLayout" name="gridLayout_rec">
+                    <property name="spacing">
+                      <number>10</number>
+                    </property>
+                    <item row="0" column="0">
+                      <widget class="QPushButton" name="btn_record_start">
+                        <property name="text">
+                          <string>START RECORDING</string>
+                        </property>
+                      </widget>
+                    </item>
+                    <item row="0" column="1">
+                      <widget class="QPushButton" name="btn_record_stop">
+                        <property name="text">
+                          <string>STOP RECORDING</string>
+                        </property>
+                      </widget>
+                    </item>
+                    <item row="0" column="2">
+                      <widget class="QLabel" name="label_rec_status_title">
+                        <property name="text">
+                          <string>Status:</string>
+                        </property>
+                        <property name="alignment">
+                          <set>Qt::AlignRight|Qt::AlignVCenter</set>
+                        </property>
+                      </widget>
+                    </item>
+                    <item row="0" column="3">
+                      <widget class="QLabel" name="label_record_status">
+                        <property name="text">
+                          <string>IDLE</string>
+                        </property>
+                        <property name="styleSheet">
+                          <string notr="true">color: #8e8e93; font-weight: bold;</string>
+                        </property>
+                      </widget>
+                    </item>
+                  </layout>
+                </widget>
+              </item>
+              <item>
+                <widget class="QGroupBox" name="group_can">
+                  <property name="title">
+                    <string>CAN Message Monitoring</string>
+                  </property>
+                  <layout class="QVBoxLayout" name="verticalLayout_can">
+                    <property name="spacing">
+                      <number>6</number>
+                    </property>
+                    <item>
+                      <widget class="QLabel" name="label_can_isc_title">
+                        <property name="text">
+                          <string>Message: ISC_01_10ms (ID: 0x100)</string>
+                        </property>
+                        <property name="styleSheet">
+                          <string notr="true">color: #00d2ff; font-weight: bold; font-size: 11px;</string>
+                        </property>
+                      </widget>
+                    </item>
+                    <item>
+                      <widget class="QTableWidget" name="table_can_signals">
+                        <property name="columnCount">
+                          <number>3</number>
+                        </property>
+                        <property name="rowCount">
+                          <number>20</number>
+                        </property>
+                        <property name="minimumSize">
+                          <size>
+                            <width>0</width>
+                            <height>300</height>
+                          </size>
+                        </property>
+                        <column>
+                          <property name="text">
+                            <string>Signal Name</string>
+                          </property>
+                        </column>
+                        <column>
+                          <property name="text">
+                            <string>Value (Enum)</string>
+                          </property>
+                        </column>
+                        <column>
+                          <property name="text">
+                            <string>Raw Value</string>
+                          </property>
+                        </column>
+                        <attribute name="horizontalHeaderStretchLastSection">
+                          <bool>true</bool>
+                        </attribute>
+                        <attribute name="verticalHeaderVisible">
+                          <bool>false</bool>
+                        </attribute>
+                      </widget>
+                    </item>
+                    <item>
+                      <widget class="QLabel" name="label_can_dms_title">
+                        <property name="text">
+                          <string>Message: STS_DMS_1000ms (ID: 0x220)</string>
+                        </property>
+                        <property name="styleSheet">
+                          <string notr="true">color: #00d2ff; font-weight: bold; font-size: 11px; margin-top: 8px;</string>
+                        </property>
+                      </widget>
+                    </item>
+                    <item>
+                      <widget class="QTableWidget" name="table_can_signals_dms">
+                        <property name="columnCount">
+                          <number>3</number>
+                        </property>
+                        <property name="rowCount">
+                          <number>2</number>
+                        </property>
+                        <property name="maximumSize">
+                          <size>
+                            <width>16777215</width>
+                            <height>110</height>
+                          </size>
+                        </property>
+                        <column>
+                          <property name="text">
+                            <string>Signal Name</string>
+                          </property>
+                        </column>
+                        <column>
+                          <property name="text">
+                            <string>Value (Enum)</string>
+                          </property>
+                        </column>
+                        <column>
+                          <property name="text">
+                            <string>Raw Value</string>
+                          </property>
+                        </column>
+                        <attribute name="horizontalHeaderStretchLastSection">
+                          <bool>true</bool>
+                        </attribute>
+                        <attribute name="verticalHeaderVisible">
+                          <bool>false</bool>
+                        </attribute>
+                      </widget>
+                    </item>
+                  </layout>
+                </widget>
+              </item>
+              <item>
+                <spacer name="verticalSpacer">
+                  <property name="orientation">
+                    <enum>Qt::Vertical</enum>
+                  </property>
+                  <property name="sizeHint">
+                    <size>
+                      <width>20</width>
+                      <height>40</height>
+                    </size>
+                  </property>
+                </spacer>
+              </item>
+            </layout>
+          </widget>
+        </item>
+      </layout>
     </widget>
-    <widget class="QWidget" name="tab_controller">
-     <attribute name="title">
-      <string>Controller Status</string>
-     </attribute>
-    </widget>
-    <widget class="QWidget" name="tab_config">
-     <attribute name="title">
-      <string>Configurations</string>
-     </attribute>
-    </widget>
-   </widget>
+    <widget class="QStatusBar" name="statusbar"/>
   </widget>
-  <widget class="QStatusBar" name="statusbar"/>
- </widget>
- <resources/>
- <connections/>
- <designerdata>
-  <property name="gridDeltaX">
-   <number>5</number>
-  </property>
-  <property name="gridDeltaY">
-   <number>5</number>
-  </property>
-  <property name="gridSnapX">
-   <bool>true</bool>
-  </property>
-  <property name="gridSnapY">
-   <bool>true</bool>
-  </property>
-  <property name="gridVisible">
-   <bool>true</bool>
-  </property>
- </designerdata>
 </ui>
