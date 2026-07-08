@@ -161,6 +161,13 @@ os_model_inference.comp: $(BUILDDIR)os.model.inference.o
 $(BUILDDIR)os.model.inference.o: $(CURRENT_DIR)/components/os.model.inference/os.model.inference.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
 
+# OSM Monolithic Inference
+osm_monolithic_inference.comp: $(BUILDDIR)osm.monolithic.inference.o
+	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS)
+
+$(BUILDDIR)osm.monolithic.inference.o: $(CURRENT_DIR)/components/osm.monolithic.inference/osm.monolithic.inference.cc
+	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
+
 # Headpose Model Inference
 headpose_model_inference.comp: $(BUILDDIR)headpose.model.inference.o
 	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_calib3d -lmediapipe
@@ -183,7 +190,7 @@ $(BUILDDIR)camera.monitor.o: $(CURRENT_DIR)/components/camera.monitor/camera.mon
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
 
 # OSM Group Target
-osm : flame uvc_camera_grabber.comp solectrix_camera_grabber.comp body_kps_inference.comp os_model_inference.comp headpose_model_inference.comp video_file_grabber.comp face_detection_inference.comp camera_monitor.comp
+osm : flame uvc_camera_grabber.comp solectrix_camera_grabber.comp body_kps_inference.comp os_model_inference.comp headpose_model_inference.comp video_file_grabber.comp face_detection_inference.comp camera_monitor.comp osm_monolithic_inference.comp
 
 deploy : FORCE
 	cp $(BUILDDIR)/*.comp $(BUILDDIR)/flame $(BINDIR)
