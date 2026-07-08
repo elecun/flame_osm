@@ -15,6 +15,8 @@
 #include <flame/component/object.hpp>
 #include <atomic>
 #include <thread>
+#include <mutex>
+#include <opencv2/opencv.hpp>
 
 using namespace std;
 using namespace flame::component;
@@ -29,6 +31,19 @@ class osm_monolithic_inference : public flame::component::Object {
         void onLoop() override;
         void onClose() override;
         void onData(flame::component::ZData& data) override;
+
+        /* Thread-safe Image Getters */
+        cv::Mat getLatestImage1();
+        cv::Mat getLatestImage2();
+
+    private:
+        /* Latest Images Caching */
+        cv::Mat _latest_image_1;
+        cv::Mat _latest_image_2;
+
+        /* Mutexes for Thread Safety */
+        std::mutex _img_mutex_1;
+        std::mutex _img_mutex_2;
 };
 
 EXPORT_COMPONENT_API
