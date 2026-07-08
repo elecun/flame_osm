@@ -12,6 +12,16 @@ osm_monolithic_inference::osm_monolithic_inference() {
 bool osm_monolithic_inference::onInit(){
     try{
         json parameters = getProfile()->parameters();
+        
+        std::string model_path = parameters.value("model_path", "bin/x86_64/models/yolo11n-face_20260708.engine");
+        int gpu_id = parameters.value("gpu_id", 0);
+
+        _face_detector = std::make_unique<face_detection>();
+        if (!_face_detector->loadModel(model_path, gpu_id)) {
+            logger::error("[{}] Failed to load face detection model: {}", getName(), model_path);
+            return false;
+        }
+
         logger::info("[{}] Initialized osm.monolithic.inference component", getName());
     }
     catch(json::exception& e){
@@ -31,6 +41,11 @@ void osm_monolithic_inference::onLoop(){
 
 void osm_monolithic_inference::onClose(){
     logger::info("[{}] Closing osm.monolithic.inference component", getName());
+
+    if (_face_detector) {
+        _face_detector.reset();
+        logger::info("[{}] Face detector instance successfully released", getName());
+    }
 }
 
 void osm_monolithic_inference::onData(flame::component::ZData& data){

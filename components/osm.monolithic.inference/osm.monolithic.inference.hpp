@@ -16,7 +16,9 @@
 #include <atomic>
 #include <thread>
 #include <mutex>
+#include <memory>
 #include <opencv2/opencv.hpp>
+#include "face_detection.hpp"
 
 using namespace std;
 using namespace flame::component;
@@ -44,6 +46,9 @@ class osm_monolithic_inference : public flame::component::Object {
         /* Mutexes for Thread Safety */
         std::mutex _img_mutex_1;
         std::mutex _img_mutex_2;
+
+        /* Face Detector Instance */
+        std::unique_ptr<face_detection> _face_detector;
 };
 
 EXPORT_COMPONENT_API
