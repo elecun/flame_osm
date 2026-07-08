@@ -60,6 +60,15 @@ bool face_detection_inference::onInit(){
         _input_height = parameters.value("input_height", 640);
         _gpu_id = parameters.value("gpu_id", 0);
 
+        /* Initialize CUDA driver/runtime */
+        int device_count = 0;
+        cudaError_t count_status = cudaGetDeviceCount(&device_count);
+        if(count_status != cudaSuccess){
+            logger::warn("[{}] Failed to get CUDA device count: {}", getName(), cudaGetErrorString(count_status));
+        } else {
+            logger::info("[{}] Available CUDA devices: {}", getName(), device_count);
+        }
+
         /* Set CUDA device */
         cudaError_t cuda_status = cudaSetDevice(_gpu_id);
         if(cuda_status != cudaSuccess){
@@ -377,8 +386,23 @@ void face_detection_inference::_inference_process(){
                 zmq::message_t image_msg = msg_multipart.pop();
 
                 /* decode & convert image */
-                vector<unsigned char> image(static_cast<unsigned char*>(image_msg.data()), static_cast<unsigned char*>(image_msg.data())+image_msg.size());
-                cv::Mat decoded = cv::imdecode(image, cv::IMREAD_COLOR);
+                cv::Mat decoded;
+                try {
+                    json tag = json::parse(tag_str);
+                    if (tag.contains("type")) {
+                        int height = tag["height"];
+                        int width = tag["width"];
+                        int type = tag["type"];
+                        cv::Mat raw_mat(height, width, type, const_cast<void*>(image_msg.data()));
+                        decoded = raw_mat.clone();
+                    } else {
+                        vector<unsigned char> image(static_cast<unsigned char*>(image_msg.data()), static_cast<unsigned char*>(image_msg.data())+image_msg.size());
+                        decoded = cv::imdecode(image, cv::IMREAD_COLOR);
+                    }
+                } catch(const std::exception& e) {
+                    logger::error("[{}] Failed to parse metadata or decode image: {}", getName(), e.what());
+                    continue;
+                }
 
                 if(decoded.empty()){
                     logger::warn("[{}] Failed to decode image", getName());
@@ -432,6 +456,37 @@ void face_detection_inference::_inference_process(){
 
                     logger::info("[{}] Frame {}: processing time = {}ms, detected {} face(s)",
                                 getName(), frame_count, total_time, (int)results.size());
+
+                    // Crop detected faces and publish them via inproc
+                    int face_idx = 0;
+                    for (const auto& result : results) {
+                        cv::Rect bbox = result.bbox & cv::Rect(0, 0, decoded.cols, decoded.rows);
+                        if (bbox.width > 0 && bbox.height > 0) {
+                            cv::Mat cropped_face = decoded(bbox).clone();
+                            
+                            flame::component::ZData crop_msg;
+                            string crop_port = "face_crop";
+                            
+                            json crop_tag;
+                            crop_tag["width"] = cropped_face.cols;
+                            crop_tag["height"] = cropped_face.rows;
+                            crop_tag["type"] = cropped_face.type();
+                            crop_tag["confidence"] = result.confidence;
+                            crop_tag["face_index"] = face_idx++;
+                            crop_tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(
+                                chrono::system_clock::now().time_since_epoch()).count();
+                            
+                            crop_msg.addstr(crop_port);
+                            crop_msg.addstr(crop_tag.dump());
+                            crop_msg.addmem(cropped_face.data, cropped_face.total() * cropped_face.elemSize());
+                            
+                            if (!dispatch(crop_port, crop_msg)) {
+                                logger::warn("[{}] Failed to publish cropped face to port {}", getName(), crop_port);
+                            } else {
+                                logger::info("[{}] Published cropped face {} ({}x{}) to port {}", getName(), face_idx - 1, cropped_face.cols, cropped_face.rows, crop_port);
+                            }
+                        }
+                    }
 
                     /* Draw bounding box on image */
                     for(const auto& result : results){

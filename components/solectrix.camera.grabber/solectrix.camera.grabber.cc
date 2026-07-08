@@ -51,6 +51,8 @@ bool solectrix_camera_grabber::onInit(){
         /* set last capture times and start dispatch workers */
         for(const auto& cam_param : parameters["camera"]){
             int cam_channel = cam_param["channel"].get<int>();
+            string portname = cam_param.value("portname", fmt::format("image_stream_{}", cam_channel));
+            _channel_ports[cam_channel] = portname;
             _last_capture_times[cam_channel] = chrono::high_resolution_clock::now();
             _dispatch_workers[cam_channel] = thread(&solectrix_camera_grabber::_dispatch_task, this, cam_channel);
         }
@@ -117,10 +119,8 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
             if(cam_channel>=0){
                 if(_use_image_stream.load()){
 
-                    // 1. encode image to jpg format
+                    // 1. Prepare raw Mat data instead of JPEG encoding
                     auto msg = make_shared<flame::component::ZData>();
-                    vector<unsigned char> image_buf;
-                    cv::imencode(".jpg", captured, image_buf);
 
                     //2. generate data meta tag
                     json tag;
@@ -131,17 +131,23 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
                     tag["fps"] = (elapsed.count() > 0) ? 1.0/elapsed.count() : 0.0;
                     tag["height"] = captured.rows;
                     tag["width"] = captured.cols;
+                    tag["type"] = captured.type();
                     tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
                     tag["cam_channel"] = cam_channel;
 
                     logger::debug("[{}] cam channel {}, fps : {}", getName(), cam_channel, tag["fps"].get<double>());
 
-                    msg->from = fmt::format("image_stream_{}", cam_channel);
+                    string portname = "image_stream_0";
+                    if (_channel_ports.find(cam_channel) != _channel_ports.end()) {
+                        portname = _channel_ports[cam_channel];
+                    }
+                    msg->from = portname;
                     msg->meta = tag.dump();
 
-                    // 3. populate multipart frames (first: metadata/tag, second: image data)
+                    // 3. populate multipart frames (first: portname, second: metadata/tag, third: raw image data)
+                    msg->addstr(msg->from);
                     msg->addstr(msg->meta);
-                    msg->addmem(image_buf.data(), image_buf.size());
+                    msg->addmem(captured.data, captured.total() * captured.elemSize());
 
                     /* push to channel queue */
                     {
