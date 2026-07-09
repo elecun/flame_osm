@@ -1,5 +1,5 @@
 {
-    "rt_cycle_ns": 2000000000,
+    "rt_cycle_ns": 1000000000,
     "verbose": 1,
     "parameters": {
         "use_channel": 0,
@@ -15,13 +15,10 @@
             "queue_size": 1000
         },
         "can_ch1_in": {
-            "transport": "inproc",
-            "socket_type": "pull",
-            "queue_size": 1000
-        },
-        "can_ch2_in": {
-            "transport": "inproc",
-            "socket_type": "pull",
+            "transport": "tcp",
+            "host": "*",
+            "port": 5102,
+            "socket_type": "pub",
             "queue_size": 1000
         }
     }

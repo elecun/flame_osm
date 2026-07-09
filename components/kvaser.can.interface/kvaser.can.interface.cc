@@ -184,7 +184,7 @@ void kvaser_can_interface::onClose(){
 void kvaser_can_interface::onData(flame::component::ZData& data){
     try {
         string portname = data.from;
-        if (portname == "can_ch1_in" || portname == "can_ch2_in") {
+        if (portname == "can_ch1_in") {
             if (data.size() > 0) {
                 zmq::message_t msg = data.pop();
                 string payload(static_cast<char*>(msg.data()), msg.size());
