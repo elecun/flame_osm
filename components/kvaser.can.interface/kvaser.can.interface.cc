@@ -131,6 +131,9 @@ bool kvaser_can_interface::onInit(){
 }
 
 void kvaser_can_interface::onLoop(){
+    if (_can_handle < 0) {
+        return;
+    }
     DMSEnable enable;
     DMSState state;
     DMSDriverReadiness readiness;
