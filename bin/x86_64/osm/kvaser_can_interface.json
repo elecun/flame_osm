@@ -6,7 +6,8 @@
         "can_bitrate": 500000,
         "can_bitrate_sample_point": 80,
         "can_fd_data_bitrate": 1000000,
-        "can_fd_data_bitrate_sample_point": 75
+        "can_fd_data_bitrate_sample_point": 75,
+        "enable_rx_task":false
     },
     "dataport": {
         "status": {
@@ -20,7 +21,7 @@
             "transport": "tcp",
             "host": "*",
             "port": 5102,
-            "socket_type": "pub",
+            "socket_type": "sub",
             "queue_size": 1000
         }
     }

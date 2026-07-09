@@ -129,14 +129,13 @@ bool kvaser_can_interface::onInit(){
             logger::debug("[{}] CAN FD channel {} opened & set arbitration bitrate {} bps (SP: {}%), data bitrate {} bps (SP: {}%)", 
                           getName(), ch, bitrate, nominal_sp * 100.0, fd_data_bitrate, data_sp * 100.0);
 
-            //test
-            set_dms_readiness(DMSDriverReadiness::HIGH);
-            set_dms_state(DMSState::ACTIVE);
-
             /* start background workers */
-            _worker_stop.store(false);
-            logger::info("[{}] Listen for CAN FD frames...", getName());
-            //_can_ch0_rcv_worker = thread(&kvaser_can_interface::_can_ch0_rcv_task, this);
+            bool enable_rx_task = parameters.value("enable_rx_task", true);
+            if (enable_rx_task) {
+                _worker_stop.store(false);
+                logger::info("[{}] Listen for CAN FD frames...", getName());
+                _can_ch0_rcv_worker = thread(&kvaser_can_interface::_can_ch0_rcv_task, this);
+            }
         }   
     }
     catch(json::exception& e){
@@ -148,9 +147,10 @@ bool kvaser_can_interface::onInit(){
 }
 
 void kvaser_can_interface::onLoop(){
-    if (_can_handle < 0) {
+    if(_can_handle < 0){
         return;
     }
+
     DMSEnable enable;
     DMSState state;
     DMSDriverReadiness readiness;
@@ -177,8 +177,7 @@ void kvaser_can_interface::onLoop(){
             canGetErrorText(stat, err_buf, sizeof(err_buf));
             logger::error("[{}] Error sending periodic CAN message 0x220: {}", getName(), err_buf);
         } else {
-            logger::debug("[{}] Sent periodic CAN FD message 0x220 (State: {}, Readiness: {})", 
-                          getName(), static_cast<int>(state), static_cast<int>(readiness));
+            logger::debug("[{}] Sent periodic CAN FD message 0x220 (State: {}, Readiness: {})", getName(), static_cast<int>(state), static_cast<int>(readiness));
         }
     }
 }
@@ -291,8 +290,7 @@ void kvaser_can_interface::_can_ch0_rcv_task(){
                             std::lock_guard<std::mutex> lock(_vars_mutex);
                             _dms_enable = (dms_enable_val == 0) ? DMSEnable::DISABLE : DMSEnable::ENABLE;
                         }
-                        logger::info("[{}] Received CMD_DMS_1000ms: DMS_Enable set to {}", 
-                                     getName(), (dms_enable_val ? "ENABLE" : "DISABLE"));
+                        logger::info("[{}] Received CMD_DMS_1000ms: DMS_Enable set to {}", getName(), (dms_enable_val ? "ENABLE" : "DISABLE"));
                     } else {
                         logger::warn("[{}] Received CMD_DMS_1000ms but DLC is {}", getName(), dlc);
                     }
