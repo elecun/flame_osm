@@ -72,12 +72,10 @@ public:
 
 private: /* private functions */
     void _can_ch0_rcv_task();
-    void _can_tx_task();
 
 private:
     /* worker related */
     std::thread _can_ch0_rcv_worker; /* can channel 0 receiver */
-    std::thread _can_tx_worker;      /* periodic CAN transmitter */
     std::atomic<bool> _worker_stop { false };
 
     /* CAN device related */

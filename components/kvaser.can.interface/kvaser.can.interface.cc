@@ -120,7 +120,6 @@ bool kvaser_can_interface::onInit(){
             _worker_stop.store(false);
             logger::info("[{}] Listen for CAN FD frames...", getName());
             _can_ch0_rcv_worker = thread(&kvaser_can_interface::_can_ch0_rcv_task, this);
-            _can_tx_worker = thread(&kvaser_can_interface::_can_tx_task, this);
         }   
     }
     catch(json::exception& e){
@@ -132,8 +131,36 @@ bool kvaser_can_interface::onInit(){
 }
 
 void kvaser_can_interface::onLoop(){
-    // Periodic transmit is fully handled in _can_tx_task.
-    // Keeping onLoop empty to prevent interference.
+    DMSEnable enable;
+    DMSState state;
+    DMSDriverReadiness readiness;
+    {
+        std::lock_guard<std::mutex> lock(_vars_mutex);
+        enable = _dms_enable;
+        state = _dms_state;
+        readiness = _dms_readiness;
+    }
+
+    if(enable == DMSEnable::ENABLE) {
+        // Pack DMS_State and DMS_DriverPresent (readiness) into 0x220 message
+        // STS_DMS_1000ms (0x220):
+        // - DMS_State: Start Bit 0, Len 2
+        // - DMS_DriverPresent: Start Bit 2, Len 2
+        unsigned char tx_data[8] = {0};
+        tx_data[0] = (static_cast<uint8_t>(state) & 0x03) | 
+                     ((static_cast<uint8_t>(readiness) & 0x03) << 2);
+
+        unsigned int flags = canMSG_STD | canFDMSG_FDF | canFDMSG_BRS;
+        canStatus stat = canWrite(_can_handle, 0x220, tx_data, 8, flags);
+        if (stat != canOK) {
+            char err_buf[100];
+            canGetErrorText(stat, err_buf, sizeof(err_buf));
+            logger::error("[{}] Error sending periodic CAN message 0x220: {}", getName(), err_buf);
+        } else {
+            logger::debug("[{}] Sent periodic CAN FD message 0x220 (State: {}, Readiness: {})", 
+                          getName(), static_cast<int>(state), static_cast<int>(readiness));
+        }
+    }
 }
 
 void kvaser_can_interface::onClose(){
@@ -142,9 +169,6 @@ void kvaser_can_interface::onClose(){
     _worker_stop.store(true);
     if(_can_ch0_rcv_worker.joinable()) {
         _can_ch0_rcv_worker.join();
-    }
-    if(_can_tx_worker.joinable()) {
-        _can_tx_worker.join();
     }
 
     /* close CAN */
@@ -272,52 +296,6 @@ void kvaser_can_interface::_can_ch0_rcv_task(){
 
 }
 
-void kvaser_can_interface::_can_tx_task() {
-    try {
-        while(!_worker_stop.load()) {
-            DMSEnable enable;
-            DMSState state;
-            DMSDriverReadiness readiness;
-            {
-                std::lock_guard<std::mutex> lock(_vars_mutex);
-                enable = _dms_enable;
-                state = _dms_state;
-                readiness = _dms_readiness;
-            }
-
-            if(enable == DMSEnable::ENABLE) {
-                // Pack DMS_State and DMS_DriverReadiness into 0x220 message
-                // STS_DMS_1000ms (0x220):
-                // - DMS_State: Start Bit 0, Len 2
-                // - DMS_DriverReadiness: Start Bit 2, Len 2
-                unsigned char tx_data[8] = {0};
-                tx_data[0] = (static_cast<uint8_t>(state) & 0x03) | 
-                             ((static_cast<uint8_t>(readiness) & 0x03) << 2);
-
-                unsigned int flags = canMSG_STD | canFDMSG_FDF | canFDMSG_BRS;
-                canStatus stat = canWrite(_can_handle, 0x220, tx_data, 8, flags);
-                if (stat != canOK) {
-                    char err_buf[100];
-                    canGetErrorText(stat, err_buf, sizeof(err_buf));
-                    logger::error("[{}] Error sending periodic CAN message 0x220: {}", getName(), err_buf);
-                } else {
-                    logger::debug("[{}] Sent periodic CAN FD message 0x220 (State: {}, Readiness: {})", 
-                                  getName(), static_cast<int>(state), static_cast<int>(readiness));
-                }
-            }
-
-            // Sleep for 1000ms (in 10ms intervals for responsive shutdown)
-            for (int i = 0; i < 100; ++i) {
-                if (_worker_stop.load()) break;
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            }
-        }
-        logger::info("[{}] Transmitter thread successfully stopped.", getName());
-    }
-    catch(const std::exception& e) {
-        logger::error("[{}] Exception in transmitter task: {}", getName(), e.what());
-    }
-}
 
 /* Thread-safe getters and setters implementation */
 void kvaser_can_interface::set_dms_enable(DMSEnable val) {
