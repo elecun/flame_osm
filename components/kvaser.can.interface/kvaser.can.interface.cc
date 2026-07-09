@@ -3,6 +3,7 @@
 #include <flame/def.hpp>
 #include <chrono>
 #include <algorithm>
+#include <cmath>
 #include <thread>
 #include <iostream>
 #include <sstream>
@@ -70,41 +71,53 @@ bool kvaser_can_interface::onInit(){
             return false;
         }
         else{
-            // 1. Set Arbitration Phase Bitrate
+            // 1. Set Arbitration Phase Bitrate (Nominal Phase)
             unsigned long bitrate = parameters.value("can_bitrate", 500000);
-            switch(bitrate){
-                case 1000000: canSetBusParams(_can_handle, canBITRATE_1M, 0, 0, 0, 0, 0); break;
-                case 500000: canSetBusParams(_can_handle, canBITRATE_500K, 0, 0, 0, 0, 0); break;
-                case 250000: canSetBusParams(_can_handle, canBITRATE_250K, 0, 0, 0, 0, 0); break;
-                case 125000: canSetBusParams(_can_handle, canBITRATE_125K, 0, 0, 0, 0, 0); break;
-                case 100000: canSetBusParams(_can_handle, canBITRATE_100K, 0, 0, 0, 0, 0); break;
-                case 62000: canSetBusParams(_can_handle, canBITRATE_62K, 0, 0, 0, 0, 0); break;
-                case 50000: canSetBusParams(_can_handle, canBITRATE_50K, 0, 0, 0, 0, 0); break;
-                case 83000: canSetBusParams(_can_handle, canBITRATE_83K, 0, 0, 0, 0, 0); break;
-                case 10000: canSetBusParams(_can_handle, canBITRATE_10K, 0, 0, 0, 0, 0); break;
-                default:
-                    canSetBusParams(_can_handle, canBITRATE_1M, 0, 0, 0, 0, 0);
+            double nominal_sp = parameters.value("can_bitrate_sample_point", 80.0) / 100.0;
+            unsigned int total_tq_nom = (bitrate <= 500000) ? 80 : 40;
+            unsigned int tseg1_nom = static_cast<unsigned int>(std::round(total_tq_nom * nominal_sp)) - 1;
+            unsigned int tseg2_nom = total_tq_nom - 1 - tseg1_nom;
+            unsigned int sjw_nom = tseg2_nom;
+
+            logger::info("Nominal bitrate: {} bps", bitrate);
+            logger::info("Nominal sample point: {}%", nominal_sp * 100.0);
+            logger::info("Nominal total TQ: {}", total_tq_nom);
+            logger::info("Nominal tseg1: {}", tseg1_nom);
+            logger::info("Nominal tseg2: {}", tseg2_nom);
+            logger::info("Nominal SJW: {}", sjw_nom);
+
+            canStatus nom_status = canSetBusParams(_can_handle, bitrate, tseg1_nom, tseg2_nom, sjw_nom, 1, 0);
+            if (nom_status != canOK) {
+                char err[512] = {0,};
+                canGetErrorText(nom_status, err, sizeof(err));
+                logger::error("[{}] Failed to set Nominal bitrate {} bps with sample point {}%: {}", 
+                              getName(), bitrate, nominal_sp * 100.0, err);
+                return false;
             }
 
             // 2. Set Data Phase Bitrate for CAN FD
-            unsigned long fd_data_bitrate = parameters.value("can_fd_data_bitrate", 2000000);
-            canStatus fd_status = canOK;
-            switch(fd_data_bitrate) {
-                case 1000000: fd_status = canSetBusParamsFd(_can_handle, canFD_BITRATE_1M_80P, 0, 0, 0); break;
-                case 2000000: fd_status = canSetBusParamsFd(_can_handle, canFD_BITRATE_2M_80P, 0, 0, 0); break;
-                case 4000000: fd_status = canSetBusParamsFd(_can_handle, canFD_BITRATE_4M_80P, 0, 0, 0); break;
-                case 8000000: fd_status = canSetBusParamsFd(_can_handle, canFD_BITRATE_8M_60P, 0, 0, 0); break;
-                case 500000: fd_status = canSetBusParamsFd(_can_handle, canFD_BITRATE_500K_80P, 0, 0, 0); break;
-                default:
-                    fd_status = canSetBusParamsFd(_can_handle, canFD_BITRATE_2M_80P, 0, 0, 0); break;
-            }
+            unsigned long fd_data_bitrate = parameters.value("can_fd_data_bitrate", 1000000);
+            double data_sp = parameters.value("can_fd_data_bitrate_sample_point", 75.0) / 100.0;
+            unsigned int total_tq_data = (fd_data_bitrate <= 2000000) ? 40 : 20;
+            unsigned int tseg1_data = static_cast<unsigned int>(std::round(total_tq_data * data_sp)) - 1;
+            unsigned int tseg2_data = total_tq_data - 1 - tseg1_data;
+            unsigned int sjw_data = tseg2_data;
 
+            canStatus fd_status = canSetBusParamsFd(_can_handle, fd_data_bitrate, tseg1_data, tseg2_data, sjw_data);
             if(fd_status != canOK) {
                 char err[512] = {0,};
                 canGetErrorText(fd_status, err, sizeof(err));
-                logger::error("[{}] Failed to set CAN FD data bitrate : {}", getName(), err);
+                logger::error("[{}] Failed to set CAN FD data bitrate {} bps with sample point {}%: {}", 
+                              getName(), fd_data_bitrate, data_sp * 100.0, err);
                 return false;
             }
+
+            logger::info("Data bitrate : {} bps", fd_data_bitrate);
+            logger::info("Data sample point : {}%", data_sp * 100.0);
+            logger::info("Data total TQ : {}", total_tq_data);
+            logger::info("Data tseg1 : {}", tseg1_data);
+            logger::info("Data tseg2 : {}", tseg2_data);
+            logger::info("Data SJW : {}", sjw_data);
 
             _status = canBusOn(_can_handle);
             if(_status != canOK){
@@ -113,13 +126,17 @@ bool kvaser_can_interface::onInit(){
                 logger::error("[{}] Failed to go bus ON : {}", getName(), err);
                 return false;
             }
-            logger::debug("[{}] CAN FD channel {} opened & set arbitration bitrate {} bps, data bitrate {} bps", 
-                          getName(), ch, bitrate, fd_data_bitrate);
+            logger::debug("[{}] CAN FD channel {} opened & set arbitration bitrate {} bps (SP: {}%), data bitrate {} bps (SP: {}%)", 
+                          getName(), ch, bitrate, nominal_sp * 100.0, fd_data_bitrate, data_sp * 100.0);
+
+            //test
+            set_dms_readiness(DMSDriverReadiness::HIGH);
+            set_dms_state(DMSState::ACTIVE);
 
             /* start background workers */
             _worker_stop.store(false);
             logger::info("[{}] Listen for CAN FD frames...", getName());
-            _can_ch0_rcv_worker = thread(&kvaser_can_interface::_can_ch0_rcv_task, this);
+            //_can_ch0_rcv_worker = thread(&kvaser_can_interface::_can_ch0_rcv_task, this);
         }   
     }
     catch(json::exception& e){
