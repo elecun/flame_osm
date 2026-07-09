@@ -30,6 +30,6 @@ def build_engine_from_onnx(onnx_path, engine_path):
 
 # Convert
 build_engine_from_onnx(
-    'yolo11x-pose.onnx',
-    'yolo11x-pose.engine'
+    'yolo11n-face.onnx',
+    'yolo11n-face.engine'
 )
