@@ -90,6 +90,8 @@ class AppWindow(QMainWindow):
                 # ui components event callback def.
                 if hasattr(self, 'chk_dms_enable'):
                     self.chk_dms_enable.stateChanged.connect(self.on_check_dms_enable)
+                if hasattr(self, 'btn_dms_update_force'):
+                    self.btn_dms_update_force.clicked.connect(self.on_btn_dms_update_force)
                 if hasattr(self, 'chk_option_show_frame_info'):
                     self.chk_option_show_frame_info.stateChanged.connect(self.on_check_option_show_frame_info)
                 if hasattr(self, 'chk_option_show_body_keypoints'):
@@ -513,3 +515,19 @@ class AppWindow(QMainWindow):
         if hasattr(self, 'chk_dms_enable'):
             enabled = self.chk_dms_enable.isChecked()
             self.__console.info(f"DMS Enable state changed: {enabled}")
+
+    def on_btn_dms_update_force(self):
+        state_text = "None"
+        readiness_text = "None"
+        
+        if hasattr(self, 'list_dms_state'):
+            current_item = self.list_dms_state.currentItem()
+            if current_item:
+                state_text = current_item.text()
+                
+        if hasattr(self, 'list_dms_driver_readiness'):
+            current_item = self.list_dms_driver_readiness.currentItem()
+            if current_item:
+                readiness_text = current_item.text()
+                
+        self.__console.info(f"Force Update - DMS State: {state_text}, Driver Readiness: {readiness_text}")
