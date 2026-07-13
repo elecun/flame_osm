@@ -63,6 +63,7 @@ class AppWindow(QMainWindow):
         # module instance
         self.__video_image_subscriber = None
         self.__can_subscriber = None
+        self.__can_ch1_out_subscriber = None
 
         try:            
             if "gui" in config:
@@ -75,17 +76,24 @@ class AppWindow(QMainWindow):
                     raise Exception(f"Cannot found UI file : {ui_path}")
                 
                 # Setup CAN monitoring
-                self.load_can_signals()
-                self.init_can_table()
-                
-                can_conn = config.get("can_monitor_port", "tcp://192.168.100.91:5101")
-                can_topic = config.get("can_monitor_topic", "status")
-                can_sim = config.get("can_simulate", True)
-                
-                from subscriber.can import CANMonitorSubscriber
-                self.__can_subscriber = CANMonitorSubscriber(self.__pipeline_context, connection=can_conn, topic=can_topic, simulate=can_sim)
-                self.__can_subscriber.can_message_received.connect(self.on_update_can_message)
-                self.__can_subscriber.start()
+                if config.get("enable_can_monitor", False):
+                    self.load_can_signals()
+                    self.init_can_table()
+                    
+                    can_conn = config.get("can_monitor_port", "tcp://192.168.100.91:5101")
+                    can_topic = config.get("can_monitor_topic", "status")
+                    can_sim = config.get("can_simulate", True)
+                    
+                    from subscriber.can import CANMonitorSubscriber
+                    self.__can_subscriber = CANMonitorSubscriber(self.__pipeline_context, connection=can_conn, topic=can_topic, simulate=can_sim)
+                    self.__can_subscriber.can_message_received.connect(self.on_update_can_message)
+                    self.__can_subscriber.start()
+
+                    can_ch1_conn = config.get("can_ch1_out_port", "tcp://192.168.100.91:5102")
+                    can_ch1_topic = config.get("can_ch1_out_topic", "can_ch1_out")
+                    self.__can_ch1_out_subscriber = CANMonitorSubscriber(self.__pipeline_context, connection=can_ch1_conn, topic=can_ch1_topic, simulate=False)
+                    self.__can_ch1_out_subscriber.can_message_received.connect(self.on_update_can_ch1_out)
+                    self.__can_ch1_out_subscriber.start()
                 
                 # ui components event callback def.
                 if hasattr(self, 'chk_dms_enable'):
@@ -217,6 +225,8 @@ class AppWindow(QMainWindow):
         # close CAN subscriber
         if self.__can_subscriber:
             self.__can_subscriber.close()
+        if self.__can_ch1_out_subscriber:
+            self.__can_ch1_out_subscriber.close()
 
         # close camera stream monitoring subscriber
         if len(self.__camera_image_subscriber_map.keys())>0:
@@ -531,3 +541,7 @@ class AppWindow(QMainWindow):
                 readiness_text = current_item.text()
                 
         self.__console.info(f"Force Update - DMS State: {state_text}, Driver Readiness: {readiness_text}")
+
+    def on_update_can_ch1_out(self, msg):
+        # Basic structure for data integration
+        self.__console.info(f"Received can_ch1_out data: {msg}")

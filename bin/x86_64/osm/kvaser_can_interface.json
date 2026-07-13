@@ -19,10 +19,17 @@
         },
         "can_ch1_in": {
             "transport": "tcp",
-            "host": "*",
+            "host": "127.0.0.1",
             "port": 5102,
             "socket_type": "sub",
-            "queue_size": 1000
+            "queue_size": 100
+        },
+        "can_ch1_out":{
+            "transport": "tcp",
+            "host": "127.0.0.1",
+            "port": 5103,
+            "socket_type": "pub",
+            "queue_size": 100
         }
     }
 }
