@@ -8,7 +8,7 @@
     <x>0</x>
     <y>0</y>
     <width>1497</width>
-    <height>958</height>
+    <height>1262</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -510,6 +510,16 @@ QCheckBox::indicator:checked {
       </widget>
      </item>
     </layout>
+   </widget>
+   <widget class="QTextBrowser" name="text_log">
+    <property name="geometry">
+     <rect>
+      <x>0</x>
+      <y>920</y>
+      <width>1191</width>
+      <height>301</height>
+     </rect>
+    </property>
    </widget>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
