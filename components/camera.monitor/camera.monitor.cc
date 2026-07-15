@@ -28,10 +28,8 @@ bool camera_monitor::onInit()
 
 
         // Start threads for image_stream_0 and image_stream_2
-        _monitor_threads["image_stream_0"] =
-            thread(&camera_monitor::_monitor_task, this, "image_stream_0", "image_stream_1_monitor");
-        _monitor_threads["image_stream_2"] =
-            thread(&camera_monitor::_monitor_task, this, "image_stream_2", "image_stream_2_monitor");
+        _monitor_threads["image_stream_0"] = thread(&camera_monitor::_monitor_task, this, "image_stream_0", "image_stream_1_monitor");
+        _monitor_threads["image_stream_2"] = thread(&camera_monitor::_monitor_task, this, "image_stream_2", "image_stream_2_monitor");
 
         logger::info("[{}] Monitoring component initialized with threads.", getName());
     } catch (const std::exception& e) {
@@ -149,7 +147,7 @@ void camera_monitor::_monitor_task(string stream_name, string monitor_portname)
 
                 auto end_time = chrono::high_resolution_clock::now();
                 chrono::duration<double, std::milli> elapsed = end_time - start_time;
-                // logger::info("[{}] [{}] Processing loop time: {:.3f} ms", getName(), stream_name, elapsed.count());
+                logger::info("[{}] [{}] Processing loop time: {:.3f} ms", getName(), stream_name, elapsed.count());
             }
         } catch (const std::exception& e) {
             if (!_stop_threads.load()) {
