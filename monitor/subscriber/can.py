@@ -17,14 +17,13 @@ from util.logger.console import ConsoleLogger
 class CANMonitorSubscriber(QThread):
     can_message_received = pyqtSignal(dict)
 
-    def __init__(self, context: zmq.Context, connection: str, topic: str, simulate: bool = False):
+    def __init__(self, context: zmq.Context, connection: str, topic: str):
         super().__init__()
         self.__console = ConsoleLogger.get_logger()
         self.__console.info(f"CAN Monitor Connection : {connection} (topic:{topic})")
 
         self.__connection = connection
         self.__topic = topic
-        self.__simulate = simulate
 
         self.__socket = context.socket(zmq.SUB)
         self.__socket.setsockopt(zmq.RCVHWM, 100)

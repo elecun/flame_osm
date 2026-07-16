@@ -82,16 +82,15 @@ class AppWindow(QMainWindow):
                     
                     can_conn = config.get("can_monitor_port", "tcp://192.168.100.91:5101")
                     can_topic = config.get("can_monitor_topic", "status")
-                    can_sim = config.get("can_simulate", True)
                     
                     from subscriber.can import CANMonitorSubscriber
-                    self.__can_subscriber = CANMonitorSubscriber(self.__pipeline_context, connection=can_conn, topic=can_topic, simulate=can_sim)
+                    self.__can_subscriber = CANMonitorSubscriber(self.__pipeline_context, connection=can_conn, topic=can_topic)
                     self.__can_subscriber.can_message_received.connect(self.on_update_can_message)
                     self.__can_subscriber.start()
 
                     can_ch1_conn = config.get("can_ch1_out_port", "tcp://192.168.100.91:5102")
                     can_ch1_topic = config.get("can_ch1_out_topic", "can_ch1_out")
-                    self.__can_ch1_out_subscriber = CANMonitorSubscriber(self.__pipeline_context, connection=can_ch1_conn, topic=can_ch1_topic, simulate=False)
+                    self.__can_ch1_out_subscriber = CANMonitorSubscriber(self.__pipeline_context, connection=can_ch1_conn, topic=can_ch1_topic)
                     self.__can_ch1_out_subscriber.can_message_received.connect(self.on_update_can_ch1_out)
                     self.__can_ch1_out_subscriber.start()
                 
