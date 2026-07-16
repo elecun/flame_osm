@@ -116,7 +116,7 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
             cv::Mat captured = captured_data.second;
 
             // If valid
-            if(cam_channel>=0){
+            if(cam_channel>=0 && !captured.empty()){
                 if(_use_image_stream.load()){
 
                     // 1. Prepare raw Mat data instead of JPEG encoding
