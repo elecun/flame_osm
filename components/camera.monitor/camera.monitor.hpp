@@ -21,9 +21,20 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+#include <opencv2/opencv.hpp>
 
 using namespace std;
 using namespace flame::component;
+
+/**
+ * @brief Per-monitor-port resolution configuration.
+ *        If has_resolution is false the original image size is kept.
+ */
+struct MonitorResolution {
+    bool has_resolution{false};
+    int  width{0};
+    int  height{0};
+};
 
 class camera_monitor : public flame::component::Object {
 public:
@@ -51,6 +62,9 @@ private:
     unordered_map<string, mutex> _queue_mtxs;
     unordered_map<string, condition_variable> _queue_cvs;
     const size_t _max_queue_size = 5;
+
+    /* Per-monitor-port target resolution (keyed by monitor portname) */
+    unordered_map<string, MonitorResolution> _monitor_resolutions;
 };
 
 EXPORT_COMPONENT_API

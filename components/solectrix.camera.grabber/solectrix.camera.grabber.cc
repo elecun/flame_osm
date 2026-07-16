@@ -145,8 +145,8 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
                     msg->meta = tag.dump();
 
                     // 3. populate multipart frames (first: portname, second: metadata/tag, third: raw image data)
-                    msg->addstr(msg->from);
-                    msg->addstr(msg->meta);
+                    // msg->addstr(msg->from);
+                    // msg->addstr(msg->meta);
                     msg->addmem(captured.data, captured.total() * captured.elemSize());
 
                     /* push to channel queue */
