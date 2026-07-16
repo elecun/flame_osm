@@ -326,6 +326,15 @@ pair<int, Mat> sxpf_grabber::capture(){
                 
             case SXPF_EVENT_CAPTURE_ERROR:
                 logger::error("(sxpf_grabber) Event: SXPF_EVENT_CAPTURE_ERROR {}", _events[n].data);
+                {
+                    sxpf_card_props_t props;
+                    if (sxpf_get_card_properties(_grabber_handle, &props) == 0) {
+                        for (uint32_t i = 0; i < props.num_buffers; i++) {
+                            sxpf_release_frame(_grabber_handle, i, 0);
+                        }
+                        logger::info("(sxpf_grabber) Forcefully released all {} frame buffer slots.", props.num_buffers);
+                    }
+                }
                 break;
                 
             case SXPF_EVENT_IO_STATE:
