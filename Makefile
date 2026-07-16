@@ -187,7 +187,7 @@ $(BUILDDIR)video.file.grabber.o: $(CURRENT_DIR)/components/video.file.grabber/vi
 
 # Camera Monitor
 camera_monitor.comp: $(BUILDDIR)camera.monitor.o
-	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS)
+	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgproc -lopencv_imgcodecs
 
 $(BUILDDIR)camera.monitor.o: $(CURRENT_DIR)/components/camera.monitor/camera.monitor.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
