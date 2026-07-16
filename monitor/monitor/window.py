@@ -126,8 +126,7 @@ class AppWindow(QMainWindow):
                 for idx, id in enumerate(config["camera_ids"]):
                     self.__frame_window_map[id] = self.findChild(QLabel, config["camera_windows"][idx])
                     portname = f"image_stream_{id}_monitor"
-                    self.__camera_image_subscriber_map[id] = CameraMonitorSubscriber(self.__pipeline_context,connection=config[portname],
-                                                                                     topic=config[f'image_stream_{id}_monitor_topic'])
+                    self.__camera_image_subscriber_map[id] = CameraMonitorSubscriber(self.__pipeline_context,connection=config[portname], topic=config[f'image_stream_{id}_monitor_topic'])
                     self.__camera_image_subscriber_map[id].frame_update_signal.connect(self.on_update_camera_image)
                     self.__camera_image_subscriber_map[id].start()
 
@@ -182,7 +181,8 @@ class AppWindow(QMainWindow):
         color_image = cv2.cvtColor(rotated_image, cv2.COLOR_BGR2RGB)
         if self.__show_frame_info:
             t = datetime.now()
-            cv2.putText(color_image, t.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3], (5, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 1, cv2.LINE_AA)
+            cv2.putText(color_image, t.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3], (5, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 1, cv2.LINE_AA)
+            cv2.putText(color_image, str(fps), (380, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,255), 1, cv2.LINE_AA)
         h, w, ch = color_image.shape
         
         # Write to video if recording is active

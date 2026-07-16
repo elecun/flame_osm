@@ -7,8 +7,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1497</width>
-    <height>1262</height>
+    <width>1622</width>
+    <height>1108</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -177,13 +177,24 @@ QCheckBox::indicator:checked {
     <property name="geometry">
      <rect>
       <x>0</x>
-      <y>0</y>
-      <width>540</width>
+      <y>50</y>
+      <width>270</width>
       <height>30</height>
      </rect>
     </property>
+    <property name="styleSheet">
+     <string notr="true">color: #ffffff;
+font-weight: bold;
+font-size: 12px;
+background-color: #1a1a1f;
+padding: 6px;
+border-top-left-radius: 6px;
+border-top-right-radius: 6px;
+border: 1px solid #2e2e38;
+border-bottom: none;</string>
+    </property>
     <property name="text">
-     <string>CAMERA 1 (DRIVER VIEW)</string>
+     <string>CAMERA 1 (Front Left)</string>
     </property>
     <property name="alignment">
      <set>Qt::AlignCenter</set>
@@ -193,10 +204,16 @@ QCheckBox::indicator:checked {
     <property name="geometry">
      <rect>
       <x>0</x>
-      <y>30</y>
-      <width>540</width>
-      <height>890</height>
+      <y>80</y>
+      <width>270</width>
+      <height>480</height>
      </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">background-color: #000000;
+border: 1px solid #2e2e38;
+border-bottom-left-radius: 6px;
+border-bottom-right-radius: 6px;</string>
     </property>
     <property name="text">
      <string>Camera #1 Stream Wait...</string>
@@ -208,9 +225,9 @@ QCheckBox::indicator:checked {
    <widget class="QGroupBox" name="group_can">
     <property name="geometry">
      <rect>
-      <x>540</x>
-      <y>0</y>
-      <width>650</width>
+      <x>860</x>
+      <y>10</y>
+      <width>461</width>
       <height>920</height>
      </rect>
     </property>
@@ -357,9 +374,9 @@ QCheckBox::indicator:checked {
    <widget class="QLabel" name="label_main_title">
     <property name="geometry">
      <rect>
-      <x>1200</x>
-      <y>10</y>
-      <width>281</width>
+      <x>0</x>
+      <y>0</y>
+      <width>271</width>
       <height>30</height>
      </rect>
     </property>
@@ -370,10 +387,10 @@ QCheckBox::indicator:checked {
    <widget class="QLabel" name="label_subtitle">
     <property name="geometry">
      <rect>
-      <x>1200</x>
-      <y>30</y>
+      <x>0</x>
+      <y>20</y>
       <width>271</width>
-      <height>41</height>
+      <height>31</height>
      </rect>
     </property>
     <property name="text">
@@ -386,8 +403,8 @@ QCheckBox::indicator:checked {
    <widget class="QGroupBox" name="group_control">
     <property name="geometry">
      <rect>
-      <x>1200</x>
-      <y>60</y>
+      <x>1330</x>
+      <y>10</y>
       <width>280</width>
       <height>330</height>
      </rect>
@@ -452,8 +469,8 @@ QCheckBox::indicator:checked {
    <widget class="QGroupBox" name="group_record">
     <property name="geometry">
      <rect>
-      <x>1200</x>
-      <y>400</y>
+      <x>1330</x>
+      <y>350</y>
       <width>281</width>
       <height>160</height>
      </rect>
@@ -514,11 +531,109 @@ QCheckBox::indicator:checked {
    <widget class="QTextBrowser" name="text_log">
     <property name="geometry">
      <rect>
-      <x>0</x>
-      <y>920</y>
-      <width>1191</width>
-      <height>301</height>
+      <x>860</x>
+      <y>940</y>
+      <width>751</width>
+      <height>130</height>
      </rect>
+    </property>
+   </widget>
+   <widget class="QLabel" name="window_camera_1_processed">
+    <property name="geometry">
+     <rect>
+      <x>270</x>
+      <y>30</y>
+      <width>585</width>
+      <height>1040</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">background-color: #000000;
+border: 1px solid #2e2e38;
+border-bottom-left-radius: 6px;
+border-bottom-right-radius: 6px;</string>
+    </property>
+    <property name="text">
+     <string>Camera #1 Processed Stream Wait...</string>
+    </property>
+    <property name="alignment">
+     <set>Qt::AlignCenter</set>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_cam1_processed_title">
+    <property name="geometry">
+     <rect>
+      <x>270</x>
+      <y>0</y>
+      <width>585</width>
+      <height>30</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">color: #ffffff;
+font-weight: bold;
+font-size: 12px;
+background-color: #1a1a1f;
+padding: 6px;
+border-top-left-radius: 6px;
+border-top-right-radius: 6px;
+border: 1px solid #2e2e38;
+border-bottom: none;</string>
+    </property>
+    <property name="text">
+     <string>CAMERA 1 Processed (DRIVER VIEW)</string>
+    </property>
+    <property name="alignment">
+     <set>Qt::AlignCenter</set>
+    </property>
+   </widget>
+   <widget class="QLabel" name="window_camera_2">
+    <property name="geometry">
+     <rect>
+      <x>0</x>
+      <y>590</y>
+      <width>270</width>
+      <height>480</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">background-color: #000000;
+border: 1px solid #2e2e38;
+border-bottom-left-radius: 6px;
+border-bottom-right-radius: 6px;</string>
+    </property>
+    <property name="text">
+     <string>Camera #1 Stream Wait...</string>
+    </property>
+    <property name="alignment">
+     <set>Qt::AlignCenter</set>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_cam1_title_2">
+    <property name="geometry">
+     <rect>
+      <x>0</x>
+      <y>560</y>
+      <width>270</width>
+      <height>30</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">color: #ffffff;
+font-weight: bold;
+font-size: 12px;
+background-color: #1a1a1f;
+padding: 6px;
+border-top-left-radius: 6px;
+border-top-right-radius: 6px;
+border: 1px solid #2e2e38;
+border-bottom: none;</string>
+    </property>
+    <property name="text">
+     <string>CAMERA 2 (Front Right)</string>
+    </property>
+    <property name="alignment">
+     <set>Qt::AlignCenter</set>
     </property>
    </widget>
   </widget>
