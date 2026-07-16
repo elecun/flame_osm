@@ -5,7 +5,8 @@
 
     },
     "parameters": {
-
+        "model_path": "models/yolo11n-face.engine",
+        "gpu_id": 0
     },
     "dataport": {
         "status": {
@@ -20,26 +21,10 @@
             "socket_type": "sub",
             "queue_size": 10
         },
-        "image_stream_2": {
-            "transport": "inproc",
-            "socket_type": "sub",
-            "queue_size": 10
-        },
-        "image_stream_1_monitor":{
+        "image_stream_1_processed_monitor":{
             "transport": "tcp",
             "host": "192.168.100.91",
             "port": 5201,
-            "socket_type": "pub",
-            "queue_size": 10,
-            "resolution": {
-                "width": 800,
-                "height": 450
-            }
-        },
-        "image_stream_2_monitor":{
-            "transport": "tcp",
-            "host": "192.168.100.91",
-            "port": 5202,
             "socket_type": "pub",
             "queue_size": 10,
             "resolution": {

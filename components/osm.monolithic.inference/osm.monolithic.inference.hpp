@@ -39,6 +39,10 @@ class osm_monolithic_inference : public flame::component::Object {
         cv::Mat getLatestImage2();
 
     private:
+        /* Inference worker thread loop */
+        void _inference_process();
+
+    private:
         /* Latest Images Caching */
         cv::Mat _latest_image_1;
         cv::Mat _latest_image_2;
@@ -49,6 +53,15 @@ class osm_monolithic_inference : public flame::component::Object {
 
         /* Face Detector Instance */
         std::unique_ptr<face_detection> _face_detector;
+
+        /* Thread Control */
+        std::thread _inference_worker;
+        std::atomic<bool> _worker_stop{false};
+
+        /* Monitor port configuration */
+        int _target_width = 800;
+        int _target_height = 450;
+        bool _has_target_resolution = false;
 };
 
 EXPORT_COMPONENT_API

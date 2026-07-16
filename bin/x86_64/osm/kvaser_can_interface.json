@@ -13,21 +13,21 @@
         "status": {
             "transport": "tcp",
             "host": "*",
-            "port": 5101,
+            "port": 5102,
             "socket_type": "pub",
             "queue_size": 1000
         },
         "can_ch1_in": {
             "transport": "tcp",
             "host": "127.0.0.1",
-            "port": 5102,
+            "port": 5211,
             "socket_type": "sub",
             "queue_size": 100
         },
         "can_ch1_out":{
             "transport": "tcp",
             "host": "127.0.0.1",
-            "port": 5103,
+            "port": 5212,
             "socket_type": "pub",
             "queue_size": 100
         }
