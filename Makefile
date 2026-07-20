@@ -83,6 +83,8 @@ endif
 # Ensure directories exist (Pre-requisite for targets)
 $(shell mkdir -p $(OUTDIR))
 $(shell mkdir -p $(BUILDDIR))
+$(shell mkdir -p $(BUILDDIR)/osm_can)
+$(shell mkdir -p $(BUILDDIR)/osm_camera)
 
 .PHONY: all clean debug deploy FORCE osm flame
 
@@ -102,7 +104,7 @@ flame:
 
 # UVC Camera Grabber
 uvc_camera_grabber.comp: $(BUILDDIR)uvc.camera.grabber.o $(BUILDDIR)support.o
-	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio -lopencv_calib3d
+	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_camera/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio -lopencv_calib3d
 
 $(BUILDDIR)uvc.camera.grabber.o: $(CURRENT_DIR)/components/uvc.camera.grabber/uvc.camera.grabber.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
@@ -119,7 +121,7 @@ SOLECTRIX_OBJS = \
 	$(BUILDDIR)core_frame_processing.o
 
 solectrix_camera_grabber.comp: $(SOLECTRIX_OBJS)
-	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio -lsxpf_ll
+	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_camera/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio -lsxpf_ll
 
 $(BUILDDIR)solectrix.camera.grabber.o: $(CURRENT_DIR)/components/solectrix.camera.grabber/solectrix.camera.grabber.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) $(SOLECTRIX_INC) -c $< -o $@
@@ -135,35 +137,35 @@ $(BUILDDIR)core_frame_processing.o: $(CURRENT_DIR)/components/solectrix.camera.g
 
 # Kvaser CAN Interface
 kvaser_can_interface.comp: $(BUILDDIR)kvaser.can.interface.o
-	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lcanlib
+	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_can/$@ $^ $(LDFLAGS) $(LDLIBS) -lcanlib
 
 $(BUILDDIR)kvaser.can.interface.o: $(CURRENT_DIR)/components/kvaser.can.interface/kvaser.can.interface.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
 
 # Body KPS Inference
 body_kps_inference.comp: $(BUILDDIR)body.kps.inference.o
-	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lnvinfer -lnvonnxparser -lcudart -lcublas
+	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_camera/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lnvinfer -lnvonnxparser -lcudart -lcublas
 
 $(BUILDDIR)body.kps.inference.o: $(CURRENT_DIR)/components/body.kps.inference/body.kps.inference.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
 
 # Face Detection Inference
 face_detection_inference.comp: $(BUILDDIR)face.detection.inference.o
-	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lnvinfer -lnvonnxparser -lcudart -lcublas
+	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_camera/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lnvinfer -lnvonnxparser -lcudart -lcublas
 
 $(BUILDDIR)face.detection.inference.o: $(CURRENT_DIR)/components/face.detection.inference/face.detection.inference.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
 
 # OS Model Inference
 os_model_inference.comp: $(BUILDDIR)os.model.inference.o
-	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS)
+	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_camera/$@ $^ $(LDFLAGS) $(LDLIBS)
 
 $(BUILDDIR)os.model.inference.o: $(CURRENT_DIR)/components/os.model.inference/os.model.inference.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
 
 # OSM Monolithic Inference
 osm_monolithic_inference.comp: $(BUILDDIR)osm.monolithic.inference.o $(BUILDDIR)face_detection.o
-	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_dnn
+	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_camera/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_dnn
 
 $(BUILDDIR)osm.monolithic.inference.o: $(CURRENT_DIR)/components/osm.monolithic.inference/osm.monolithic.inference.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
@@ -173,21 +175,21 @@ $(BUILDDIR)face_detection.o: $(CURRENT_DIR)/components/osm.monolithic.inference/
 
 # Headpose Model Inference
 headpose_model_inference.comp: $(BUILDDIR)headpose.model.inference.o
-	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_calib3d -lmediapipe
+	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_camera/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_calib3d -lmediapipe
 
 $(BUILDDIR)headpose.model.inference.o: $(CURRENT_DIR)/components/headpose.model.inference/headpose.model.inference.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
 
 # Video File Grabber
 video_file_grabber.comp: $(BUILDDIR)video.file.grabber.o
-	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio
+	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_camera/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio
 
 $(BUILDDIR)video.file.grabber.o: $(CURRENT_DIR)/components/video.file.grabber/video.file.grabber.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
 
 # Camera Monitor
 camera_monitor.comp: $(BUILDDIR)camera.monitor.o
-	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgproc -lopencv_imgcodecs
+	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_camera/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgproc -lopencv_imgcodecs
 
 $(BUILDDIR)camera.monitor.o: $(CURRENT_DIR)/components/camera.monitor/camera.monitor.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
@@ -199,7 +201,7 @@ deploy : FORCE
 	cp $(BUILDDIR)/*.comp $(BUILDDIR)/flame $(BINDIR)
 
 clean : FORCE 
-	$(RM) $(BUILDDIR)/*.o $(BUILDDIR)/*.comp $(BUILDDIR)/osm/*.comp $(BUILDDIR)/flame
+	$(RM) $(BUILDDIR)/*.o $(BUILDDIR)/*.comp $(BUILDDIR)/osm/*.comp $(BUILDDIR)/osm_can/*.comp $(BUILDDIR)/osm_camera/*.comp $(BUILDDIR)/flame
 
 debug:
 	@echo "Building for Architecture : $(ARCH)"
