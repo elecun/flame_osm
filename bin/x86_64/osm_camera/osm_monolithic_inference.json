@@ -1,12 +1,13 @@
 {
     "rt_cycle_ns": 1000000000,
     "verbose": 1,
-    "info": {
-
-    },
+    "info": {},
     "parameters": {
-        "model_path": "models/yolo11n-face.pt",
-        "gpu_id": 0
+        "use_image_stream":[1],
+        "face_detection": {
+            "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/yolo11n-face.onnx",
+            "gpu_id": 0
+        }
     },
     "dataport": {
         "status": {
@@ -21,7 +22,7 @@
             "socket_type": "sub",
             "queue_size": 10
         },
-        "image_stream_1_processed_monitor":{
+        "image_stream_1_processed_monitor": {
             "transport": "tcp",
             "host": "192.168.100.91",
             "port": 5203,
