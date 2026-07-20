@@ -163,8 +163,8 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
 
             if(cam_channel>=0 && !captured.empty()){
                 if(_use_image_stream.load()){
-                    auto process_start = std::chrono::high_resolution_clock::now();
 
+                    // 1. Undistort immediately on captured image (1920x1080)
                     if (_enable_undistort && !_map1.empty() && !_map2.empty()) {
                         cv::Mat undistorted;
                         cv::remap(captured, undistorted, _map1, _map2, cv::INTER_LINEAR);
@@ -176,6 +176,7 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
                         portname = _channel_ports[cam_channel];
                     }
 
+                    // 2. Rotate according to the options
                     if (_port_rotations.find(portname) != _port_rotations.end()) {
                         cv::Mat rotated;
                         string rot_type = _port_rotations[portname];
@@ -187,10 +188,6 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
                             captured = rotated;
                         }
                     }
-
-                    auto process_end = std::chrono::high_resolution_clock::now();
-                    double process_ms = std::chrono::duration<double, std::milli>(process_end - process_start).count();
-                    logger::info("[{}] Channel {} undistort+rotate processing time: {} ms", getName(), cam_channel, process_ms);
 
                     // 1. Prepare raw Mat data instead of JPEG encoding
                     auto msg = make_shared<flame::component::ZData>();

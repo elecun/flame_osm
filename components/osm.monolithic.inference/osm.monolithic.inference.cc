@@ -15,7 +15,7 @@ osm_monolithic_inference::osm_monolithic_inference() {
 
 bool osm_monolithic_inference::onInit(){
     try{
-        json parameters = getProfile()->parameters();
+        const json& parameters = getProfile()->parameters();
         
         std::string model_path = "bin/x86_64/models/yolo11n-face.pt";
         int gpu_id = 0;
@@ -42,7 +42,7 @@ bool osm_monolithic_inference::onInit(){
         logger::info("[{}] Enabled image streams: stream_1={}, stream_2={}", getName(), _enable_stream_1, _enable_stream_2);
 
         /* Load monitor port configuration for image_stream_1_processed_monitor */
-        json dataport_cfg = getProfile()->dataPort();
+        const json& dataport_cfg = getProfile()->dataPort();
         if (dataport_cfg.contains("image_stream_1_processed_monitor")) {
             const auto& port_cfg = dataport_cfg["image_stream_1_processed_monitor"];
             if (port_cfg.contains("resolution")) {
@@ -100,19 +100,21 @@ void osm_monolithic_inference::onClose(){
 
 void osm_monolithic_inference::onData(flame::component::ZData& data){
     try {
-        if (data.size() >= 3) {
-            std::string portname = data.popstr();
-            std::string tag_str = data.popstr();
-            zmq::message_t image_msg = data.pop();
+        std::string portname = data.from;
 
-            if ((portname == "image_stream_1" && _enable_stream_1) || (portname == "image_stream_2" && _enable_stream_2)) {
+        if ((portname == "image_stream_1" && _enable_stream_1) || (portname == "image_stream_2" && _enable_stream_2)) {
+            if (data.size() >= 2) {
+                zmq::message_t tag_msg = data.pop();
+                zmq::message_t img_msg = data.pop();
+
+                std::string tag_str(static_cast<char*>(tag_msg.data()), tag_msg.size());
                 json tag = json::parse(tag_str);
                 int height = tag["height"].get<int>();
                 int width = tag["width"].get<int>();
                 int type = tag["type"].get<int>();
 
                 // Restore image Mat from payload
-                cv::Mat raw_img(height, width, type, image_msg.data());
+                cv::Mat raw_img(height, width, type, img_msg.data());
                 cv::Mat cloned_img = raw_img.clone();
 
                 if (portname == "image_stream_1") {
@@ -134,6 +136,8 @@ void osm_monolithic_inference::_inference_process() {
     logger::info("[{}] Inference worker thread started", getName());
 
     std::vector<int> encode_params = {cv::IMWRITE_JPEG_QUALITY, 80};
+    auto last_time_1 = std::chrono::high_resolution_clock::now();
+    auto last_time_2 = std::chrono::high_resolution_clock::now();
 
     while (!_worker_stop.load()) {
         auto frame_start = std::chrono::high_resolution_clock::now();
@@ -151,7 +155,7 @@ void osm_monolithic_inference::_inference_process() {
                     _latest_image_1.release();
                 }
 
-                logger::info("[{}] Received Stream 1 Image - Size: {}x{}, Channels: {}, Type: {}", 
+                logger::debug("[{}] Received Stream 1 Image - Size: {}x{}, Channels: {}, Type: {}", 
                              getName(), image.cols, image.rows, image.channels(), image.type());
 
                 try {
@@ -184,6 +188,12 @@ void osm_monolithic_inference::_inference_process() {
                             std::chrono::system_clock::now().time_since_epoch()).count();
                         tag["cam_channel"] = 1;
 
+                        auto now = std::chrono::high_resolution_clock::now();
+                        double elapsed = std::chrono::duration<double>(now - last_time_1).count();
+                        last_time_1 = now;
+                        double fps = (elapsed > 0) ? (1.0 / elapsed) : 0.0;
+                        tag["fps"] = fps;
+
                         /* 6. Send multipart message */
                         flame::component::ZData out_msg;
                         out_msg.from = "image_stream_1_processed_monitor";
@@ -193,7 +203,7 @@ void osm_monolithic_inference::_inference_process() {
                         if (!dispatch("image_stream_1_processed_monitor", out_msg)) {
                             logger::warn("[{}] Failed to dispatch processed image 1", getName());
                         } else {
-                            logger::info("[{}] Successfully dispatched processed image 1", getName());
+                            logger::debug("[{}] Successfully dispatched processed image 1", getName());
                         }
                     }
                 } catch (const std::exception& e) {
@@ -246,6 +256,12 @@ void osm_monolithic_inference::_inference_process() {
                         tag["timestamp"] = std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::system_clock::now().time_since_epoch()).count();
                         tag["cam_channel"] = 2;
+
+                        auto now = std::chrono::high_resolution_clock::now();
+                        double elapsed = std::chrono::duration<double>(now - last_time_2).count();
+                        last_time_2 = now;
+                        double fps = (elapsed > 0) ? (1.0 / elapsed) : 0.0;
+                        tag["fps"] = fps;
 
                         /* 6. Send multipart message */
                         flame::component::ZData out_msg;

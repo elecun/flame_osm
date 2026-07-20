@@ -30,7 +30,35 @@
         ],
         "csi2_datatype": "0x1e",
         "left_shift": 8,
-        "use_image_stream": true
+        "use_image_stream": true,
+        "undistort": false,
+        "camera_calibration": {
+            "view_transform": [
+                [0.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 0.0]
+            ],
+            "projection_transform": [
+                [0.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 0.0]
+            ],
+            "intrinsic": [
+                [1061.013861, 0.000000, 477.171894],
+                [0.000000, 1167.335993, 944.795309],
+                [0.000000, 0.000000, 1.000000]
+            ],
+            "distortion": [-0.446958, 0.281446, 0.004579, -0.055549],
+            "position": [0.0, 0.0, 0.0],
+            "extrinsic": [
+                [-0.910390, -0.198551, -0.362999, 178.276151],
+                [-0.191020, 0.979934, -0.056927, 323.263157],
+                [0.367018, 0.017514, -0.930049, 611.355783],
+                [0.000000, 0.000000, 0.000000, 1.000000]
+            ]
+        }
     },
     "dataport": {
         "status": {
@@ -43,12 +71,14 @@
         "image_stream_1": {
             "transport": "ipc",
             "socket_type": "pub",
-            "queue_size": 10
+            "queue_size": 10,
+            "rotation": "ccw"
         },
         "image_stream_2": {
             "transport": "ipc",
             "socket_type": "pub",
-            "queue_size": 10
+            "queue_size": 10,
+            "rotation": "ccw"
         }
     }
 }
