@@ -19,6 +19,7 @@
 #include <memory>
 #include <opencv2/opencv.hpp>
 #include "face_detection.hpp"
+#include "body_pose_estimation.hpp"
 
 using namespace std;
 using namespace flame::component;
@@ -54,6 +55,9 @@ class osm_monolithic_inference : public flame::component::Object {
         /* Face Detector Instance */
         std::unique_ptr<face_detection> _face_detector;
 
+        /* Body Pose Estimator Instance */
+        std::unique_ptr<body_pose_estimation> _body_pose_estimator;
+
         /* Thread Control */
         std::thread _inference_worker;
         std::atomic<bool> _worker_stop{false};
@@ -64,6 +68,7 @@ class osm_monolithic_inference : public flame::component::Object {
         bool _has_target_resolution = false;
         bool _enable_stream_1 = false;
         bool _enable_stream_2 = false;
+        float _nms_threshold = 0.45f;
 };
 
 EXPORT_COMPONENT_API

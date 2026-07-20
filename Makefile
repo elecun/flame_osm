@@ -61,9 +61,14 @@ else ifeq ($(ARCH), aarch64)
 	LIBDIR = -L/usr/local/lib -L$(CURRENT_DIR)/lib/aarch64/ -L$(CURRENT_DIR)/lib/aarch64-linux-gnu/
 
 else
+	# LibTorch Paths
+	TORCH_DIR = /home/osm/dev/flame_osm/venv/lib/python3.10/site-packages/torch
+	TORCH_INC = -I$(TORCH_DIR)/include -I$(TORCH_DIR)/include/torch/csrc/api/include
+	TORCH_LIB = -L$(TORCH_DIR)/lib -Wl,--no-as-needed -ltorch -ltorch_cpu -ltorch_cuda -lc10 -lc10_cuda -Wl,--as-needed
+
 	# x86_64 (Default)
-	INCLUDE_DIR = $(INCLUDE_BASE) -I$(FLAME_PATH)/include -I$(FLAME_PATH)/include/dep -I$(FLAME_PATH)/include/dep/libzmq -I/usr/local/include -I/usr/include/opencv4 -I/usr/local/cuda/include
-	LIBDIR = -L/usr/local/lib -L$(CURRENT_DIR)/lib/x86_64/ -L$(FLAME_PATH)/lib/x86_64/ -L/usr/lib/x86-64-linux-gnu -L/usr/local/cuda/lib64
+	INCLUDE_DIR = $(INCLUDE_BASE) -I$(FLAME_PATH)/include -I$(FLAME_PATH)/include/dep -I$(FLAME_PATH)/include/dep/libzmq -I/usr/local/include -I/usr/include/opencv4 -I/usr/local/cuda/include $(TORCH_INC)
+	LIBDIR = -L/usr/local/lib -L$(CURRENT_DIR)/lib/x86_64/ -L$(FLAME_PATH)/lib/x86_64/ -L/usr/lib/x86-64-linux-gnu -L/usr/local/cuda/lib64 -Wl,-rpath,$(TORCH_DIR)/lib
 endif
 
 # LDFLAGS definition
@@ -85,6 +90,7 @@ $(shell mkdir -p $(OUTDIR))
 $(shell mkdir -p $(BUILDDIR))
 $(shell mkdir -p $(BUILDDIR)/osm_can)
 $(shell mkdir -p $(BUILDDIR)/osm_camera)
+$(shell mkdir -p $(BUILDDIR)/osm_process)
 
 .PHONY: all clean debug deploy FORCE osm flame
 
@@ -121,7 +127,7 @@ SOLECTRIX_OBJS = \
 	$(BUILDDIR)core_frame_processing.o
 
 solectrix_camera_grabber.comp: $(SOLECTRIX_OBJS)
-	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_camera/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio -lsxpf_ll
+	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_camera/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio -lsxpf_ll -lopencv_calib3d
 
 $(BUILDDIR)solectrix.camera.grabber.o: $(CURRENT_DIR)/components/solectrix.camera.grabber/solectrix.camera.grabber.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) $(SOLECTRIX_INC) -c $< -o $@
@@ -164,13 +170,16 @@ $(BUILDDIR)os.model.inference.o: $(CURRENT_DIR)/components/os.model.inference/os
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
 
 # OSM Monolithic Inference
-osm_monolithic_inference.comp: $(BUILDDIR)osm.monolithic.inference.o $(BUILDDIR)face_detection.o
-	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_camera/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_dnn
+osm_monolithic_inference.comp: $(BUILDDIR)osm.monolithic.inference.o $(BUILDDIR)face_detection.o $(BUILDDIR)body_pose_estimation.o
+	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_process/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_dnn $(TORCH_LIB)
 
 $(BUILDDIR)osm.monolithic.inference.o: $(CURRENT_DIR)/components/osm.monolithic.inference/osm.monolithic.inference.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
 
 $(BUILDDIR)face_detection.o: $(CURRENT_DIR)/components/osm.monolithic.inference/face_detection.cc
+	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
+
+$(BUILDDIR)body_pose_estimation.o: $(CURRENT_DIR)/components/osm.monolithic.inference/body_pose_estimation.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
 
 # Headpose Model Inference
@@ -201,7 +210,7 @@ deploy : FORCE
 	cp $(BUILDDIR)/*.comp $(BUILDDIR)/flame $(BINDIR)
 
 clean : FORCE 
-	$(RM) $(BUILDDIR)/*.o $(BUILDDIR)/*.comp $(BUILDDIR)/osm/*.comp $(BUILDDIR)/osm_can/*.comp $(BUILDDIR)/osm_camera/*.comp $(BUILDDIR)/flame
+	$(RM) $(BUILDDIR)/*.o $(BUILDDIR)/*.comp $(BUILDDIR)/osm/*.comp $(BUILDDIR)/osm_can/*.comp $(BUILDDIR)/osm_camera/*.comp $(BUILDDIR)/osm_process/*.comp $(BUILDDIR)/flame
 
 debug:
 	@echo "Building for Architecture : $(ARCH)"

@@ -32,8 +32,8 @@
             "socket_type": "pub",
             "queue_size": 10,
             "resolution": {
-                "width": 800,
-                "height": 450
+                "width": 450,
+                "height": 800
             }
         },
         "image_stream_2_monitor":{
@@ -43,8 +43,8 @@
             "socket_type": "pub",
             "queue_size": 10,
             "resolution": {
-                "width": 800,
-                "height": 450
+                "width": 450,
+                "height": 800
             }
         }
     }

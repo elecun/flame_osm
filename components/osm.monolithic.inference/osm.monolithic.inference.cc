@@ -23,6 +23,15 @@ bool osm_monolithic_inference::onInit(){
             const auto& fd_params = parameters["face_detection"];
             model_path = fd_params.value("model_path", model_path);
             gpu_id = fd_params.value("gpu_id", gpu_id);
+            _nms_threshold = fd_params.value("nms", _nms_threshold);
+        }
+
+        std::string body_model_path = "bin/x86_64/models/yolo26m-pose.torchscript";
+        int body_gpu_id = 0;
+        if (parameters.contains("body_pose_estimation")) {
+            const auto& bp_params = parameters["body_pose_estimation"];
+            body_model_path = bp_params.value("model_path", body_model_path);
+            body_gpu_id = bp_params.value("gpu_id", body_gpu_id);
         }
 
         /* Set stream enable flags from parameters */
@@ -59,6 +68,12 @@ bool osm_monolithic_inference::onInit(){
         _face_detector = std::make_unique<face_detection>();
         if (!_face_detector->loadModel(model_path, gpu_id)) {
             logger::error("[{}] Failed to load face detection model: {}", getName(), model_path);
+            return false;
+        }
+
+        _body_pose_estimator = std::make_unique<body_pose_estimation>();
+        if (!_body_pose_estimator->loadModel(body_model_path, body_gpu_id)) {
+            logger::error("[{}] Failed to load body pose estimation model: {}", getName(), body_model_path);
             return false;
         }
 
@@ -155,16 +170,48 @@ void osm_monolithic_inference::_inference_process() {
                     _latest_image_1.release();
                 }
 
-                logger::debug("[{}] Received Stream 1 Image - Size: {}x{}, Channels: {}, Type: {}", 
-                             getName(), image.cols, image.rows, image.channels(), image.type());
+                logger::debug("[{}] Received Stream 1 Image - Size: {}x{}, Channels: {}, Type: {}", getName(), image.cols, image.rows, image.channels(), image.type());
 
                 try {
                     /* 1. Run YOLO11-Face detection */
-                    std::vector<cv::Rect> bboxes = _face_detector->process(image);
+                    std::vector<cv::Rect> bboxes = _face_detector->process(image, _nms_threshold);
 
-                    /* 2. Draw bounding boxes on the image */
+                    /* 2. Run YOLO-Pose estimation */
+                    std::vector<body_pose::PoseResult> poses = _body_pose_estimator->process(image, 0.5f, 0.45f);
+
+                    /* 3. Draw face bounding boxes on the image */
                     for (const auto& box : bboxes) {
                         cv::rectangle(image, box, cv::Scalar(0, 255, 0), 3);
+                    }
+
+                    /* 4. Draw body poses on the image (limbs & body only) */
+                    const std::vector<std::pair<int, int>> SKELETON_CONNECTIONS = {
+                        {5, 6}, {5, 7}, {7, 9}, {6, 8}, {8, 10},
+                        {5, 11}, {6, 12}, {11, 12},
+                        {11, 13}, {13, 15}, {12, 14}, {14, 16}
+                    };
+
+                    for (const auto& pose : poses) {
+                        // Bounding box for person is removed as requested
+
+                        // Draw skeleton connections
+                        for (const auto& conn : SKELETON_CONNECTIONS) {
+                            if (conn.first < (int)pose.keypoints.size() && conn.second < (int)pose.keypoints.size()) {
+                                const auto& kp1 = pose.keypoints[conn.first];
+                                const auto& kp2 = pose.keypoints[conn.second];
+                                if (kp1.confidence > 0.5f && kp2.confidence > 0.5f) {
+                                    cv::line(image, cv::Point(kp1.x, kp1.y), cv::Point(kp2.x, kp2.y), cv::Scalar(0, 255, 255), 2);
+                                }
+                            }
+                        }
+
+                        // Draw keypoints (excluding face landmarks: index 0 to 4)
+                        for (int k = 5; k < (int)pose.keypoints.size(); ++k) {
+                            const auto& kpt = pose.keypoints[k];
+                            if (kpt.confidence > 0.5f) {
+                                cv::circle(image, cv::Point(kpt.x, kpt.y), 4, cv::Scalar(0, 0, 255), -1);
+                            }
+                        }
                     }
 
                     /* 3. Resize if target monitor resolution is defined */
@@ -229,7 +276,7 @@ void osm_monolithic_inference::_inference_process() {
 
                 try {
                     /* 1. Run YOLO11-Face detection */
-                    std::vector<cv::Rect> bboxes = _face_detector->process(image);
+                    std::vector<cv::Rect> bboxes = _face_detector->process(image, _nms_threshold);
 
                     /* 2. Draw bounding boxes on the image */
                     for (const auto& box : bboxes) {

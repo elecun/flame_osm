@@ -35,6 +35,7 @@ bool camera_monitor::onInit()
             MonitorResolution res;
             if (dataport_cfg.contains(monitor_portname)) {
                 const auto& port_cfg = dataport_cfg[monitor_portname];
+                
                 if (port_cfg.contains("resolution")) {
                     const auto& r = port_cfg["resolution"];
                     if (r.contains("width") && r.contains("height")) {

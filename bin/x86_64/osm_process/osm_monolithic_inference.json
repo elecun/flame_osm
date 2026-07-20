@@ -5,7 +5,12 @@
     "parameters": {
         "use_image_stream":[1],
         "face_detection": {
-            "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/yolo11n-face.pt",
+            "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/yolo11n-face.torchscript",
+            "gpu_id": 0,
+            "nms": 0.45
+        },
+        "body_pose_estimation": {
+            "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/yolo26m-pose.torchscript",
             "gpu_id": 0
         }
     },
@@ -29,8 +34,8 @@
             "socket_type": "pub",
             "queue_size": 10,
             "resolution": {
-                "width": 800,
-                "height": 450
+                "width": 450,
+                "height": 800
             }
         }
     }
