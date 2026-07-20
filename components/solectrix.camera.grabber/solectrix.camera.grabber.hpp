@@ -61,6 +61,13 @@ class solectrix_camera_grabber : public flame::component::Object {
         atomic<bool> _use_image_stream { false };
         unordered_map<int, chrono::time_point<chrono::high_resolution_clock>> _last_capture_times;
         unordered_map<int, string> _channel_ports;
+        unordered_map<string, string> _port_rotations;
+
+        /* undistortion parameters */
+        bool _enable_undistort{false};
+        cv::Mat _camera_matrix;
+        cv::Mat _dist_coeffs;
+        cv::Mat _map1, _map2;
 
         /* grabber device */
         unique_ptr<sxpf_grabber> _frame_grabber;

@@ -33,6 +33,40 @@ bool solectrix_camera_grabber::onInit(){
         /* setup pipeline */
         _use_image_stream.store(parameters.value("use_image_stream", false));
 
+        /* undistortion setup */
+        _enable_undistort = parameters.value("undistort", false);
+        if (_enable_undistort && parameters.contains("camera_calibration")) {
+            const auto& calib = parameters["camera_calibration"];
+            if (calib.contains("intrinsic") && calib.contains("distortion")) {
+                _camera_matrix = cv::Mat::eye(3, 3, CV_64F);
+                const auto& intr = calib["intrinsic"];
+                for (int r = 0; r < 3; ++r) {
+                    for (int c = 0; c < 3; ++c) {
+                        _camera_matrix.at<double>(r, c) = intr[r][c].get<double>();
+                    }
+                }
+
+                const auto& dist = calib["distortion"];
+                int dist_size = dist.size();
+                _dist_coeffs = cv::Mat(1, dist_size, CV_64F);
+                for (int i = 0; i < dist_size; ++i) {
+                    _dist_coeffs.at<double>(0, i) = dist[i].get<double>();
+                }
+
+                logger::info("[{}] Loaded distortion parameters. Intrinsic: {}x{}, Distortion size: {}", 
+                             getName(), _camera_matrix.rows, _camera_matrix.cols, dist_size);
+
+                cv::initUndistortRectifyMap(
+                    _camera_matrix, _dist_coeffs, cv::Mat(),
+                    _camera_matrix, cv::Size(1920, 1080),
+                    CV_32FC1, _map1, _map2
+                );
+            } else {
+                _enable_undistort = false;
+                logger::warn("[{}] Missing intrinsic/distortion calibration data. Undistort disabled.", getName());
+            }
+        }
+
         /* device instance */
         _frame_grabber = make_unique<sxpf_grabber>(parameters);
 
@@ -48,11 +82,23 @@ bool solectrix_camera_grabber::onInit(){
             return false;
         }
 
+        /* read profile dataport */
+        json dataport_cfg = getProfile()->dataPort();
+
         /* set last capture times and start dispatch workers */
         for(const auto& cam_param : parameters["camera"]){
             int cam_channel = cam_param["channel"].get<int>();
             string portname = cam_param.value("portname", fmt::format("image_stream_{}", cam_channel));
             _channel_ports[cam_channel] = portname;
+
+            if (dataport_cfg.contains(portname)) {
+                const auto& port_cfg = dataport_cfg[portname];
+                if (port_cfg.contains("rotation")) {
+                    _port_rotations[portname] = port_cfg["rotation"].get<string>();
+                    logger::info("[{}] Port '{}' rotation configured: {}", getName(), portname, _port_rotations[portname]);
+                }
+            }
+
             _last_capture_times[cam_channel] = chrono::high_resolution_clock::now();
             _dispatch_workers[cam_channel] = thread(&solectrix_camera_grabber::_dispatch_task, this, cam_channel);
         }
@@ -115,9 +161,36 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
             int cam_channel = captured_data.first;
             cv::Mat captured = captured_data.second;
 
-            // If valid
             if(cam_channel>=0 && !captured.empty()){
                 if(_use_image_stream.load()){
+                    auto process_start = std::chrono::high_resolution_clock::now();
+
+                    if (_enable_undistort && !_map1.empty() && !_map2.empty()) {
+                        cv::Mat undistorted;
+                        cv::remap(captured, undistorted, _map1, _map2, cv::INTER_LINEAR);
+                        captured = undistorted;
+                    }
+
+                    string portname = "image_stream_0";
+                    if (_channel_ports.find(cam_channel) != _channel_ports.end()) {
+                        portname = _channel_ports[cam_channel];
+                    }
+
+                    if (_port_rotations.find(portname) != _port_rotations.end()) {
+                        cv::Mat rotated;
+                        string rot_type = _port_rotations[portname];
+                        if (rot_type == "ccw") {
+                            cv::rotate(captured, rotated, cv::ROTATE_90_COUNTERCLOCKWISE);
+                            captured = rotated;
+                        } else if (rot_type == "cw") {
+                            cv::rotate(captured, rotated, cv::ROTATE_90_CLOCKWISE);
+                            captured = rotated;
+                        }
+                    }
+
+                    auto process_end = std::chrono::high_resolution_clock::now();
+                    double process_ms = std::chrono::duration<double, std::milli>(process_end - process_start).count();
+                    logger::info("[{}] Channel {} undistort+rotate processing time: {} ms", getName(), cam_channel, process_ms);
 
                     // 1. Prepare raw Mat data instead of JPEG encoding
                     auto msg = make_shared<flame::component::ZData>();
@@ -136,11 +209,6 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
                     tag["cam_channel"] = cam_channel;
 
                     logger::debug("[{}] cam channel {}, fps : {}", getName(), cam_channel, tag["fps"].get<double>());
-
-                    string portname = "image_stream_0";
-                    if (_channel_ports.find(cam_channel) != _channel_ports.end()) {
-                        portname = _channel_ports[cam_channel];
-                    }
                     msg->from = portname;
                     msg->meta = tag.dump();
 
