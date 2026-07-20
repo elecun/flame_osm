@@ -162,7 +162,17 @@ class AppWindow(QMainWindow):
 
     def on_update_camera_image(self, image:np.ndarray, tags:dict):
 
-        id = tags.get("id", tags.get("camera_id", tags.get("cam_id", tags.get("cam_channel", 1))))
+        cam_channel = tags.get("cam_channel", tags.get("id", 1))
+        try:
+            val = int(cam_channel)
+            if val == 0:
+                id = 1
+            elif val == 2:
+                id = 2
+            else:
+                id = val
+        except (ValueError, TypeError):
+            id = cam_channel
         
         # Robust ID lookup: try type conversions to match key types in self.__frame_window_map
         if id not in self.__frame_window_map and self.__frame_window_map:
@@ -186,9 +196,8 @@ class AppWindow(QMainWindow):
 
         print(tags)
 
-        # Rotate received image 90 degrees clockwise
-        rotated_image = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
-        color_image = cv2.cvtColor(rotated_image, cv2.COLOR_BGR2RGB)
+        # C++ camera_monitor already rotated the image, so no rotation here
+        color_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         if self.__show_frame_info:
             t = datetime.now()
             cv2.putText(color_image, t.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3], (5, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 1, cv2.LINE_AA)
@@ -205,7 +214,7 @@ class AppWindow(QMainWindow):
                 self.__console.info(f"Started video recording for Camera {id} to {filename}")
             
             try:
-                self.__video_writers[id].write(rotated_image)
+                self.__video_writers[id].write(image)
             except Exception as e:
                 self.__console.error(f"Error writing frame to Camera {id} video: {e}")
 
@@ -220,9 +229,8 @@ class AppWindow(QMainWindow):
     def on_update_processed_image(self, image:np.ndarray, tags:dict):
         fps = round(tags.get("fps", 0.0), 1)
 
-        # Rotate received image 90 degrees counter-clockwise to match camera orientation
-        rotated_image = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
-        color_image = cv2.cvtColor(rotated_image, cv2.COLOR_BGR2RGB)
+        # C++ camera_monitor already rotated the image, so no rotation here
+        color_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
         if self.__show_frame_info:
             t = datetime.now()
