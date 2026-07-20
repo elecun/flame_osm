@@ -5,7 +5,7 @@
     "parameters": {
         "use_image_stream":[1],
         "face_detection": {
-            "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/yolo11n-face.onnx",
+            "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/yolo11n-face.pt",
             "gpu_id": 0
         }
     },
@@ -18,7 +18,7 @@
             "queue_size": 10
         },
         "image_stream_1": {
-            "transport": "inproc",
+            "transport": "ipc",
             "socket_type": "sub",
             "queue_size": 10
         },

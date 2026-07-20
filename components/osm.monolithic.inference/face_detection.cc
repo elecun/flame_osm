@@ -13,38 +13,12 @@ bool face_detection::loadModel(const std::string& model_path, int gpu_id) {
     try {
         std::string path = model_path;
 
-        // If the path ends with .engine but we want to compile on host, we can look for .onnx
-        if (path.find(".engine") != std::string::npos) {
-            std::string onnx_path = path.substr(0, path.find(".engine")) + ".onnx";
-            if (fs::exists(onnx_path)) {
-                path = onnx_path;
-            } else {
-                std::string alt_path = "bin/x86_64/models/yolo11n-face.onnx";
-                if (fs::exists(alt_path)) {
-                    path = alt_path;
-                }
-            }
-        }
-        
-        // Also support loading .pt model by finding its .onnx counterpart
-        if (path.find(".pt") != std::string::npos) {
-            std::string onnx_path = path.substr(0, path.find(".pt")) + ".onnx";
-            if (fs::exists(onnx_path)) {
-                path = onnx_path;
-            } else {
-                std::string alt_path = "bin/x86_64/models/yolo11n-face.onnx";
-                if (fs::exists(alt_path)) {
-                    path = alt_path;
-                }
-            }
-        }
-
         if (!fs::exists(path)) {
             logger::error("[FaceDetection] Model file not found: {}", path);
             return false;
         }
 
-        _net = cv::dnn::readNetFromONNX(path);
+        _net = cv::dnn::readNet(path);
         
         // Set CPU backend for portability and to avoid compile-time/run-time CUDA mismatches on host
         _net.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);

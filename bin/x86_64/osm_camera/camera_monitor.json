@@ -16,12 +16,12 @@
             "queue_size": 10
         },
         "image_stream_1": {
-            "transport": "inproc",
+            "transport": "ipc",
             "socket_type": "sub",
             "queue_size": 10
         },
         "image_stream_2": {
-            "transport": "inproc",
+            "transport": "ipc",
             "socket_type": "sub",
             "queue_size": 10
         },

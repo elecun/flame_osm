@@ -62,6 +62,8 @@ class osm_monolithic_inference : public flame::component::Object {
         int _target_width = 800;
         int _target_height = 450;
         bool _has_target_resolution = false;
+        bool _enable_stream_1 = false;
+        bool _enable_stream_2 = false;
 };
 
 EXPORT_COMPONENT_API
