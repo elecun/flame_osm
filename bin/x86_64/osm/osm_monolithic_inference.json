@@ -5,7 +5,7 @@
 
     },
     "parameters": {
-        "model_path": "models/yolo11n-face.engine",
+        "model_path": "models/yolo11n-face.pt",
         "gpu_id": 0
     },
     "dataport": {
@@ -24,7 +24,7 @@
         "image_stream_1_processed_monitor":{
             "transport": "tcp",
             "host": "192.168.100.91",
-            "port": 5201,
+            "port": 5203,
             "socket_type": "pub",
             "queue_size": 10,
             "resolution": {

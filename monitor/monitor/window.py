@@ -64,6 +64,7 @@ class AppWindow(QMainWindow):
         self.__video_image_subscriber = None
         self.__can_subscriber = None
         self.__can_ch1_out_subscriber = None
+        self.__processed_image_subscriber = None
 
         try:            
             if "gui" in config:
@@ -129,6 +130,15 @@ class AppWindow(QMainWindow):
                     self.__camera_image_subscriber_map[id] = CameraMonitorSubscriber(self.__pipeline_context,connection=config[portname], topic=config[f'image_stream_{id}_monitor_topic'])
                     self.__camera_image_subscriber_map[id].frame_update_signal.connect(self.on_update_camera_image)
                     self.__camera_image_subscriber_map[id].start()
+
+                # processed image monitor setup
+                self.__processed_frame_window = self.findChild(QLabel, "window_camera_1_processed")
+                if self.__processed_frame_window:
+                    conn_str = config.get("image_stream_1_processed_monitor", "tcp://192.168.100.91:5203")
+                    topic_str = config.get("image_stream_1_processed_monitor_topic", "image_stream_1_processed_monitor")
+                    self.__processed_image_subscriber = CameraMonitorSubscriber(self.__pipeline_context, connection=conn_str, topic=topic_str)
+                    self.__processed_image_subscriber.frame_update_signal.connect(self.on_update_processed_image)
+                    self.__processed_image_subscriber.start()
 
         except Exception as e:
             self.__console.error(f"{e}")
@@ -207,6 +217,27 @@ class AppWindow(QMainWindow):
         except Exception as e:
             self.__console.error(e)
     
+    def on_update_processed_image(self, image:np.ndarray, tags:dict):
+        fps = round(tags.get("fps", 0.0), 1)
+
+        # Rotate received image 90 degrees counter-clockwise to match camera orientation
+        rotated_image = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        color_image = cv2.cvtColor(rotated_image, cv2.COLOR_BGR2RGB)
+        
+        if self.__show_frame_info:
+            t = datetime.now()
+            cv2.putText(color_image, t.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3], (5, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 1, cv2.LINE_AA)
+            cv2.putText(color_image, str(fps), (380, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,255), 1, cv2.LINE_AA)
+            
+        h, w, ch = color_image.shape
+        qt_image = QImage(color_image.data, w, h, ch*w, QImage.Format.Format_RGB888)
+        pixmap = QPixmap.fromImage(qt_image)
+        try:
+            self.__processed_frame_window.setPixmap(pixmap.scaled(self.__processed_frame_window.size(), Qt.AspectRatioMode.KeepAspectRatio))
+            self.__processed_frame_window.show()
+        except Exception as e:
+            self.__console.error(e)
+
     def on_update_video_image(self, image:np.ndarray, tags:dict):
         """ video image stream subscribe """
         print(tags)
@@ -235,6 +266,9 @@ class AppWindow(QMainWindow):
         # close video stream subscriber
         if self.__video_image_subscriber:
             self.__video_image_subscriber.close()
+
+        if self.__processed_image_subscriber:
+            self.__processed_image_subscriber.close()
 
         # context termination with linger=0
         self.__pipeline_context.destroy(0)

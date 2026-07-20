@@ -163,7 +163,7 @@ $(BUILDDIR)os.model.inference.o: $(CURRENT_DIR)/components/os.model.inference/os
 
 # OSM Monolithic Inference
 osm_monolithic_inference.comp: $(BUILDDIR)osm.monolithic.inference.o $(BUILDDIR)face_detection.o
-	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lnvinfer -lnvonnxparser -lcudart -lcublas
+	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_dnn
 
 $(BUILDDIR)osm.monolithic.inference.o: $(CURRENT_DIR)/components/osm.monolithic.inference/osm.monolithic.inference.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@

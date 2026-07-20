@@ -11,7 +11,7 @@
         "status": {
             "transport": "tcp",
             "host": "*",
-            "port": 5103,
+            "port": 5104,
             "socket_type": "pub",
             "queue_size": 10
         },
