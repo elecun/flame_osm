@@ -383,6 +383,9 @@ border-bottom-right-radius: 6px;</string>
     <property name="text">
      <string>Driver Monitor System</string>
     </property>
+    <property name="alignment">
+     <set>Qt::AlignCenter</set>
+    </property>
    </widget>
    <widget class="QLabel" name="label_subtitle">
     <property name="geometry">
@@ -395,6 +398,9 @@ border-bottom-right-radius: 6px;</string>
     </property>
     <property name="text">
      <string>Driver Readiness Assessment &amp; System Monitoring</string>
+    </property>
+    <property name="alignment">
+     <set>Qt::AlignCenter</set>
     </property>
     <property name="wordWrap">
      <bool>true</bool>
@@ -472,7 +478,7 @@ border-bottom-right-radius: 6px;</string>
       <x>1330</x>
       <y>350</y>
       <width>281</width>
-      <height>160</height>
+      <height>121</height>
      </rect>
     </property>
     <property name="title">
@@ -486,26 +492,6 @@ border-bottom-right-radius: 6px;</string>
       <widget class="QPushButton" name="btn_record_stop">
        <property name="text">
         <string>STOP</string>
-       </property>
-      </widget>
-     </item>
-     <item row="2" column="0">
-      <widget class="QLabel" name="label_record_path">
-       <property name="styleSheet">
-        <string notr="true">color: #8e8e93; font-size: 11px;</string>
-       </property>
-       <property name="text">
-        <string>Path: -</string>
-       </property>
-      </widget>
-     </item>
-     <item row="1" column="0">
-      <widget class="QLabel" name="label_rec_status_title">
-       <property name="text">
-        <string>Status:</string>
-       </property>
-       <property name="alignment">
-        <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
        </property>
       </widget>
      </item>
@@ -523,6 +509,16 @@ border-bottom-right-radius: 6px;</string>
       <widget class="QPushButton" name="btn_record_start">
        <property name="text">
         <string>START RECORDING</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="0">
+      <widget class="QLabel" name="label_rec_status_title">
+       <property name="text">
+        <string>Status:</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
        </property>
       </widget>
      </item>
