@@ -97,10 +97,9 @@ class AppWindow(QMainWindow):
 
                     # Setup CAN control publisher
                     can_ch0_control_conn = config.get("can_ch0_control", "tcp://192.168.100.91:5210")
-                    self.__can_ch0_control_topic = config.get("can_ch0_control_topic", "can_ch0_control")
-                    self.__can_ch0_control_socket = self.__pipeline_context.socket(zmq.PUB)
-                    self.__can_ch0_control_socket.setsockopt(zmq.LINGER, 0)
-                    self.__can_ch0_control_socket.connect(can_ch0_control_conn)
+                    can_ch0_control_topic = config.get("can_ch0_control_topic", "can_ch0_control")
+                    from publisher.can import CANControlPublisher
+                    self.__can_control_publisher = CANControlPublisher(self.__pipeline_context, connection=can_ch0_control_conn, topic=can_ch0_control_topic)
                 
                 # Populate list_dms_state and list_dms_driver_readiness from kvaser_can_interface.json
                 self.init_dms_controls()
@@ -253,9 +252,8 @@ class AppWindow(QMainWindow):
             self.__can_ch0_out_subscriber.close()
         if hasattr(self, '_AppWindow__can_ch0_in_subscriber') and self.__can_ch0_in_subscriber:
             self.__can_ch0_in_subscriber.close()
-        if hasattr(self, '_AppWindow__can_ch0_control_socket') and self.__can_ch0_control_socket:
-            self.__can_ch0_control_socket.close()
-
+        if hasattr(self, '_AppWindow__can_control_publisher') and self.__can_control_publisher:
+            self.__can_control_publisher.close()
         # close camera stream monitoring subscriber
         if len(self.__camera_image_subscriber_map.keys())>0:
             with ThreadPoolExecutor(max_workers=10) as executor:
@@ -557,16 +555,9 @@ class AppWindow(QMainWindow):
             ]
         }
 
-        topic = getattr(self, '_AppWindow__can_ch0_control_topic', 'can_ch0_control')
-        payload_str = json.dumps(msg_dict)
-
-        if hasattr(self, '_AppWindow__can_ch0_control_socket') and self.__can_ch0_control_socket:
-            try:
-                self.__can_ch0_control_socket.send_multipart([topic.encode('utf-8'), payload_str.encode('utf-8')])
-            except Exception as e:
-                self.__console.error(f"Failed to send can_ch0_control message: {e}")
-
-        self.__console.info(f"[CAN Control Message Sent] topic: '{topic}', payload: {payload_str}")
+        if hasattr(self, '_AppWindow__can_control_publisher') and self.__can_control_publisher:
+            self.__can_control_publisher.publish_control(msg_dict)
+            self.__console.info(f"[CAN Control Message Sent] payload: {msg_dict}")
 
     def on_update_can_ch0_in(self, msg):
         # Basic structure for data integration

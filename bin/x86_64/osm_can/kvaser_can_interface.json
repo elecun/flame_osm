@@ -31,7 +31,7 @@
         },
         "can_ch0_control": {
             "transport": "tcp",
-            "host": "192.168.100.91",
+            "host": "192.168.100.92",
             "port": 5210,
             "socket_type": "sub",
             "queue_size": 100
