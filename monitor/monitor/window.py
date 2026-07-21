@@ -81,19 +81,19 @@ class AppWindow(QMainWindow):
                     self.load_can_signals()
                     self.init_can_table()
                     
-                    can_conn = config.get("can_monitor_port", "tcp://192.168.100.91:5101")
-                    can_topic = config.get("can_monitor_topic", "status")
+                    can_ch0_out_conn = config.get("can_ch0_out", "tcp://192.168.100.91:5212")
+                    can_ch0_out_topic = config.get("can_ch0_out_topic", "can_ch0_out")
                     
                     from subscriber.can import CANMonitorSubscriber
-                    self.__can_subscriber = CANMonitorSubscriber(self.__pipeline_context, connection=can_conn, topic=can_topic)
-                    self.__can_subscriber.can_message_received.connect(self.on_update_can_message)
-                    self.__can_subscriber.start()
-
-                    can_ch0_conn = config.get("can_ch0_out_port", "tcp://192.168.100.91:5102")
-                    can_ch0_topic = config.get("can_ch0_out_topic", "can_ch0_out")
-                    self.__can_ch0_out_subscriber = CANMonitorSubscriber(self.__pipeline_context, connection=can_ch0_conn, topic=can_ch0_topic)
+                    self.__can_ch0_out_subscriber = CANMonitorSubscriber(self.__pipeline_context, connection=can_ch0_out_conn, topic=can_ch0_out_topic)
                     self.__can_ch0_out_subscriber.can_message_received.connect(self.on_update_can_ch0_out)
                     self.__can_ch0_out_subscriber.start()
+
+                    can_ch0_in_conn = config.get("can_ch0_in", "tcp://192.168.100.91:5211")
+                    can_ch0_in_topic = config.get("can_ch0_in_topic", "can_ch0_in")
+                    self.__can_ch0_in_subscriber = CANMonitorSubscriber(self.__pipeline_context, connection=can_ch0_in_conn, topic=can_ch0_can_ch0_in_topictopic)
+                    self.__can_ch0_in_subscriber.can_message_received.connect(self.on_update_can_ch0_in)
+                    self.__can_ch0_in_subscriber.start()
                 
                 # Populate list_dms_state and list_dms_driver_readiness from kvaser_can_interface.json
                 self.init_dms_controls()
@@ -328,88 +328,50 @@ class AppWindow(QMainWindow):
     def load_can_signals(self):
         self.__can_signals_isc = []
         self.__can_signals_dms = []
-        try:
-            import pandas as pd
-            excel_path = os.path.join(self.__config.get("root_path", ""), "can_protocol.xlsx")
-            if os.path.isfile(excel_path):
-                self.__console.info(f"Loading CAN protocol from {excel_path}...")
-                xl = pd.ExcelFile(excel_path)
-                df = xl.parse("4. CAN Matrix")
-                headers = df.iloc[2].tolist()
-                clean_df = df.iloc[3:].copy()
-                clean_df.columns = headers
-                
-                # Load ISC_01_10ms
-                isc_signals = clean_df[clean_df["Message Name"] == "ISC_01_10ms"]
-                for _, row in isc_signals.iterrows():
-                    self.__can_signals_isc.append({
-                        "signal_name": str(row["Signal Name"]).strip(),
-                        "start_bit": str(row["Start Bit"]),
-                        "len_bit": str(row["Len(bit)"]),
-                        "value_table_enum": str(row["Value Table / Enum"]),
-                        "init_value": str(int(float(row["Init Value"]))) if pd.notna(row["Init Value"]) else "0"
-                    })
-                    
-                # Load STS_DMS_1000ms
-                dms_signals = clean_df[clean_df["Message Name"] == "STS_DMS_1000ms"]
-                for _, row in dms_signals.iterrows():
-                    self.__can_signals_dms.append({
-                        "signal_name": str(row["Signal Name"]).strip(),
-                        "start_bit": str(row["Start Bit"]),
-                        "len_bit": str(row["Len(bit)"]),
-                        "value_table_enum": str(row["Value Table / Enum"]),
-                        "init_value": str(int(float(row["Init Value"]))) if pd.notna(row["Init Value"]) else "0"
-                    })
-        except Exception as e:
-            self.__console.warning(f"Failed to load CAN protocol from Excel: {e}. Using fallback signals.")
-            
-        if not self.__can_signals_isc:
-            # fallback signals from can_protocol.xlsx for ISC
-            fallback_isc = [
-                {"signal_name": "MasterStatus", "start_bit": "0", "len_bit": "2", "init_value": "0", "value_table_enum": "0x0=Init \n0x1=Normal\n0x2=Error\n0x3=Reserved"},
-                {"signal_name": "ISC_OperatingCASE", "start_bit": "2", "len_bit": "4", "init_value": "0", "value_table_enum": "0x0=CASE0\n0x1=CASE1\n0x2=CASE1_1\n0x3=CASE1_2\n0x4=CASE1_3\n0x5=CASE2\n0x6=CASE3\n0x7=CASE4\n0x8 ~ 0xF = Reserved"},
-                {"signal_name": "FaultClearReq", "start_bit": "7", "len_bit": "1", "init_value": "1", "value_table_enum": "0x0=Normal\n0x1=Clear (pulse: 1 frame SET → auto CLEAR)"},
-                {"signal_name": "ISC_DMS_Enable", "start_bit": "8", "len_bit": "1", "init_value": "1", "value_table_enum": "0x0=Disable\n0x1=Enable"},
-                {"signal_name": "ISC_DMS_State", "start_bit": "9", "len_bit": "2", "init_value": "0", "value_table_enum": "0x0=Init\n0x1=Inactive\n0x2=Active\n0x3=Fault"},
-                {"signal_name": "ISC_DMS_DriverPresent", "start_bit": "11", "len_bit": "2", "init_value": "0", "value_table_enum": "0x0=Unknown\n0x1=High\n0x2=Moderate\n0x3=Low"},
-                {"signal_name": "ISC_Ridar1_Passenger1_Status", "start_bit": "16", "len_bit": "1", "init_value": "0", "value_table_enum": "0x0=Inactive\n0x1=Active"},
-                {"signal_name": "ISC_Ridar1_Passenger2_Status", "start_bit": "17", "len_bit": "1", "init_value": "0", "value_table_enum": "0x0=Inactive\n0x1=Active"},
-                {"signal_name": "ISC_Ridar1_FaultStatus", "start_bit": "18", "len_bit": "1", "init_value": "0", "value_table_enum": "0x0=Normal\n0x1=Error"},
-                {"signal_name": "ISC_Ridar2_Passenger3_Status", "start_bit": "19", "len_bit": "1", "init_value": "0", "value_table_enum": "0x0=Inactive\n0x1=Active"},
-                {"signal_name": "ISC_Ridar2_Passenger4_Status", "start_bit": "20", "len_bit": "1", "init_value": "0", "value_table_enum": "0x0=Inactive\n0x1=Active"},
-                {"signal_name": "ISC_Ridar2_FaultStatus", "start_bit": "21", "len_bit": "1", "init_value": "0", "value_table_enum": "0x0=Normal\n0x1=Error"},
-                {"signal_name": "ISC_STR_FoldState", "start_bit": "24", "len_bit": "3", "init_value": "0", "value_table_enum": "0x0=Folded\n0x1=Unfolded\n0x2=Folding\n0x3=Unfolding\n0x4=Error\n0x5 ~ 0x7=Reserved"},
-                {"signal_name": "ISC_Seat_ModeFeedback", "start_bit": "32", "len_bit": "3", "init_value": "0", "value_table_enum": "0x0=Normal\n0x1=Drive\n0x2=InOut\n0x3=Conversation\n0x4=Meet\n0x5=Relax\n0x6=Done\n0x7=Reserved"},
-                {"signal_name": "ISC_Seat_MotorMoving", "start_bit": "35", "len_bit": "1", "init_value": "0", "value_table_enum": "0x0=Idle\n0x1=Moving"},
-                {"signal_name": "ISC_Seat_FaultFlag", "start_bit": "36", "len_bit": "2", "init_value": "0", "value_table_enum": "0x0=Normal\n0x1=DRV_FAULT\n0x2=PAS_FAULT\n0x3=Reserved"},
-                {"signal_name": "ISC_MoodLampIDFeedback", "start_bit": "40", "len_bit": "5", "init_value": "0", "value_table_enum": "0x0=None \n0x1=Cockpit \n0x2=Doortrim\n0x3=Reserved \n0x4=Roof\n0x5=Reserved \n0x6=Reserved \n0x7=Reserved \n0x8=A_Pillar\n0x9~0xF=Reserved\n0x10=Seatback\n0x11~0x1F=Reserved"},
-                {"signal_name": "ISC_MoodLampState", "start_bit": "45", "len_bit": "4", "init_value": "0", "value_table_enum": "0x0=None\n0x1=Work\n0x2=Relax\n0x3=Media\n0x4=Meal\n0x5=Conversation\n0x6=Fear_Surprise\n0x7=Sadness\n0x8=Caution\n0x9=Warning\n0xA~0xF=Reserved"},
-                {"signal_name": "ISC_TC_DisplayState", "start_bit": "56", "len_bit": "2", "init_value": "0", "value_table_enum": "0x0=Off\n0x1=On\n0x2=Standby\n0x3=Reserved"},
-                {"signal_name": "ISC_TC_FaultStatus", "start_bit": "58", "len_bit": "1", "init_value": "0", "value_table_enum": "0x0=Normal\n0x1=Error"}
-            ]
-            for sig in fallback_isc:
-                self.__can_signals_isc.append({
-                    "signal_name": sig["signal_name"],
-                    "start_bit": sig["start_bit"],
-                    "len_bit": sig["len_bit"],
-                    "init_value": sig["init_value"],
-                    "value_table_enum": sig["value_table_enum"]
-                })
-                
-        if not self.__can_signals_dms:
-            # fallback signals for STS_DMS_1000ms
-            fallback_dms = [
-                {"signal_name": "DMS_State", "start_bit": "0", "len_bit": "2", "init_value": "0", "value_table_enum": "0x0=Init\n0x1=Inactive\n0x2=Active\n0x3=Fault"},
-                {"signal_name": "DMS_DriverPresent", "start_bit": "2", "len_bit": "2", "init_value": "0", "value_table_enum": "0x0=Unknown\n0x1=High\n0x2=Moderate\n0x3=Low"}
-            ]
-            for sig in fallback_dms:
-                self.__can_signals_dms.append({
-                    "signal_name": sig["signal_name"],
-                    "start_bit": sig["start_bit"],
-                    "len_bit": sig["len_bit"],
-                    "init_value": sig["init_value"],
-                    "value_table_enum": sig["value_table_enum"]
-                })
+
+        fallback_isc = [
+            {"signal_name": "MasterStatus", "start_bit": "0", "len_bit": "2", "init_value": "0", "value_table_enum": "0x0=Init \n0x1=Normal\n0x2=Error\n0x3=Reserved"},
+            {"signal_name": "ISC_OperatingCASE", "start_bit": "2", "len_bit": "4", "init_value": "0", "value_table_enum": "0x0=CASE0\n0x1=CASE1\n0x2=CASE1_1\n0x3=CASE1_2\n0x4=CASE1_3\n0x5=CASE2\n0x6=CASE3\n0x7=CASE4\n0x8 ~ 0xF = Reserved"},
+            {"signal_name": "FaultClearReq", "start_bit": "7", "len_bit": "1", "init_value": "1", "value_table_enum": "0x0=Normal\n0x1=Clear (pulse: 1 frame SET → auto CLEAR)"},
+            {"signal_name": "ISC_DMS_Enable", "start_bit": "8", "len_bit": "1", "init_value": "1", "value_table_enum": "0x0=Disable\n0x1=Enable"},
+            {"signal_name": "ISC_DMS_State", "start_bit": "9", "len_bit": "2", "init_value": "0", "value_table_enum": "0x0=Init\n0x1=Inactive\n0x2=Active\n0x3=Fault"},
+            {"signal_name": "ISC_DMS_DriverPresent", "start_bit": "11", "len_bit": "2", "init_value": "0", "value_table_enum": "0x0=Unknown\n0x1=High\n0x2=Moderate\n0x3=Low"},
+            {"signal_name": "ISC_Ridar1_Passenger1_Status", "start_bit": "16", "len_bit": "1", "init_value": "0", "value_table_enum": "0x0=Inactive\n0x1=Active"},
+            {"signal_name": "ISC_Ridar1_Passenger2_Status", "start_bit": "17", "len_bit": "1", "init_value": "0", "value_table_enum": "0x0=Inactive\n0x1=Active"},
+            {"signal_name": "ISC_Ridar1_FaultStatus", "start_bit": "18", "len_bit": "1", "init_value": "0", "value_table_enum": "0x0=Normal\n0x1=Error"},
+            {"signal_name": "ISC_Ridar2_Passenger3_Status", "start_bit": "19", "len_bit": "1", "init_value": "0", "value_table_enum": "0x0=Inactive\n0x1=Active"},
+            {"signal_name": "ISC_Ridar2_Passenger4_Status", "start_bit": "20", "len_bit": "1", "init_value": "0", "value_table_enum": "0x0=Inactive\n0x1=Active"},
+            {"signal_name": "ISC_Ridar2_FaultStatus", "start_bit": "21", "len_bit": "1", "init_value": "0", "value_table_enum": "0x0=Normal\n0x1=Error"},
+            {"signal_name": "ISC_STR_FoldState", "start_bit": "24", "len_bit": "3", "init_value": "0", "value_table_enum": "0x0=Folded\n0x1=Unfolded\n0x2=Folding\n0x3=Unfolding\n0x4=Error\n0x5 ~ 0x7=Reserved"},
+            {"signal_name": "ISC_Seat_ModeFeedback", "start_bit": "32", "len_bit": "3", "init_value": "0", "value_table_enum": "0x0=Normal\n0x1=Drive\n0x2=InOut\n0x3=Conversation\n0x4=Meet\n0x5=Relax\n0x6=Done\n0x7=Reserved"},
+            {"signal_name": "ISC_Seat_MotorMoving", "start_bit": "35", "len_bit": "1", "init_value": "0", "value_table_enum": "0x0=Idle\n0x1=Moving"},
+            {"signal_name": "ISC_Seat_FaultFlag", "start_bit": "36", "len_bit": "2", "init_value": "0", "value_table_enum": "0x0=Normal\n0x1=DRV_FAULT\n0x2=PAS_FAULT\n0x3=Reserved"},
+            {"signal_name": "ISC_MoodLampIDFeedback", "start_bit": "40", "len_bit": "5", "init_value": "0", "value_table_enum": "0x0=None \n0x1=Cockpit \n0x2=Doortrim\n0x3=Reserved \n0x4=Roof\n0x5=Reserved \n0x6=Reserved \n0x7=Reserved \n0x8=A_Pillar\n0x9~0xF=Reserved\n0x10=Seatback\n0x11~0x1F=Reserved"},
+            {"signal_name": "ISC_MoodLampState", "start_bit": "45", "len_bit": "4", "init_value": "0", "value_table_enum": "0x0=None\n0x1=Work\n0x2=Relax\n0x3=Media\n0x4=Meal\n0x5=Conversation\n0x6=Fear_Surprise\n0x7=Sadness\n0x8=Caution\n0x9=Warning\n0xA~0xF=Reserved"},
+            {"signal_name": "ISC_TC_DisplayState", "start_bit": "56", "len_bit": "2", "init_value": "0", "value_table_enum": "0x0=Off\n0x1=On\n0x2=Standby\n0x3=Reserved"},
+            {"signal_name": "ISC_TC_FaultStatus", "start_bit": "58", "len_bit": "1", "init_value": "0", "value_table_enum": "0x0=Normal\n0x1=Error"}
+        ]
+        for sig in fallback_isc:
+            self.__can_signals_isc.append({
+                "signal_name": sig["signal_name"],
+                "start_bit": sig["start_bit"],
+                "len_bit": sig["len_bit"],
+                "init_value": sig["init_value"],
+                "value_table_enum": sig["value_table_enum"]
+            })
+
+        fallback_dms = [
+            {"signal_name": "DMS_State", "start_bit": "0", "len_bit": "2", "init_value": "0", "value_table_enum": "0x0=Init\n0x1=Inactive\n0x2=Active\n0x3=Fault"},
+            {"signal_name": "DMS_DriverPresent", "start_bit": "2", "len_bit": "2", "init_value": "0", "value_table_enum": "0x0=Unknown\n0x1=High\n0x2=Moderate\n0x3=Low"}
+        ]
+        for sig in fallback_dms:
+            self.__can_signals_dms.append({
+                "signal_name": sig["signal_name"],
+                "start_bit": sig["start_bit"],
+                "len_bit": sig["len_bit"],
+                "init_value": sig["init_value"],
+                "value_table_enum": sig["value_table_enum"]
+            })
                 
         # Parse enums for each signal
         for sig in self.__can_signals_isc:
@@ -508,7 +470,7 @@ class AppWindow(QMainWindow):
             item_raw.setFlags(item_raw.flags() & ~editable_flag)
             table.setItem(row_idx, 2, item_raw)
 
-    def on_update_can_message(self, msg):
+    def on_update_can_ch0_out(self, msg):
         msg_id = msg.get("id")
         data_bytes = msg.get("data", [])
         if not data_bytes:
@@ -629,6 +591,6 @@ class AppWindow(QMainWindow):
                 
         self.__console.info(f"Force Update - DMS State: {state_text}, Driver Readiness: {readiness_text}")
 
-    def on_update_can_ch0_out(self, msg):
+    def on_update_can_ch0_in(self, msg):
         # Basic structure for data integration
-        self.__console.info(f"Received can_ch0_out data: {msg}")
+        self.__console.info(f"Received can_ch0_in data: {msg}")
