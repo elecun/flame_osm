@@ -17,6 +17,9 @@ bool osm_monolithic_inference::onInit(){
     try{
         const json& parameters = getProfile()->parameters();
         
+        _show_info = parameters.value("show_info", true);
+        logger::info("[{}] Show info parameter: {}", getName(), _show_info);
+
         std::string model_path = "bin/x86_64/models/yolo11n-face.pt";
         int gpu_id = 0;
         if (parameters.contains("face_detection")) {
@@ -24,6 +27,11 @@ bool osm_monolithic_inference::onInit(){
             model_path = fd_params.value("model_path", model_path);
             gpu_id = fd_params.value("gpu_id", gpu_id);
             _nms_threshold = fd_params.value("nms", _nms_threshold);
+            if (fd_params.contains("padding") && fd_params["padding"].is_array() && fd_params["padding"].size() == 2) {
+                _padding_w = fd_params["padding"][0].get<float>();
+                _padding_h = fd_params["padding"][1].get<float>();
+                logger::info("[{}] Loaded face detection padding: w={}, h={}", getName(), _padding_w, _padding_h);
+            }
         }
 
         std::string body_model_path = "bin/x86_64/models/yolo26m-pose.torchscript";
@@ -150,7 +158,7 @@ void osm_monolithic_inference::onData(flame::component::ZData& data){
 void osm_monolithic_inference::_inference_process() {
     logger::info("[{}] Inference worker thread started", getName());
 
-    std::vector<int> encode_params = {cv::IMWRITE_JPEG_QUALITY, 80};
+    std::vector<int> encode_params = {cv::IMWRITE_JPEG_QUALITY, 100};
     auto last_time_1 = std::chrono::high_resolution_clock::now();
     auto last_time_2 = std::chrono::high_resolution_clock::now();
 
@@ -173,18 +181,37 @@ void osm_monolithic_inference::_inference_process() {
                 logger::debug("[{}] Received Stream 1 Image - Size: {}x{}, Channels: {}, Type: {}", getName(), image.cols, image.rows, image.channels(), image.type());
 
                 try {
+                    auto proc_start = std::chrono::high_resolution_clock::now();
+
                     /* 1. Run YOLO11-Face detection */
-                    std::vector<cv::Rect> bboxes = _face_detector->process(image, _nms_threshold);
+                    std::vector<cv::Rect> bboxes = _face_detector->process(image, _nms_threshold, _padding_w, _padding_h);
 
                     /* 2. Run YOLO-Pose estimation */
                     std::vector<body_pose::PoseResult> poses = _body_pose_estimator->process(image, 0.5f, 0.45f);
 
-                    /* 3. Draw face bounding boxes on the image */
-                    for (const auto& box : bboxes) {
-                        cv::rectangle(image, box, cv::Scalar(0, 255, 0), 3);
+                    /* 3. Resize if target monitor resolution is defined */
+                    cv::Mat out_image;
+                    if (_has_target_resolution && (_target_width != image.cols || _target_height != image.rows)) {
+                        cv::resize(image, out_image, cv::Size(_target_width, _target_height), 0, 0, cv::INTER_LINEAR);
+                    } else {
+                        out_image = image;
                     }
 
-                    /* 4. Draw body poses on the image (limbs & body only) */
+                    float scale_x = (float)out_image.cols / image.cols;
+                    float scale_y = (float)out_image.rows / image.rows;
+
+                    /* 4. Draw face bounding boxes on the resized out_image */
+                    for (const auto& box : bboxes) {
+                        cv::Rect scaled_box(
+                            box.x * scale_x,
+                            box.y * scale_y,
+                            box.width * scale_x,
+                            box.height * scale_y
+                        );
+                        cv::rectangle(out_image, scaled_box, cv::Scalar(0, 255, 0), 3);
+                    }
+
+                    /* 5. Draw body poses on the resized out_image (limbs & body only) */
                     const std::vector<std::pair<int, int>> SKELETON_CONNECTIONS = {
                         {5, 6}, {5, 7}, {7, 9}, {6, 8}, {8, 10},
                         {5, 11}, {6, 12}, {11, 12},
@@ -192,15 +219,16 @@ void osm_monolithic_inference::_inference_process() {
                     };
 
                     for (const auto& pose : poses) {
-                        // Bounding box for person is removed as requested
-
                         // Draw skeleton connections
                         for (const auto& conn : SKELETON_CONNECTIONS) {
                             if (conn.first < (int)pose.keypoints.size() && conn.second < (int)pose.keypoints.size()) {
                                 const auto& kp1 = pose.keypoints[conn.first];
                                 const auto& kp2 = pose.keypoints[conn.second];
                                 if (kp1.confidence > 0.5f && kp2.confidence > 0.5f) {
-                                    cv::line(image, cv::Point(kp1.x, kp1.y), cv::Point(kp2.x, kp2.y), cv::Scalar(0, 255, 255), 2);
+                                    cv::line(out_image, 
+                                             cv::Point(kp1.x * scale_x, kp1.y * scale_y), 
+                                             cv::Point(kp2.x * scale_x, kp2.y * scale_y), 
+                                             cv::Scalar(0, 255, 255), 2);
                                 }
                             }
                         }
@@ -209,17 +237,36 @@ void osm_monolithic_inference::_inference_process() {
                         for (int k = 5; k < (int)pose.keypoints.size(); ++k) {
                             const auto& kpt = pose.keypoints[k];
                             if (kpt.confidence > 0.5f) {
-                                cv::circle(image, cv::Point(kpt.x, kpt.y), 4, cv::Scalar(0, 0, 255), -1);
+                                cv::circle(out_image, 
+                                           cv::Point(kpt.x * scale_x, kpt.y * scale_y), 
+                                           4, cv::Scalar(0, 0, 255), -1);
                             }
                         }
                     }
 
-                    /* 3. Resize if target monitor resolution is defined */
-                    cv::Mat out_image;
-                    if (_has_target_resolution && (_target_width != image.cols || _target_height != image.rows)) {
-                        cv::resize(image, out_image, cv::Size(_target_width, _target_height), 0, 0, cv::INTER_LINEAR);
-                    } else {
-                        out_image = image;
+                    // Calculate FPS
+                    auto now = std::chrono::high_resolution_clock::now();
+                    double elapsed = std::chrono::duration<double>(now - last_time_1).count();
+                    last_time_1 = now;
+                    double fps = (elapsed > 0) ? (1.0 / elapsed) : 0.0;
+
+                    if (_show_info) {
+                        auto now_sys = std::chrono::system_clock::now();
+                        auto time_t_now = std::chrono::system_clock::to_time_t(now_sys);
+                        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now_sys.time_since_epoch()) % 1000;
+                        std::tm tm_now;
+                        localtime_r(&time_t_now, &tm_now);
+                        char time_str[64];
+                        std::strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm_now);
+                        char ms_str[8];
+                        snprintf(ms_str, sizeof(ms_str), "%03d", (int)ms.count());
+                        std::string datetime_str = std::string(time_str) + "." + ms_str;
+
+                        char fps_str[32];
+                        snprintf(fps_str, sizeof(fps_str), "%.1f", fps);
+
+                        cv::putText(out_image, datetime_str, cv::Point(5, 20), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+                        cv::putText(out_image, fps_str, cv::Point(540, 20), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0, 0, 255), 1, cv::LINE_AA);
                     }
 
                     /* 4. Encode as JPEG */
@@ -231,14 +278,8 @@ void osm_monolithic_inference::_inference_process() {
                         tag["width"] = out_image.cols;
                         tag["height"] = out_image.rows;
                         tag["type"] = out_image.type();
-                        tag["timestamp"] = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            std::chrono::system_clock::now().time_since_epoch()).count();
+                        tag["timestamp"] = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
                         tag["cam_channel"] = 1;
-
-                        auto now = std::chrono::high_resolution_clock::now();
-                        double elapsed = std::chrono::duration<double>(now - last_time_1).count();
-                        last_time_1 = now;
-                        double fps = (elapsed > 0) ? (1.0 / elapsed) : 0.0;
                         tag["fps"] = fps;
 
                         /* 6. Send multipart message */
@@ -253,6 +294,10 @@ void osm_monolithic_inference::_inference_process() {
                             logger::debug("[{}] Successfully dispatched processed image 1", getName());
                         }
                     }
+
+                    auto proc_end = std::chrono::high_resolution_clock::now();
+                    double proc_elapsed = std::chrono::duration<double, std::milli>(proc_end - proc_start).count();
+                    logger::info("[{}] Stream 1 inference worker thread loop execution time: {} ms", getName(), proc_elapsed);
                 } catch (const std::exception& e) {
                     logger::error("[{}] Error in stream 1 inference: {}", getName(), e.what());
                 }
@@ -271,17 +316,13 @@ void osm_monolithic_inference::_inference_process() {
                     _latest_image_2.release();
                 }
 
-                logger::info("[{}] Received Stream 2 Image - Size: {}x{}, Channels: {}, Type: {}", 
-                             getName(), image.cols, image.rows, image.channels(), image.type());
+                logger::info("[{}] Received Stream 2 Image - Size: {}x{}, Channels: {}, Type: {}", getName(), image.cols, image.rows, image.channels(), image.type());
 
                 try {
-                    /* 1. Run YOLO11-Face detection */
-                    std::vector<cv::Rect> bboxes = _face_detector->process(image, _nms_threshold);
+                    auto proc_start = std::chrono::high_resolution_clock::now();
 
-                    /* 2. Draw bounding boxes on the image */
-                    for (const auto& box : bboxes) {
-                        cv::rectangle(image, box, cv::Scalar(0, 255, 0), 3);
-                    }
+                    /* 1. Run YOLO11-Face detection */
+                    std::vector<cv::Rect> bboxes = _face_detector->process(image, _nms_threshold, _padding_w, _padding_h);
 
                     /* 3. Resize if target monitor resolution is defined */
                     cv::Mat out_image;
@@ -289,6 +330,45 @@ void osm_monolithic_inference::_inference_process() {
                         cv::resize(image, out_image, cv::Size(_target_width, _target_height), 0, 0, cv::INTER_LINEAR);
                     } else {
                         out_image = image;
+                    }
+
+                    float scale_x = (float)out_image.cols / image.cols;
+                    float scale_y = (float)out_image.rows / image.rows;
+
+                    /* 2. Draw bounding boxes on the resized out_image */
+                    for (const auto& box : bboxes) {
+                        cv::Rect scaled_box(
+                            box.x * scale_x,
+                            box.y * scale_y,
+                            box.width * scale_x,
+                            box.height * scale_y
+                        );
+                        cv::rectangle(out_image, scaled_box, cv::Scalar(0, 255, 0), 2);
+                    }
+
+                    // Calculate FPS
+                    auto now = std::chrono::high_resolution_clock::now();
+                    double elapsed = std::chrono::duration<double>(now - last_time_2).count();
+                    last_time_2 = now;
+                    double fps = (elapsed > 0) ? (1.0 / elapsed) : 0.0;
+
+                    if (_show_info) {
+                        auto now_sys = std::chrono::system_clock::now();
+                        auto time_t_now = std::chrono::system_clock::to_time_t(now_sys);
+                        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now_sys.time_since_epoch()) % 1000;
+                        std::tm tm_now;
+                        localtime_r(&time_t_now, &tm_now);
+                        char time_str[64];
+                        std::strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm_now);
+                        char ms_str[8];
+                        snprintf(ms_str, sizeof(ms_str), "%03d", (int)ms.count());
+                        std::string datetime_str = std::string(time_str) + "." + ms_str;
+
+                        char fps_str[32];
+                        snprintf(fps_str, sizeof(fps_str), "%.1f", fps);
+
+                        cv::putText(out_image, datetime_str, cv::Point(5, 30), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+                        cv::putText(out_image, fps_str, cv::Point(380, 30), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 255), 1, cv::LINE_AA);
                     }
 
                     /* 4. Encode as JPEG */
@@ -300,14 +380,8 @@ void osm_monolithic_inference::_inference_process() {
                         tag["width"] = out_image.cols;
                         tag["height"] = out_image.rows;
                         tag["type"] = out_image.type();
-                        tag["timestamp"] = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            std::chrono::system_clock::now().time_since_epoch()).count();
+                        tag["timestamp"] = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
                         tag["cam_channel"] = 2;
-
-                        auto now = std::chrono::high_resolution_clock::now();
-                        double elapsed = std::chrono::duration<double>(now - last_time_2).count();
-                        last_time_2 = now;
-                        double fps = (elapsed > 0) ? (1.0 / elapsed) : 0.0;
                         tag["fps"] = fps;
 
                         /* 6. Send multipart message */
@@ -322,6 +396,10 @@ void osm_monolithic_inference::_inference_process() {
                             logger::info("[{}] Successfully dispatched processed image 2", getName());
                         }
                     }
+
+                    auto proc_end = std::chrono::high_resolution_clock::now();
+                    double proc_elapsed = std::chrono::duration<double, std::milli>(proc_end - proc_start).count();
+                    logger::info("[{}] Stream 2 inference worker thread loop execution time: {} ms", getName(), proc_elapsed);
                 } catch (const std::exception& e) {
                     logger::error("[{}] Error in stream 2 inference: {}", getName(), e.what());
                 }
@@ -352,3 +430,4 @@ cv::Mat osm_monolithic_inference::getLatestImage2() {
     std::lock_guard<std::mutex> lock(_img_mutex_2);
     return _latest_image_2.clone();
 }
+

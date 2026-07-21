@@ -2,7 +2,6 @@
 #include <flame/log.hpp>
 #include <filesystem>
 #include <algorithm>
-
 namespace fs = std::filesystem;
 
 face_detection::face_detection() {}
@@ -45,7 +44,7 @@ bool face_detection::loadModel(const std::string& model_path, int gpu_id) {
     }
 }
 
-std::vector<cv::Rect> face_detection::process(const cv::Mat& image, float nms_threshold) {
+std::vector<cv::Rect> face_detection::process(const cv::Mat& image, float nms_threshold, float padding_w, float padding_h) {
     std::vector<cv::Rect> bboxes;
     if (image.empty()) {
         logger::warn("[FaceDetection] Input image is empty");
@@ -122,11 +121,19 @@ std::vector<cv::Rect> face_detection::process(const cv::Mat& image, float nms_th
                 float width = w * scale_x;
                 float height = h * scale_y;
 
+                // Apply padding based on center of current bounding box
+                float pad_x = width * padding_w;
+                float pad_y = height * padding_h;
+                float new_x1 = x1 - pad_x / 2.0f;
+                float new_y1 = y1 - pad_y / 2.0f;
+                float new_width = width + pad_x;
+                float new_height = height + pad_y;
+
                 cv::Rect bbox(
-                    std::max(0.0f, x1),
-                    std::max(0.0f, y1),
-                    std::max(0.0f, width),
-                    std::max(0.0f, height)
+                    std::max(0.0f, new_x1),
+                    std::max(0.0f, new_y1),
+                    std::max(0.0f, new_width),
+                    std::max(0.0f, new_height)
                 );
 
                 bbox = bbox & cv::Rect(0, 0, image.cols, image.rows);

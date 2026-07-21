@@ -2,7 +2,6 @@
 #include <flame/log.hpp>
 #include <filesystem>
 #include <algorithm>
-
 namespace fs = std::filesystem;
 
 body_pose_estimation::body_pose_estimation() {}

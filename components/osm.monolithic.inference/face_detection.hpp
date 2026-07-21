@@ -16,7 +16,7 @@ public:
     bool loadModel(const std::string& model_path, int gpu_id = 0);
 
     // Process image and return bounding boxes
-    std::vector<cv::Rect> process(const cv::Mat& image, float nms_threshold = 0.45f);
+    std::vector<cv::Rect> process(const cv::Mat& image, float nms_threshold = 0.45f, float padding_w = 0.0f, float padding_h = 0.0f);
 
 private:
     torch::jit::script::Module _module;

@@ -69,6 +69,9 @@ class osm_monolithic_inference : public flame::component::Object {
         bool _enable_stream_1 = false;
         bool _enable_stream_2 = false;
         float _nms_threshold = 0.45f;
+        float _padding_w = 0.0f;
+        float _padding_h = 0.0f;
+        bool _show_info = true;
 };
 
 EXPORT_COMPONENT_API
