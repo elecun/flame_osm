@@ -216,7 +216,7 @@ void kvaser_can_interface::onData(flame::component::ZData& data)
 {
     try {
         string portname = data.from;
-        if (portname == "can_ch1_in") {
+        if (portname == "can_ch0_in") {
             if (data.size() > 0) {
                 zmq::message_t msg = data.pop();
                 string payload(static_cast<char*>(msg.data()), msg.size());
@@ -329,6 +329,24 @@ void kvaser_can_interface::_can_ch0_rcv_task()
                     } else {
                         logger::warn("[{}] Received ISC_01_10ms but DLC is {}", getName(), dlc);
                     }
+                }
+                // Dispatch received CAN frame on can_ch0_in data port
+                try {
+                    json can_json;
+                    can_json["id"] = id;
+                    can_json["dlc"] = dlc;
+                    can_json["flags"] = flags;
+                    can_json["timestamp"] = time;
+                    vector<uint8_t> frame_bytes(data, data + std::min((unsigned int)64, dlc));
+                    can_json["data"] = frame_bytes;
+
+                    flame::component::ZData zmsg;
+                    zmsg.addstr(can_json.dump());
+                    if (!dispatch("can_ch0_in", zmsg)) {
+                        logger::warn("[{}] Failed to dispatch CAN message to port can_ch0_in", getName());
+                    }
+                } catch (const std::exception& e) {
+                    logger::error("[{}] Error dispatching CAN message to can_ch0_in: {}", getName(), e.what());
                 }
             }
 

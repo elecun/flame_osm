@@ -17,16 +17,16 @@
             "socket_type": "pub",
             "queue_size": 1000
         },
-        "can_ch1_in": {
+        "can_ch0_in": {
             "transport": "tcp",
-            "host": "127.0.0.1",
+            "host": "192.168.100.91",
             "port": 5211,
-            "socket_type": "sub",
+            "socket_type": "pub",
             "queue_size": 100
         },
-        "can_ch1_out":{
+        "can_ch0_out":{
             "transport": "tcp",
-            "host": "127.0.0.1",
+            "host": "192.168.100.91",
             "port": 5212,
             "socket_type": "pub",
             "queue_size": 100

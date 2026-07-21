@@ -63,7 +63,7 @@ class AppWindow(QMainWindow):
         # module instance
         self.__video_image_subscriber = None
         self.__can_subscriber = None
-        self.__can_ch1_out_subscriber = None
+        self.__can_ch0_out_subscriber = None
         self.__processed_image_subscriber = None
 
         try:            
@@ -89,11 +89,11 @@ class AppWindow(QMainWindow):
                     self.__can_subscriber.can_message_received.connect(self.on_update_can_message)
                     self.__can_subscriber.start()
 
-                    can_ch1_conn = config.get("can_ch1_out_port", "tcp://192.168.100.91:5102")
-                    can_ch1_topic = config.get("can_ch1_out_topic", "can_ch1_out")
-                    self.__can_ch1_out_subscriber = CANMonitorSubscriber(self.__pipeline_context, connection=can_ch1_conn, topic=can_ch1_topic)
-                    self.__can_ch1_out_subscriber.can_message_received.connect(self.on_update_can_ch1_out)
-                    self.__can_ch1_out_subscriber.start()
+                    can_ch0_conn = config.get("can_ch0_out_port", "tcp://192.168.100.91:5102")
+                    can_ch0_topic = config.get("can_ch0_out_topic", "can_ch0_out")
+                    self.__can_ch0_out_subscriber = CANMonitorSubscriber(self.__pipeline_context, connection=can_ch0_conn, topic=can_ch0_topic)
+                    self.__can_ch0_out_subscriber.can_message_received.connect(self.on_update_can_ch0_out)
+                    self.__can_ch0_out_subscriber.start()
                 
                 # ui components event callback def.
                 if hasattr(self, 'chk_dms_enable'):
@@ -256,8 +256,8 @@ class AppWindow(QMainWindow):
         # close CAN subscriber
         if self.__can_subscriber:
             self.__can_subscriber.close()
-        if self.__can_ch1_out_subscriber:
-            self.__can_ch1_out_subscriber.close()
+        if self.__can_ch0_out_subscriber:
+            self.__can_ch0_out_subscriber.close()
 
         # close camera stream monitoring subscriber
         if len(self.__camera_image_subscriber_map.keys())>0:
@@ -576,6 +576,6 @@ class AppWindow(QMainWindow):
                 
         self.__console.info(f"Force Update - DMS State: {state_text}, Driver Readiness: {readiness_text}")
 
-    def on_update_can_ch1_out(self, msg):
+    def on_update_can_ch0_out(self, msg):
         # Basic structure for data integration
-        self.__console.info(f"Received can_ch1_out data: {msg}")
+        self.__console.info(f"Received can_ch0_out data: {msg}")
