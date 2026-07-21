@@ -20,10 +20,30 @@ bool osm_monolithic_inference::onInit(){
         _show_info = parameters.value("show_info", true);
         logger::info("[{}] Show info parameter: {}", getName(), _show_info);
 
-        std::string model_path = "bin/x86_64/models/yolo11n-face.pt";
+        /* Model parameters & use flags */
+        std::string model_path = "bin/x86_64/models/yolo11n-face.torchscript";
         int gpu_id = 0;
+
+        _use_face_det = true;
+        _use_landmark_2d = true;
+        _use_landmark_3d = true;
+        _use_body_pose = true;
+        _use_head_pose_2d = true;
+        _use_head_pose_3d = true;
+
+        if (parameters.contains("head_pose_estimation_from_2d")) {
+            const auto& hp_params = parameters["head_pose_estimation_from_2d"];
+            _use_head_pose_2d = hp_params.value("use", _use_head_pose_2d);
+        }
+
+        if (parameters.contains("head_pose_estimation_from_3d")) {
+            const auto& hp_params = parameters["head_pose_estimation_from_3d"];
+            _use_head_pose_3d = hp_params.value("use", _use_head_pose_3d);
+        }
+
         if (parameters.contains("face_detection")) {
             const auto& fd_params = parameters["face_detection"];
+            _use_face_det = fd_params.value("use", _use_face_det);
             model_path = fd_params.value("model_path", model_path);
             gpu_id = fd_params.value("gpu_id", gpu_id);
             _nms_threshold = fd_params.value("nms", _nms_threshold);
@@ -38,6 +58,7 @@ bool osm_monolithic_inference::onInit(){
         int body_gpu_id = 0;
         if (parameters.contains("body_pose_estimation")) {
             const auto& bp_params = parameters["body_pose_estimation"];
+            _use_body_pose = bp_params.value("use", _use_body_pose);
             body_model_path = bp_params.value("model_path", body_model_path);
             body_gpu_id = bp_params.value("gpu_id", body_gpu_id);
         }
@@ -46,8 +67,29 @@ bool osm_monolithic_inference::onInit(){
         int landmark_gpu_id = 0;
         if (parameters.contains("2d_face_landmark")) {
             const auto& fl_params = parameters["2d_face_landmark"];
+            _use_landmark_2d = fl_params.value("use", _use_landmark_2d);
             landmark_model_path = fl_params.value("model_path", landmark_model_path);
             landmark_gpu_id = fl_params.value("gpu_id", landmark_gpu_id);
+        }
+
+        std::string landmark_3d_model_path = "/home/osm/dev/flame_osm/bin/x86_64/models/face_alignment_3d_fan_cuda.torchscript";
+        int landmark_3d_gpu_id = 0;
+        if (parameters.contains("3d_face_landmark")) {
+            const auto& fl3d_params = parameters["3d_face_landmark"];
+            _use_landmark_3d = fl3d_params.value("use", _use_landmark_3d);
+            landmark_3d_model_path = fl3d_params.value("model_path", landmark_3d_model_path);
+            landmark_3d_gpu_id = fl3d_params.value("gpu_id", landmark_3d_gpu_id);
+        }
+
+        // Warnings for dependency checks
+        if (!_use_face_det && (_use_landmark_2d || _use_landmark_3d)) {
+            logger::warn("[{}] Face detection process is required for 2D/3D face landmark extraction, but face_detection 'use' is set to false!", getName());
+        }
+        if (_use_head_pose_2d && !_use_landmark_2d) {
+            logger::warn("[{}] 2D Head pose estimation is enabled, but 2d_face_landmark 'use' is set to false!", getName());
+        }
+        if (_use_head_pose_3d && !_use_landmark_3d) {
+            logger::warn("[{}] 3D Head pose estimation is enabled, but 3d_face_landmark 'use' is set to false!", getName());
         }
 
         /* Set stream enable flags from parameters */
@@ -81,25 +123,57 @@ bool osm_monolithic_inference::onInit(){
             }
         }
 
-        _face_detector = std::make_unique<face_detection>();
-        if (!_face_detector->loadModel(model_path, gpu_id)) {
-            logger::error("[{}] Failed to load face detection model: {}", getName(), model_path);
-            return false;
+        /* Conditional Model Loading */
+        if (_use_face_det) {
+            _face_detector = std::make_unique<face_detection>();
+            if (!_face_detector->loadModel(model_path, gpu_id)) {
+                logger::error("[{}] Failed to load face detection model: {}", getName(), model_path);
+                return false;
+            }
         }
 
-        _body_pose_estimator = std::make_unique<body_pose_estimation>();
-        if (!_body_pose_estimator->loadModel(body_model_path, body_gpu_id)) {
-            logger::error("[{}] Failed to load body pose estimation model: {}", getName(), body_model_path);
-            return false;
+        if (_use_body_pose) {
+            _body_pose_estimator = std::make_unique<body_pose_estimation>();
+            if (!_body_pose_estimator->loadModel(body_model_path, body_gpu_id)) {
+                logger::error("[{}] Failed to load body pose estimation model: {}", getName(), body_model_path);
+                return false;
+            }
         }
 
-        _face_landmark_2d = std::make_unique<face_landmark_2d>();
-        if (!_face_landmark_2d->loadModel(landmark_model_path, landmark_gpu_id)) {
-            logger::error("[{}] Failed to load 2D face landmark model: {}", getName(), landmark_model_path);
-            return false;
+        if (_use_landmark_2d) {
+            _face_landmark_2d = std::make_unique<face_landmark_2d>();
+            if (!_face_landmark_2d->loadModel(landmark_model_path, landmark_gpu_id)) {
+                logger::error("[{}] Failed to load 2D face landmark model: {}", getName(), landmark_model_path);
+                return false;
+            }
         }
 
-        _head_pose_estimator = std::make_unique<head_pose_estimation>();
+        if (_use_landmark_3d) {
+            _face_landmark_3d = std::make_unique<face_landmark_3d>();
+            if (!_face_landmark_3d->loadModel(landmark_3d_model_path, landmark_3d_gpu_id)) {
+                logger::error("[{}] Failed to load 3D face landmark model: {}", getName(), landmark_3d_model_path);
+                return false;
+            }
+        }
+
+        std::string calib_path;
+        if (parameters.contains("camera_calibration") && parameters["camera_calibration"].is_string()) {
+            calib_path = parameters["camera_calibration"].get<std::string>();
+        }
+
+        if (_use_head_pose_2d) {
+            _head_pose_estimator_2d = std::make_unique<head_pose_estimation_from_2d>();
+            if (!calib_path.empty()) {
+                _head_pose_estimator_2d->loadCalibration(calib_path);
+            }
+        }
+
+        if (_use_head_pose_3d) {
+            _head_pose_estimator_3d = std::make_unique<head_pose_estimation_from_3d>();
+            if (!calib_path.empty()) {
+                _head_pose_estimator_3d->loadCalibration(calib_path);
+            }
+        }
 
         /* Start Inference thread */
         _worker_stop.store(false);
@@ -136,14 +210,29 @@ void osm_monolithic_inference::onClose(){
         logger::info("[{}] Face detector instance successfully released", getName());
     }
 
+    if (_body_pose_estimator) {
+        _body_pose_estimator.reset();
+        logger::info("[{}] Body pose estimator instance successfully released", getName());
+    }
+
     if (_face_landmark_2d) {
         _face_landmark_2d.reset();
         logger::info("[{}] Face landmark 2d instance successfully released", getName());
     }
 
-    if (_head_pose_estimator) {
-        _head_pose_estimator.reset();
-        logger::info("[{}] Head pose estimator instance successfully released", getName());
+    if (_face_landmark_3d) {
+        _face_landmark_3d.reset();
+        logger::info("[{}] Face landmark 3d instance successfully released", getName());
+    }
+
+    if (_head_pose_estimator_2d) {
+        _head_pose_estimator_2d.reset();
+        logger::info("[{}] 2D Head pose estimator instance successfully released", getName());
+    }
+
+    if (_head_pose_estimator_3d) {
+        _head_pose_estimator_3d.reset();
+        logger::info("[{}] 3D Head pose estimator instance successfully released", getName());
     }
 }
 
@@ -209,16 +298,31 @@ void osm_monolithic_inference::_inference_process() {
                 try {
                     auto proc_start = std::chrono::high_resolution_clock::now();
 
-                    /* 1. Run YOLO11-Face detection */
-                    std::vector<cv::Rect> bboxes = _face_detector->process(image, _nms_threshold, _padding_w, _padding_h);
+                    /* 1. Run YOLO11-Face detection (if enabled) */
+                    std::vector<cv::Rect> bboxes;
+                    if (_use_face_det && _face_detector) {
+                        bboxes = _face_detector->process(image, _nms_threshold, _padding_w, _padding_h);
+                    }
 
-                    /* 2. Run YOLO-Pose estimation */
-                    std::vector<body_pose::PoseResult> poses = _body_pose_estimator->process(image, 0.5f, 0.45f);
+                    /* 2. Run YOLO-Pose estimation (if enabled) */
+                    std::vector<body_pose::PoseResult> poses;
+                    if (_use_body_pose && _body_pose_estimator) {
+                        poses = _body_pose_estimator->process(image, 0.5f, 0.45f);
+                    }
 
-                    /* 3. Run FAN 2D Face Landmark estimation */
-                    std::vector<face_landmark::LandmarkResult> landmarks_2d = _face_landmark_2d->process(image, bboxes);
+                    /* 3. Run FAN 2D Face Landmark estimation (if enabled) */
+                    std::vector<face_landmark::LandmarkResult> landmarks_2d;
+                    if (_use_landmark_2d && _face_landmark_2d && !bboxes.empty()) {
+                        landmarks_2d = _face_landmark_2d->process(image, bboxes);
+                    }
 
-                    /* 4. Resize if target monitor resolution is defined */
+                    /* 4. Run FAN 3D Face Landmark estimation (if enabled) */
+                    std::vector<face_landmark_3d_ns::Landmark3DResult> landmarks_3d;
+                    if (_use_landmark_3d && _face_landmark_3d && !bboxes.empty()) {
+                        landmarks_3d = _face_landmark_3d->process(image, bboxes);
+                    }
+
+                    /* 5. Resize if target monitor resolution is defined */
                     cv::Mat out_image;
                     if (_has_target_resolution && (_target_width != image.cols || _target_height != image.rows)) {
                         cv::resize(image, out_image, cv::Size(_target_width, _target_height), 0, 0, cv::INTER_LINEAR);
@@ -229,37 +333,60 @@ void osm_monolithic_inference::_inference_process() {
                     float scale_x = (float)out_image.cols / image.cols;
                     float scale_y = (float)out_image.rows / image.rows;
 
-                    /* 5. Draw face bounding boxes on the resized out_image */
-                    for (const auto& box : bboxes) {
-                        cv::Rect scaled_box(
-                            box.x * scale_x,
-                            box.y * scale_y,
-                            box.width * scale_x,
-                            box.height * scale_y
-                        );
-                        cv::rectangle(out_image, scaled_box, cv::Scalar(0, 255, 0), 3);
+                    /* 6. Draw face bounding boxes on the resized out_image */
+                    if (_use_face_det) {
+                        for (const auto& box : bboxes) {
+                            cv::Rect scaled_box(
+                                box.x * scale_x,
+                                box.y * scale_y,
+                                box.width * scale_x,
+                                box.height * scale_y
+                            );
+                            cv::rectangle(out_image, scaled_box, cv::Scalar(0, 255, 0), 3);
+                        }
                     }
 
-                    /* 6. Draw 2D face landmarks and FAN crop region (RED Bounding Box) on out_image */
-                    for (const auto& res : landmarks_2d) {
-                        // Draw RED bounding box for the actual landmark detection area (FAN Crop Patch)
-                        cv::Rect scaled_crop_box(
-                            res.crop_bbox.x * scale_x,
-                            res.crop_bbox.y * scale_y,
-                            res.crop_bbox.width * scale_x,
-                            res.crop_bbox.height * scale_y
-                        );
-                        cv::rectangle(out_image, scaled_crop_box, cv::Scalar(0, 0, 255), 2);
+                    /* 7. Draw 2D face landmarks and FAN crop region (RED Bounding Box) on out_image */
+                    if (_use_landmark_2d) {
+                        for (const auto& res : landmarks_2d) {
+                            // Draw RED bounding box for the actual landmark detection area (FAN Crop Patch)
+                            cv::Rect scaled_crop_box(
+                                res.crop_bbox.x * scale_x,
+                                res.crop_bbox.y * scale_y,
+                                res.crop_bbox.width * scale_x,
+                                res.crop_bbox.height * scale_y
+                            );
+                            cv::rectangle(out_image, scaled_crop_box, cv::Scalar(0, 0, 255), 2);
 
-                        // Draw 68 landmark points
-                        for (const auto& pt : res.points) {
-                            cv::circle(out_image, cv::Point2f(pt.x * scale_x, pt.y * scale_y), 1, cv::Scalar(0, 255, 255), -1);
+                            // Draw 68 landmark points
+                            for (const auto& pt : res.points) {
+                                cv::circle(out_image, cv::Point2f(pt.x * scale_x, pt.y * scale_y), 1, cv::Scalar(0, 0, 255), -1);
+                            }
+
+                            // Estimate Head Pose using 68 2D landmarks (if head_pose_estimation_from_2d is enabled)
+                            if (_use_head_pose_2d && _head_pose_estimator_2d) {
+                                head_pose::PoseResult pose_res = _head_pose_estimator_2d->estimate(res.points, image.size());
+                                if (pose_res.success) {
+                                    _head_pose_estimator_2d->drawPoseAxes(out_image, pose_res, image.size(), scale_x, scale_y);
+                                }
+                            }
                         }
+                    }
 
-                        // Estimate Head Pose using 68 2D landmarks and draw 3D coordinate axes
-                        head_pose::PoseResult pose_res = _head_pose_estimator->estimate(res.points, image.size());
-                        if (pose_res.success) {
-                            _head_pose_estimator->drawPoseAxes(out_image, pose_res, image.size(), scale_x, scale_y);
+                    /* 8. Draw 3D face landmarks and estimate Head Pose from 3D points on out_image */
+                    if (_use_landmark_3d) {
+                        for (const auto& res : landmarks_3d) {
+                            for (const auto& pt : res.points_3d) {
+                                cv::circle(out_image, cv::Point2f(pt.x * scale_x, pt.y * scale_y), 1, cv::Scalar(0, 0, 255), -1);
+                            }
+
+                            // Estimate Head Pose using 68 3D landmarks (if head_pose_estimation_from_3d is enabled)
+                            if (_use_head_pose_3d && _head_pose_estimator_3d) {
+                                head_pose::PoseResult pose_res = _head_pose_estimator_3d->estimate(res.points_3d, image.size());
+                                if (pose_res.success) {
+                                    _head_pose_estimator_3d->drawPoseAxes(out_image, pose_res, image.size(), scale_x, scale_y);
+                                }
+                            }
                         }
                     }
 

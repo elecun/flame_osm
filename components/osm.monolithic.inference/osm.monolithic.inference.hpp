@@ -21,7 +21,9 @@
 #include "face_detection.hpp"
 #include "body_pose_estimation.hpp"
 #include "face_landmark_2d.hpp"
-#include "head_pose_estimation.hpp"
+#include "face_landmark_3d.hpp"
+#include "head_pose_estimation_from_2d.hpp"
+#include "head_pose_estimation_from_3d.hpp"
 
 using namespace std;
 using namespace flame::component;
@@ -63,8 +65,20 @@ class osm_monolithic_inference : public flame::component::Object {
         /* Face Landmark 2D Instance */
         std::unique_ptr<face_landmark_2d> _face_landmark_2d;
 
-        /* Head Pose Estimator Instance */
-        std::unique_ptr<head_pose_estimation> _head_pose_estimator;
+        /* Face Landmark 3D Instance */
+        std::unique_ptr<face_landmark_3d> _face_landmark_3d;
+
+        /* Head Pose Estimator Instances */
+        std::unique_ptr<head_pose_estimation_from_2d> _head_pose_estimator_2d;
+        std::unique_ptr<head_pose_estimation_from_3d> _head_pose_estimator_3d;
+
+        /* Model Execution Flags */
+        bool _use_face_det{true};
+        bool _use_landmark_2d{true};
+        bool _use_landmark_3d{true};
+        bool _use_body_pose{true};
+        bool _use_head_pose_2d{true};
+        bool _use_head_pose_3d{true};
 
         /* Thread Control */
         std::thread _inference_worker;
