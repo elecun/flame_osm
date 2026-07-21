@@ -48,6 +48,7 @@ class CANMonitorSubscriber(QThread):
                         payload = multipart[1].decode()
                         if topic == self.__topic:
                             msg = json.loads(payload)
+                            self.__console.info(f"<CAN Monitor> Received message [{topic}]: {msg}")
                             self.can_message_received.emit(msg)
             except zmq.ZMQError as e:
                 self.__console.error(f"<CAN Monitor> ZMQ Error: {e}")
