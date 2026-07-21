@@ -46,7 +46,7 @@ class CANMonitorSubscriber(QThread):
                     self.__console.info(f"<CAN Monitor> Raw multipart frames count={len(multipart)}: {multipart}")
                     if len(multipart) >= 2:
                         topic = multipart[0].decode()
-                        payload = multipart[1].decode()
+                        payload = multipart[-1].decode()
                         if topic == self.__topic:
                             msg = json.loads(payload)
                             self.__console.info(f"<CAN Monitor> Received message [{topic}]: {msg}")

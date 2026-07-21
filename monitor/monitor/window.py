@@ -562,3 +562,4 @@ class AppWindow(QMainWindow):
     def on_update_can_ch0_in(self, msg):
         # Basic structure for data integration
         self.__console.info(f"Received can_ch0_in data: {msg}")
+        self.on_update_can_ch0_out(msg)
