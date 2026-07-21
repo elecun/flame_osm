@@ -447,7 +447,7 @@ border-bottom-right-radius: 6px;</string>
       </widget>
      </item>
      <item>
-      <widget class="QLabel" name="lbl_dms_driver_present">
+      <widget class="QLabel" name="lbl_dms_driver_readiness">
        <property name="text">
         <string>DMS Driver Readiness</string>
        </property>

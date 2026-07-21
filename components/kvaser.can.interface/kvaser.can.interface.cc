@@ -412,12 +412,12 @@ void kvaser_can_interface::_can_ch0_rcv_task()
                         uint8_t fault_clear_req = (data[0] >> 7) & 0x01;
                         uint8_t dms_enable = data[1] & 0x01;
                         uint8_t dms_state = (data[1] >> 1) & 0x03;
-                        uint8_t dms_driver_present = (data[1] >> 3) & 0x03;
+                        uint8_t dms_driver_readiness = (data[1] >> 3) & 0x03;
 
                         logger::info("[{}] Received ISC_01_10ms: Raw: {}| MasterStatus: {}, CASE: {}, FaultClear: {}, "
                                      "DMS_Enable: {}, DMS_State: {}, DMS_DriverPresent: {}",
                                      getName(), oss.str(), master_status, operating_case, fault_clear_req, dms_enable,
-                                     dms_state, dms_driver_present);
+                                     dms_state, dms_driver_readiness);
                     } else {
                         logger::warn("[{}] Received ISC_01_10ms but DLC is {}", getName(), dlc);
                     }
