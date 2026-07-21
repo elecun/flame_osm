@@ -91,7 +91,7 @@ class AppWindow(QMainWindow):
 
                     can_ch0_in_conn = config.get("can_ch0_in", "tcp://192.168.100.91:5211")
                     can_ch0_in_topic = config.get("can_ch0_in_topic", "can_ch0_in")
-                    self.__can_ch0_in_subscriber = CANMonitorSubscriber(self.__pipeline_context, connection=can_ch0_in_conn, topic=can_ch0_can_ch0_in_topictopic)
+                    self.__can_ch0_in_subscriber = CANMonitorSubscriber(self.__pipeline_context, connection=can_ch0_in_conn, topic=can_ch0_in_topic)
                     self.__can_ch0_in_subscriber.can_message_received.connect(self.on_update_can_ch0_in)
                     self.__can_ch0_in_subscriber.start()
                 
@@ -266,6 +266,8 @@ class AppWindow(QMainWindow):
             self.__can_subscriber.close()
         if self.__can_ch0_out_subscriber:
             self.__can_ch0_out_subscriber.close()
+        if hasattr(self, '_AppWindow__can_ch0_in_subscriber') and self.__can_ch0_in_subscriber:
+            self.__can_ch0_in_subscriber.close()
 
         # close camera stream monitoring subscriber
         if len(self.__camera_image_subscriber_map.keys())>0:
