@@ -42,6 +42,14 @@ bool osm_monolithic_inference::onInit(){
             body_gpu_id = bp_params.value("gpu_id", body_gpu_id);
         }
 
+        std::string landmark_model_path = "/home/osm/dev/flame_osm/bin/x86_64/models/face_alignment_2d_fan_cuda.torchscript";
+        int landmark_gpu_id = 0;
+        if (parameters.contains("2d_face_landmark")) {
+            const auto& fl_params = parameters["2d_face_landmark"];
+            landmark_model_path = fl_params.value("model_path", landmark_model_path);
+            landmark_gpu_id = fl_params.value("gpu_id", landmark_gpu_id);
+        }
+
         /* Set stream enable flags from parameters */
         _enable_stream_1 = false;
         _enable_stream_2 = false;
@@ -85,6 +93,12 @@ bool osm_monolithic_inference::onInit(){
             return false;
         }
 
+        _face_landmark_2d = std::make_unique<face_landmark_2d>();
+        if (!_face_landmark_2d->loadModel(landmark_model_path, landmark_gpu_id)) {
+            logger::error("[{}] Failed to load 2D face landmark model: {}", getName(), landmark_model_path);
+            return false;
+        }
+
         /* Start Inference thread */
         _worker_stop.store(false);
         _inference_worker = std::thread(&osm_monolithic_inference::_inference_process, this);
@@ -118,6 +132,11 @@ void osm_monolithic_inference::onClose(){
     if (_face_detector) {
         _face_detector.reset();
         logger::info("[{}] Face detector instance successfully released", getName());
+    }
+
+    if (_face_landmark_2d) {
+        _face_landmark_2d.reset();
+        logger::info("[{}] Face landmark 2d instance successfully released", getName());
     }
 }
 
@@ -189,7 +208,10 @@ void osm_monolithic_inference::_inference_process() {
                     /* 2. Run YOLO-Pose estimation */
                     std::vector<body_pose::PoseResult> poses = _body_pose_estimator->process(image, 0.5f, 0.45f);
 
-                    /* 3. Resize if target monitor resolution is defined */
+                    /* 3. Run FAN 2D Face Landmark estimation */
+                    std::vector<face_landmark::LandmarkResult> landmarks_2d = _face_landmark_2d->process(image, bboxes);
+
+                    /* 4. Resize if target monitor resolution is defined */
                     cv::Mat out_image;
                     if (_has_target_resolution && (_target_width != image.cols || _target_height != image.rows)) {
                         cv::resize(image, out_image, cv::Size(_target_width, _target_height), 0, 0, cv::INTER_LINEAR);
@@ -200,7 +222,7 @@ void osm_monolithic_inference::_inference_process() {
                     float scale_x = (float)out_image.cols / image.cols;
                     float scale_y = (float)out_image.rows / image.rows;
 
-                    /* 4. Draw face bounding boxes on the resized out_image */
+                    /* 5. Draw face bounding boxes on the resized out_image */
                     for (const auto& box : bboxes) {
                         cv::Rect scaled_box(
                             box.x * scale_x,
@@ -211,7 +233,26 @@ void osm_monolithic_inference::_inference_process() {
                         cv::rectangle(out_image, scaled_box, cv::Scalar(0, 255, 0), 3);
                     }
 
-                    /* 5. Draw body poses on the resized out_image (limbs & body only) */
+                    /* 6. Draw 2D face landmarks and FAN crop region (RED Bounding Box) on out_image */
+                    for (const auto& res : landmarks_2d) {
+                        // Draw RED bounding box for the actual landmark detection area (FAN Crop Patch)
+                        cv::Rect scaled_crop_box(
+                            res.crop_bbox.x * scale_x,
+                            res.crop_bbox.y * scale_y,
+                            res.crop_bbox.width * scale_x,
+                            res.crop_bbox.height * scale_y
+                        );
+                        cv::rectangle(out_image, scaled_crop_box, cv::Scalar(0, 0, 255), 2);
+
+                        // Draw 68 landmark points
+                        for (const auto& pt : res.points) {
+                            cv::circle(out_image, 
+                                       cv::Point2f(pt.x * scale_x, pt.y * scale_y), 
+                                       2, cv::Scalar(0, 255, 255), -1);
+                        }
+                    }
+
+                    /* 7. Draw body poses on the resized out_image (limbs & body only) */
                     const std::vector<std::pair<int, int>> SKELETON_CONNECTIONS = {
                         {5, 6}, {5, 7}, {7, 9}, {6, 8}, {8, 10},
                         {5, 11}, {6, 12}, {11, 12},

@@ -20,6 +20,7 @@
 #include <opencv2/opencv.hpp>
 #include "face_detection.hpp"
 #include "body_pose_estimation.hpp"
+#include "face_landmark_2d.hpp"
 
 using namespace std;
 using namespace flame::component;
@@ -57,6 +58,9 @@ class osm_monolithic_inference : public flame::component::Object {
 
         /* Body Pose Estimator Instance */
         std::unique_ptr<body_pose_estimation> _body_pose_estimator;
+
+        /* Face Landmark 2D Instance */
+        std::unique_ptr<face_landmark_2d> _face_landmark_2d;
 
         /* Thread Control */
         std::thread _inference_worker;

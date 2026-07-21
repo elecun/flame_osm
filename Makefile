@@ -170,7 +170,7 @@ $(BUILDDIR)os.model.inference.o: $(CURRENT_DIR)/components/os.model.inference/os
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
 
 # OSM Monolithic Inference
-osm_monolithic_inference.comp: $(BUILDDIR)osm.monolithic.inference.o $(BUILDDIR)face_detection.o $(BUILDDIR)body_pose_estimation.o
+osm_monolithic_inference.comp: $(BUILDDIR)osm.monolithic.inference.o $(BUILDDIR)face_detection.o $(BUILDDIR)body_pose_estimation.o $(BUILDDIR)face_landmark_2d.o
 	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_process/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_dnn $(TORCH_LIB)
 
 $(BUILDDIR)osm.monolithic.inference.o: $(CURRENT_DIR)/components/osm.monolithic.inference/osm.monolithic.inference.cc
@@ -180,6 +180,9 @@ $(BUILDDIR)face_detection.o: $(CURRENT_DIR)/components/osm.monolithic.inference/
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
 
 $(BUILDDIR)body_pose_estimation.o: $(CURRENT_DIR)/components/osm.monolithic.inference/body_pose_estimation.cc
+	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
+
+$(BUILDDIR)face_landmark_2d.o: $(CURRENT_DIR)/components/osm.monolithic.inference/face_landmark_2d.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
 
 # Headpose Model Inference
