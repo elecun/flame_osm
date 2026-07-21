@@ -192,13 +192,27 @@ void kvaser_can_interface::onLoop()
         }
 
         try {
+            string state_str = "INIT";
+            switch (state) {
+                case DMSState::INIT: state_str = "INIT"; break;
+                case DMSState::INACTIVE: state_str = "INACTIVE"; break;
+                case DMSState::ACTIVE: state_str = "ACTIVE"; break;
+                case DMSState::FAULT: state_str = "FAULT"; break;
+            }
+
+            string readiness_str = "UNKNOWN";
+            switch (readiness) {
+                case DMSDriverReadiness::UNKNOWN: readiness_str = "UNKNOWN"; break;
+                case DMSDriverReadiness::HIGH: readiness_str = "HIGH"; break;
+                case DMSDriverReadiness::MODERATE: readiness_str = "MODERATE"; break;
+                case DMSDriverReadiness::LOW: readiness_str = "LOW"; break;
+            }
+
             json can_json;
-            can_json["id"] = 0x220;
-            can_json["dlc"] = 8;
-            can_json["flags"] = flags;
-            can_json["timestamp"] = 0;
-            vector<uint8_t> frame_bytes(tx_data, tx_data + 8);
-            can_json["data"] = frame_bytes;
+            can_json["dms_state"] = state_str;
+            can_json["dms_state_val"] = static_cast<int>(state);
+            can_json["dms_driver_readiness"] = readiness_str;
+            can_json["dms_driver_readiness_val"] = static_cast<int>(readiness);
 
             flame::component::ZData zmsg;
             zmsg.addstr(can_json.dump());

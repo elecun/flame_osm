@@ -446,6 +446,56 @@ class AppWindow(QMainWindow):
             table.setItem(row_idx, 2, item_raw)
 
     def on_update_can_ch0_out(self, msg):
+        if "dms_state" in msg or "dms_driver_readiness" in msg:
+            table = self.findChild(QTableWidget, "table_can_signals_dms")
+            if not table:
+                return
+            
+            if "dms_state" in msg:
+                val_str = str(msg.get("dms_state", ""))
+                val_raw = msg.get("dms_state_val", 0)
+                display_str = val_str.capitalize() if val_str else "Init"
+                
+                item_enum = table.item(0, 1)
+                if item_enum:
+                    item_enum.setText(display_str)
+                    lower_enum = display_str.lower()
+                    if "error" in lower_enum or "fault" in lower_enum:
+                        item_enum.setForeground(Qt.GlobalColor.red if hasattr(Qt, "GlobalColor") else Qt.red)
+                    elif any(word in lower_enum for word in ["normal", "active", "enable", "unfolded"]):
+                        item_enum.setForeground(Qt.GlobalColor.green if hasattr(Qt, "GlobalColor") else Qt.green)
+                    elif any(word in lower_enum for word in ["init", "moving", "folding", "unfolding"]):
+                        item_enum.setForeground(Qt.GlobalColor.yellow if hasattr(Qt, "GlobalColor") else Qt.yellow)
+                    else:
+                        item_enum.setForeground(Qt.GlobalColor.white if hasattr(Qt, "GlobalColor") else Qt.white)
+                
+                item_raw = table.item(0, 2)
+                if item_raw:
+                    item_raw.setText(str(val_raw))
+            
+            if "dms_driver_readiness" in msg:
+                val_str = str(msg.get("dms_driver_readiness", ""))
+                val_raw = msg.get("dms_driver_readiness_val", 0)
+                display_str = val_str.capitalize() if val_str else "Unknown"
+                
+                item_enum = table.item(1, 1)
+                if item_enum:
+                    item_enum.setText(display_str)
+                    lower_enum = display_str.lower()
+                    if "error" in lower_enum or "fault" in lower_enum:
+                        item_enum.setForeground(Qt.GlobalColor.red if hasattr(Qt, "GlobalColor") else Qt.red)
+                    elif any(word in lower_enum for word in ["normal", "active", "enable", "unfolded"]):
+                        item_enum.setForeground(Qt.GlobalColor.green if hasattr(Qt, "GlobalColor") else Qt.green)
+                    elif any(word in lower_enum for word in ["init", "moving", "folding", "unfolding"]):
+                        item_enum.setForeground(Qt.GlobalColor.yellow if hasattr(Qt, "GlobalColor") else Qt.yellow)
+                    else:
+                        item_enum.setForeground(Qt.GlobalColor.white if hasattr(Qt, "GlobalColor") else Qt.white)
+                        
+                item_raw = table.item(1, 2)
+                if item_raw:
+                    item_raw.setText(str(val_raw))
+            return
+
         msg_id = msg.get("id")
         data_bytes = msg.get("data", [])
         if not data_bytes:
