@@ -95,11 +95,20 @@ class AppWindow(QMainWindow):
                     self.__can_ch0_out_subscriber.can_message_received.connect(self.on_update_can_ch0_out)
                     self.__can_ch0_out_subscriber.start()
                 
-                # ui components event callback def.
+                # Populate list_dms_state and list_dms_driver_present from kvaser_can_interface.json
+                self.init_dms_controls()
+
                 if hasattr(self, 'chk_dms_enable'):
                     self.chk_dms_enable.stateChanged.connect(self.on_check_dms_enable)
                 if hasattr(self, 'btn_dms_update_force'):
                     self.btn_dms_update_force.clicked.connect(self.on_btn_dms_update_force)
+                    self.update_dms_force_button_state()
+                if hasattr(self, 'list_dms_state'):
+                    self.list_dms_state.itemSelectionChanged.connect(self.update_dms_force_button_state)
+                list_driver = getattr(self, 'list_dms_driver_present', getattr(self, 'list_dms_driver_readiness', None))
+                if list_driver:
+                    list_driver.itemSelectionChanged.connect(self.update_dms_force_button_state)
+
                 if hasattr(self, 'chk_option_show_frame_info'):
                     self.chk_option_show_frame_info.stateChanged.connect(self.on_check_option_show_frame_info)
                 if hasattr(self, 'chk_option_show_body_keypoints'):
@@ -555,6 +564,53 @@ class AppWindow(QMainWindow):
             if item_raw:
                 item_raw.setText(raw_str)
 
+    def init_dms_controls(self):
+        dms_state_enums = ["INIT", "INACTIVE", "ACTIVE", "FAULT"]
+        dms_readiness_options = ["UNKNOWN", "HIGH", "MODERATE", "LOW"]
+
+        json_path = os.path.join(self.__config.get("root_path", ""), "bin", "x86_64", "osm_can", "kvaser_can_interface.json")
+        if not os.path.exists(json_path):
+            json_path = os.path.join(self.__config.get("root_path", ""), "kvaser_can_interface.json")
+
+        if os.path.exists(json_path):
+            try:
+                with open(json_path, 'r') as f:
+                    data = json.load(f)
+                    params = data.get("parameters", {})
+                    if "dms_state_enums" in params:
+                        dms_state_enums = params["dms_state_enums"]
+                    if "dms_driver_readiness_enums" in params:
+                        dms_readiness_options = params["dms_driver_readiness_enums"]
+                self.__console.info(f"Loaded DMS options from {json_path}")
+            except Exception as e:
+                self.__console.warning(f"Failed to load DMS options from json: {e}")
+
+        if hasattr(self, 'list_dms_state'):
+            self.list_dms_state.clear()
+            for opt in dms_state_enums:
+                self.list_dms_state.addItem(str(opt))
+
+        list_driver = getattr(self, 'list_dms_driver_present', getattr(self, 'list_dms_driver_readiness', None))
+        if list_driver:
+            list_driver.clear()
+            for opt in dms_readiness_options:
+                list_driver.addItem(str(opt))
+
+    def update_dms_force_button_state(self):
+        if not hasattr(self, 'btn_dms_update_force'):
+            return
+
+        state_selected = False
+        if hasattr(self, 'list_dms_state') and self.list_dms_state.currentItem() is not None:
+            state_selected = True
+
+        readiness_selected = False
+        list_driver = getattr(self, 'list_dms_driver_present', getattr(self, 'list_dms_driver_readiness', None))
+        if list_driver and list_driver.currentItem() is not None:
+            readiness_selected = True
+
+        self.btn_dms_update_force.setEnabled(state_selected and readiness_selected)
+
     def on_check_dms_enable(self):
         if hasattr(self, 'chk_dms_enable'):
             enabled = self.chk_dms_enable.isChecked()
@@ -569,8 +625,9 @@ class AppWindow(QMainWindow):
             if current_item:
                 state_text = current_item.text()
                 
-        if hasattr(self, 'list_dms_driver_readiness'):
-            current_item = self.list_dms_driver_readiness.currentItem()
+        list_driver = getattr(self, 'list_dms_driver_present', getattr(self, 'list_dms_driver_readiness', None))
+        if list_driver:
+            current_item = list_driver.currentItem()
             if current_item:
                 readiness_text = current_item.text()
                 

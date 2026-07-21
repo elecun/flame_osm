@@ -7,7 +7,19 @@
         "can_bitrate_sample_point": 80,
         "can_fd_data_bitrate": 1000000,
         "can_fd_data_bitrate_sample_point": 75,
-        "enable_rx_task":false
+        "enable_ch0_in_monitor": false,
+        "dms_state_enums": [
+            "INIT",
+            "INACTIVE",
+            "ACTIVE",
+            "FAULT"
+        ],
+        "dms_driver_readiness_enums": [
+            "UNKNOWN",
+            "HIGH",
+            "MODERATE",
+            "LOW"
+        ]
     },
     "dataport": {
         "status": {
@@ -17,6 +29,13 @@
             "socket_type": "pub",
             "queue_size": 1000
         },
+        "can_ch0_control": {
+            "transport": "tcp",
+            "host": "192.168.100.91",
+            "port": 5210,
+            "socket_type": "sub",
+            "queue_size": 100
+        },
         "can_ch0_in": {
             "transport": "tcp",
             "host": "192.168.100.91",
@@ -24,7 +43,7 @@
             "socket_type": "pub",
             "queue_size": 100
         },
-        "can_ch0_out":{
+        "can_ch0_out": {
             "transport": "tcp",
             "host": "192.168.100.91",
             "port": 5212,

@@ -144,7 +144,7 @@ bool kvaser_can_interface::onInit()
 
             /* start background workers */
             _worker_stop.store(false);
-            if (parameters.value("enable_rx_task", false)) {
+            if (parameters.value("enable_ch0_in_monitor", false)) {
                 logger::info("[{}] Listen for CAN FD frames...", getName());
                 _can_ch0_rcv_worker = thread(&kvaser_can_interface::_can_ch0_rcv_task, this);
             }
