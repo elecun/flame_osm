@@ -173,10 +173,10 @@ void kvaser_can_interface::onLoop()
     }
 
     if (enable == DMSEnable::ENABLE) {
-        // Pack DMS_State and DMS_DriverPresent (readiness) into 0x220 message
+        // Pack DMS_State and DMS_DriverReadiness (readiness) into 0x220 message
         // STS_DMS_1000ms (0x220):
         // - DMS_State: Start Bit 0, Len 2
-        // - DMS_DriverPresent: Start Bit 2, Len 2
+        // - DMS_DriverReadiness: Start Bit 2, Len 2
         unsigned char tx_data[8] = {0};
         tx_data[0] = (static_cast<uint8_t>(state) & 0x03) | ((static_cast<uint8_t>(readiness) & 0x03) << 2);
 
@@ -415,7 +415,7 @@ void kvaser_can_interface::_can_ch0_rcv_task()
                         uint8_t dms_driver_readiness = (data[1] >> 3) & 0x03;
 
                         logger::info("[{}] Received ISC_01_10ms: Raw: {}| MasterStatus: {}, CASE: {}, FaultClear: {}, "
-                                     "DMS_Enable: {}, DMS_State: {}, DMS_DriverPresent: {}",
+                                     "DMS_Enable: {}, DMS_State: {}, DMS_DriverReadiness: {}",
                                      getName(), oss.str(), master_status, operating_case, fault_clear_req, dms_enable,
                                      dms_state, dms_driver_readiness);
                     } else {

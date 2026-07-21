@@ -310,7 +310,7 @@ class AppWindow(QMainWindow):
             {"signal_name": "FaultClearReq", "start_bit": "7", "len_bit": "1", "init_value": "1", "value_table_enum": "0x0=Normal\n0x1=Clear (pulse: 1 frame SET → auto CLEAR)"},
             {"signal_name": "ISC_DMS_Enable", "start_bit": "8", "len_bit": "1", "init_value": "1", "value_table_enum": "0x0=Disable\n0x1=Enable"},
             {"signal_name": "ISC_DMS_State", "start_bit": "9", "len_bit": "2", "init_value": "0", "value_table_enum": "0x0=Init\n0x1=Inactive\n0x2=Active\n0x3=Fault"},
-            {"signal_name": "ISC_DMS_DriverPresent", "start_bit": "11", "len_bit": "2", "init_value": "0", "value_table_enum": "0x0=Unknown\n0x1=High\n0x2=Moderate\n0x3=Low"},
+            {"signal_name": "ISC_DMS_DriverReadiness", "start_bit": "11", "len_bit": "2", "init_value": "0", "value_table_enum": "0x0=Unknown\n0x1=High\n0x2=Moderate\n0x3=Low"},
             {"signal_name": "ISC_Ridar1_Passenger1_Status", "start_bit": "16", "len_bit": "1", "init_value": "0", "value_table_enum": "0x0=Inactive\n0x1=Active"},
             {"signal_name": "ISC_Ridar1_Passenger2_Status", "start_bit": "17", "len_bit": "1", "init_value": "0", "value_table_enum": "0x0=Inactive\n0x1=Active"},
             {"signal_name": "ISC_Ridar1_FaultStatus", "start_bit": "18", "len_bit": "1", "init_value": "0", "value_table_enum": "0x0=Normal\n0x1=Error"},
@@ -337,7 +337,7 @@ class AppWindow(QMainWindow):
 
         fallback_dms = [
             {"signal_name": "DMS_State", "start_bit": "0", "len_bit": "2", "init_value": "0", "value_table_enum": "0x0=Init\n0x1=Inactive\n0x2=Active\n0x3=Fault"},
-            {"signal_name": "DMS_DriverPresent", "start_bit": "2", "len_bit": "2", "init_value": "0", "value_table_enum": "0x0=Unknown\n0x1=High\n0x2=Moderate\n0x3=Low"}
+            {"signal_name": "DMS_DriverReadiness", "start_bit": "2", "len_bit": "2", "init_value": "0", "value_table_enum": "0x0=Unknown\n0x1=High\n0x2=Moderate\n0x3=Low"}
         ]
         for sig in fallback_dms:
             self.__can_signals_dms.append({
