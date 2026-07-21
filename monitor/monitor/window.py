@@ -536,18 +536,18 @@ class AppWindow(QMainWindow):
             self.__console.info(f"DMS Enable state changed: {enabled}")
 
     def on_btn_dms_update_force(self):
-        dms_state_val = 0
-        dms_driver_readiness_val = 0
+        dms_state_val = ""
+        dms_driver_readiness_val = ""
         
         if hasattr(self, 'list_dms_state'):
-            dms_state_val = self.list_dms_state.currentRow()
-            if dms_state_val < 0:
-                dms_state_val = 0
+            current_item = self.list_dms_state.currentItem()
+            if current_item:
+                dms_state_val = current_item.text()
                 
         if hasattr(self, 'list_dms_driver_readiness'):
-            dms_driver_readiness_val = self.list_dms_driver_readiness.currentRow()
-            if dms_driver_readiness_val < 0:
-                dms_driver_readiness_val = 0
+            current_item = self.list_dms_driver_readiness.currentItem()
+            if current_item:
+                dms_driver_readiness_val = current_item.text()
 
         msg_dict = {
             "function": "update_force",
