@@ -1,9 +1,10 @@
-
 #include "solectrix.camera.grabber.hpp"
 #include <flame/log.hpp>
 #include <fcntl.h>
 #include <errno.h>
 #include <cstring>
+#include <fstream>
+#include <filesystem>
 #include "core_frame_processing.h"
 
 using namespace flame;
@@ -33,44 +34,10 @@ bool solectrix_camera_grabber::onInit(){
         /* setup pipeline */
         _use_image_stream.store(parameters.value("use_image_stream", false));
 
-        /* undistortion setup */
-        _enable_undistort = parameters.value("undistort", false);
-        if (_enable_undistort && parameters.contains("camera_calibration")) {
-            const auto& calib = parameters["camera_calibration"];
-            if (calib.contains("intrinsic") && calib.contains("distortion")) {
-                _camera_matrix = cv::Mat::eye(3, 3, CV_64F);
-                const auto& intr = calib["intrinsic"];
-                for (int r = 0; r < 3; ++r) {
-                    for (int c = 0; c < 3; ++c) {
-                        _camera_matrix.at<double>(r, c) = intr[r][c].get<double>();
-                    }
-                }
-
-                const auto& dist = calib["distortion"];
-                int dist_size = dist.size();
-                _dist_coeffs = cv::Mat(1, dist_size, CV_64F);
-                for (int i = 0; i < dist_size; ++i) {
-                    _dist_coeffs.at<double>(0, i) = dist[i].get<double>();
-                }
-
-                logger::info("[{}] Loaded distortion parameters. Intrinsic: {}x{}, Distortion size: {}", 
-                             getName(), _camera_matrix.rows, _camera_matrix.cols, dist_size);
-
-                cv::initUndistortRectifyMap(
-                    _camera_matrix, _dist_coeffs, cv::Mat(),
-                    _camera_matrix, cv::Size(1920, 1080),
-                    CV_32FC1, _map1, _map2
-                );
-            } else {
-                _enable_undistort = false;
-                logger::warn("[{}] Missing intrinsic/distortion calibration data. Undistort disabled.", getName());
-            }
-        }
-
         /* device instance */
         _frame_grabber = make_unique<sxpf_grabber>(parameters);
 
-        /* device initialization */
+        /* device initialization (Run FIRST before any OpenCV allocation) */
         if(!_frame_grabber->init()){
             logger::error("[{}] Failed to initialize frame grabber device", getName());
             return false;
@@ -80,6 +47,88 @@ bool solectrix_camera_grabber::onInit(){
         if(!_frame_grabber->open()){
             logger::error("[{}] Failed to open frame grabber device", getName());
             return false;
+        }
+
+        /* undistortion setup (Loaded AFTER frame grabber init and open succeed) */
+        _enable_undistort = parameters.value("undistort", false);
+        if (_enable_undistort && parameters.contains("camera_calibration")) {
+            json calib_json;
+            std::string calib_file_path;
+
+            if (parameters["camera_calibration"].is_string()) {
+                calib_file_path = parameters["camera_calibration"].get<std::string>();
+                if (std::filesystem::exists(calib_file_path)) {
+                    try {
+                        std::ifstream f(calib_file_path);
+                        calib_json = json::parse(f);
+                    } catch (const std::exception& e) {
+                        logger::error("[{}] Failed to parse calibration JSON file '{}': {}", getName(), calib_file_path, e.what());
+                    }
+                } else {
+                    logger::warn("[{}] Calibration file not found: '{}'", getName(), calib_file_path);
+                }
+            } else if (parameters["camera_calibration"].is_object()) {
+                calib_json = parameters["camera_calibration"];
+            }
+
+            if (!calib_json.empty()) {
+                // Parse intrinsic matrix
+                if (calib_json.contains("camera_matrix") && calib_json["camera_matrix"].is_array()) {
+                    _camera_matrix = cv::Mat::eye(3, 3, CV_64F);
+                    const auto& cm = calib_json["camera_matrix"];
+                    for (int r = 0; r < 3; ++r) {
+                        for (int c = 0; c < 3; ++c) {
+                            _camera_matrix.at<double>(r, c) = cm[r][c].get<double>();
+                        }
+                    }
+                } else if (calib_json.contains("intrinsic") && calib_json["intrinsic"].is_array()) {
+                    _camera_matrix = cv::Mat::eye(3, 3, CV_64F);
+                    const auto& intr = calib_json["intrinsic"];
+                    for (int r = 0; r < 3; ++r) {
+                        for (int c = 0; c < 3; ++c) {
+                            _camera_matrix.at<double>(r, c) = intr[r][c].get<double>();
+                        }
+                    }
+                }
+
+                // Parse distortion coefficients
+                if (calib_json.contains("distortion_coefficients") && calib_json["distortion_coefficients"].is_array()) {
+                    const auto& dist = calib_json["distortion_coefficients"];
+                    int dist_size = dist.size();
+                    _dist_coeffs = cv::Mat(1, dist_size, CV_64F);
+                    for (int i = 0; i < dist_size; ++i) {
+                        _dist_coeffs.at<double>(0, i) = dist[i].get<double>();
+                    }
+                } else if (calib_json.contains("distortion") && calib_json["distortion"].is_array()) {
+                    const auto& dist = calib_json["distortion"];
+                    int dist_size = dist.size();
+                    _dist_coeffs = cv::Mat(1, dist_size, CV_64F);
+                    for (int i = 0; i < dist_size; ++i) {
+                        _dist_coeffs.at<double>(0, i) = dist[i].get<double>();
+                    }
+                }
+
+                int img_w = 1080, img_h = 1920;
+                if (calib_json.contains("image_size")) {
+                    img_w = calib_json["image_size"].value("width", img_w);
+                    img_h = calib_json["image_size"].value("height", img_h);
+                }
+
+                if (!_camera_matrix.empty() && !_dist_coeffs.empty()) {
+                    cv::Mat new_camera_matrix = cv::getOptimalNewCameraMatrix(
+                        _camera_matrix, _dist_coeffs, cv::Size(img_w, img_h), 0.0, cv::Size(img_w, img_h)
+                    );
+                    cv::initUndistortRectifyMap(
+                        _camera_matrix, _dist_coeffs, cv::Mat(),
+                        new_camera_matrix, cv::Size(img_w, img_h),
+                        CV_32FC1, _map1, _map2
+                    );
+                    logger::info("[{}] Loaded camera calibration parameters successfully. Resolution: {}x{}", getName(), img_w, img_h);
+                }
+            } else {
+                _enable_undistort = false;
+                logger::warn("[{}] Missing intrinsic/distortion calibration data. Undistort disabled.", getName());
+            }
         }
 
         /* read profile dataport */
@@ -164,19 +213,12 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
             if(cam_channel>=0 && !captured.empty()){
                 if(_use_image_stream.load()){
 
-                    // 1. Undistort immediately on captured image (1920x1080)
-                    if (_enable_undistort && !_map1.empty() && !_map2.empty()) {
-                        cv::Mat undistorted;
-                        cv::remap(captured, undistorted, _map1, _map2, cv::INTER_LINEAR);
-                        captured = undistorted;
-                    }
-
                     string portname = "image_stream_0";
                     if (_channel_ports.find(cam_channel) != _channel_ports.end()) {
                         portname = _channel_ports[cam_channel];
                     }
 
-                    // 2. Rotate according to the options
+                    // 1. Rotate first according to options
                     if (_port_rotations.find(portname) != _port_rotations.end()) {
                         cv::Mat rotated;
                         string rot_type = _port_rotations[portname];
@@ -187,6 +229,13 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
                             cv::rotate(captured, rotated, cv::ROTATE_90_CLOCKWISE);
                             captured = rotated;
                         }
+                    }
+
+                    // 2. Undistort AFTER rotation right before outputting to data port
+                    if (_enable_undistort && !_map1.empty() && !_map2.empty()) {
+                        cv::Mat undistorted;
+                        cv::remap(captured, undistorted, _map1, _map2, cv::INTER_LINEAR);
+                        captured = undistorted;
                     }
 
                     // 1. Prepare raw Mat data instead of JPEG encoding
@@ -209,9 +258,6 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
                     msg->from = portname;
                     msg->meta = tag.dump();
 
-                    // 3. populate multipart frames (first: portname, second: metadata/tag, third: raw image data)
-                    // msg->addstr(msg->from);
-                    // msg->addstr(msg->meta);
                     msg->addmem(captured.data, captured.total() * captured.elemSize());
 
                     /* push to channel queue */
