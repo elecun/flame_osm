@@ -38,6 +38,7 @@ except ImportError:
 from util.logger.console import ConsoleLogger
 from subscriber.camera import CameraMonitorSubscriber
 from subscriber.video import VideoImageStreamSubscriber
+from monitor.publisher.can import CANControlPublisher
 
 class AppWindow(QMainWindow):
     def __init__(self, config:dict):
@@ -98,7 +99,6 @@ class AppWindow(QMainWindow):
                     # Setup CAN control publisher
                     can_ch0_control_conn = config.get("can_ch0_control", "tcp://192.168.100.91:5210")
                     can_ch0_control_topic = config.get("can_ch0_control_topic", "can_ch0_control")
-                    from publisher.can import CANControlPublisher
                     self.__can_control_publisher = CANControlPublisher(self.__pipeline_context, connection=can_ch0_control_conn, topic=can_ch0_control_topic)
                 
                 # Populate list_dms_state and list_dms_driver_readiness from kvaser_can_interface.json

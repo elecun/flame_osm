@@ -288,6 +288,66 @@ void kvaser_can_interface::onData(flame::component::ZData& data)
                     }
                 }
             }
+        } else if (portname == "can_ch0_control") {
+            if (data.size() > 0) {
+                string payload;
+                if (data.size() >= 2) {
+                    zmq::message_t topic_msg = data.pop();
+                    zmq::message_t payload_msg = data.pop();
+                    payload = string(static_cast<char*>(payload_msg.data()), payload_msg.size());
+                } else {
+                    zmq::message_t payload_msg = data.pop();
+                    payload = string(static_cast<char*>(payload_msg.data()), payload_msg.size());
+                }
+
+                logger::info("[{}] Received control data on can_ch0_control: {}", getName(), payload);
+
+                if (!payload.empty() && (payload.front() == '{' || payload.front() == '[')) {
+                    json j = json::parse(payload);
+                    if (j.contains("function") && j["function"].get<string>() == "update_force") {
+                        if (j.contains("kwargs") && j["kwargs"].is_array()) {
+                            string dms_state_str = "";
+                            string dms_readiness_str = "";
+                            for (auto& item : j["kwargs"]) {
+                                if (item.contains("dms_state")) {
+                                    dms_state_str = item["dms_state"].get<string>();
+                                }
+                                if (item.contains("dms_driver_readiness")) {
+                                    dms_readiness_str = item["dms_driver_readiness"].get<string>();
+                                }
+                            }
+
+                            logger::info("[{}] update_force details: dms_state={}, dms_driver_readiness={}", getName(), dms_state_str, dms_readiness_str);
+
+                            // Convert to upper case for comparison
+                            std::transform(dms_state_str.begin(), dms_state_str.end(), dms_state_str.begin(), ::toupper);
+                            std::transform(dms_readiness_str.begin(), dms_readiness_str.end(), dms_readiness_str.begin(), ::toupper);
+
+                            // Set state
+                            if (dms_state_str == "INIT") {
+                                set_dms_state(DMSState::INIT);
+                            } else if (dms_state_str == "INACTIVE") {
+                                set_dms_state(DMSState::INACTIVE);
+                            } else if (dms_state_str == "ACTIVE") {
+                                set_dms_state(DMSState::ACTIVE);
+                            } else if (dms_state_str == "FAULT") {
+                                set_dms_state(DMSState::FAULT);
+                            }
+
+                            // Set readiness
+                            if (dms_readiness_str == "UNKNOWN") {
+                                set_dms_readiness(DMSDriverReadiness::UNKNOWN);
+                            } else if (dms_readiness_str == "HIGH") {
+                                set_dms_readiness(DMSDriverReadiness::HIGH);
+                            } else if (dms_readiness_str == "MODERATE") {
+                                set_dms_readiness(DMSDriverReadiness::MODERATE);
+                            } else if (dms_readiness_str == "LOW") {
+                                set_dms_readiness(DMSDriverReadiness::LOW);
+                            }
+                        }
+                    }
+                }
+            }
         }
     } catch (const std::exception& e) {
         logger::error("[{}] Error in onData: {}", getName(), e.what());
