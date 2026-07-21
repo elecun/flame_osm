@@ -186,8 +186,6 @@ class AppWindow(QMainWindow):
             id = list(self.__frame_window_map.keys())[0]
         fps = round(tags.get("fps", 0.0), 1)
 
-        print(tags)
-
         # C++ camera_monitor already rotated the image, so no rotation here
         color_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         if self.__show_frame_info:
