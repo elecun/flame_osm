@@ -99,6 +99,8 @@ bool osm_monolithic_inference::onInit(){
             return false;
         }
 
+        _head_pose_estimator = std::make_unique<head_pose_estimation>();
+
         /* Start Inference thread */
         _worker_stop.store(false);
         _inference_worker = std::thread(&osm_monolithic_inference::_inference_process, this);
@@ -137,6 +139,11 @@ void osm_monolithic_inference::onClose(){
     if (_face_landmark_2d) {
         _face_landmark_2d.reset();
         logger::info("[{}] Face landmark 2d instance successfully released", getName());
+    }
+
+    if (_head_pose_estimator) {
+        _head_pose_estimator.reset();
+        logger::info("[{}] Head pose estimator instance successfully released", getName());
     }
 }
 
@@ -246,9 +253,13 @@ void osm_monolithic_inference::_inference_process() {
 
                         // Draw 68 landmark points
                         for (const auto& pt : res.points) {
-                            cv::circle(out_image, 
-                                       cv::Point2f(pt.x * scale_x, pt.y * scale_y), 
-                                       2, cv::Scalar(0, 255, 255), -1);
+                            cv::circle(out_image, cv::Point2f(pt.x * scale_x, pt.y * scale_y), 1, cv::Scalar(0, 255, 255), -1);
+                        }
+
+                        // Estimate Head Pose using 68 2D landmarks and draw 3D coordinate axes
+                        head_pose::PoseResult pose_res = _head_pose_estimator->estimate(res.points, image.size());
+                        if (pose_res.success) {
+                            _head_pose_estimator->drawPoseAxes(out_image, pose_res, image.size(), scale_x, scale_y);
                         }
                     }
 
