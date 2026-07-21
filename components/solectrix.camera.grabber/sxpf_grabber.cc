@@ -2,6 +2,7 @@
 #include "sxpf_grabber.hpp"
 #include <flame/log.hpp>
 #include <chrono>
+#include <thread>
 
 #define NELEMENTS(ar)   (sizeof(ar) / sizeof((ar)[0]))
 
@@ -325,14 +326,28 @@ pair<int, Mat> sxpf_grabber::capture(){
                 break;
                 
             case SXPF_EVENT_CAPTURE_ERROR:
-                logger::error("(sxpf_grabber) Event: SXPF_EVENT_CAPTURE_ERROR {}", _events[n].data);
-                {
+                logger::error("(sxpf_grabber) Event: SXPF_EVENT_CAPTURE_ERROR {}, initiating pipeline resynchronization...", _events[n].data);
+                if (_grabber_handle) {
+                    // 1. Stop stream DMA transfers
+                    sxpf_stop(_grabber_handle, _stream_channel_mask);
+
+                    // 2. Wait 0.1s (100ms) for hardware DMA pipeline to settle
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+                    // 3. Flush and release all buffer slots
                     sxpf_card_props_t props;
                     if (sxpf_get_card_properties(_grabber_handle, &props) == 0) {
                         for (uint32_t i = 0; i < props.num_buffers; i++) {
                             sxpf_release_frame(_grabber_handle, i, 0);
                         }
-                        logger::info("(sxpf_grabber) Forcefully released all {} frame buffer slots.", props.num_buffers);
+                        logger::info("(sxpf_grabber) Reset and released all {} frame buffer slots.", props.num_buffers);
+                    }
+
+                    // 4. Restart stream to re-sync DMA descriptors and hardware capture engine
+                    if (sxpf_start_record(_grabber_handle, _stream_channel_mask) == 0) {
+                        logger::info("(sxpf_grabber) Successfully restarted stream record on mask 0x{:X}", _stream_channel_mask);
+                    } else {
+                        logger::error("(sxpf_grabber) Failed to restart stream record on mask 0x{:X}", _stream_channel_mask);
                     }
                 }
                 break;
