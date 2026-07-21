@@ -94,6 +94,13 @@ class AppWindow(QMainWindow):
                     self.__can_ch0_in_subscriber = CANMonitorSubscriber(self.__pipeline_context, connection=can_ch0_in_conn, topic=can_ch0_in_topic)
                     self.__can_ch0_in_subscriber.can_message_received.connect(self.on_update_can_ch0_in)
                     self.__can_ch0_in_subscriber.start()
+
+                    # Setup CAN control publisher
+                    can_ch0_control_conn = config.get("can_ch0_control", "tcp://192.168.100.91:5210")
+                    self.__can_ch0_control_topic = config.get("can_ch0_control_topic", "can_ch0_control")
+                    self.__can_ch0_control_socket = self.__pipeline_context.socket(zmq.PUB)
+                    self.__can_ch0_control_socket.setsockopt(zmq.LINGER, 0)
+                    self.__can_ch0_control_socket.connect(can_ch0_control_conn)
                 
                 # Populate list_dms_state and list_dms_driver_readiness from kvaser_can_interface.json
                 self.init_dms_controls()
@@ -107,16 +114,6 @@ class AppWindow(QMainWindow):
                     self.list_dms_state.itemSelectionChanged.connect(self.update_dms_force_button_state)
                 if hasattr(self, 'list_dms_driver_readiness'):
                     self.list_dms_driver_readiness.itemSelectionChanged.connect(self.update_dms_force_button_state)
-
-                if hasattr(self, 'chk_option_show_frame_info'):
-                    self.chk_option_show_frame_info.stateChanged.connect(self.on_check_option_show_frame_info)
-                if hasattr(self, 'chk_option_show_body_keypoints'):
-                    self.chk_option_show_body_keypoints.stateChanged.connect(self.on_check_show_body_keypoints)
-                elif hasattr(self, 'chk_show_body_kps'):
-                    self.chk_show_body_kps.stateChanged.connect(self.on_check_show_body_keypoints)
-                if hasattr(self, 'btn_video_open'):
-                    self.btn_video_open.clicked.connect(self.on_btn_video_open)
-
                 if hasattr(self, 'btn_record_start'):
                     self.btn_record_start.clicked.connect(self.on_btn_record_start)
                 if hasattr(self, 'btn_record_stop'):
@@ -125,9 +122,7 @@ class AppWindow(QMainWindow):
 
                 # set options
                 if self.__config.get("option_show_frame_info", False):
-                    if hasattr(self, 'chk_option_show_frame_info'):
-                        self.chk_option_show_frame_info.setChecked(True)
-                    self.on_check_option_show_frame_info()
+                    self.__show_frame_info = True
 
                 # map between camera device and windows
                 self.__frame_window_map = {}
@@ -157,16 +152,6 @@ class AppWindow(QMainWindow):
             pass
         except Exception as e:
             self.__console.error(f"{e}")
-
-    ## component event callbacks
-    def on_btn_video_open(self):
-        video_file, _ = QFileDialog.getOpenFileName(self, "Video File", "", "AVI Files (*.avi);;All Files (*)")
-        if video_file:
-            widget = self.findChild(QLabel, name=f"label_video_filepath")
-            if widget:
-                widget.setText(f"{video_file}")
-        else:
-            self.__console.warning("No Markers file selected.")
 
     def on_update_camera_image(self, image:np.ndarray, tags:dict):
 
@@ -268,6 +253,8 @@ class AppWindow(QMainWindow):
             self.__can_ch0_out_subscriber.close()
         if hasattr(self, '_AppWindow__can_ch0_in_subscriber') and self.__can_ch0_in_subscriber:
             self.__can_ch0_in_subscriber.close()
+        if hasattr(self, '_AppWindow__can_ch0_control_socket') and self.__can_ch0_control_socket:
+            self.__can_ch0_control_socket.close()
 
         # close camera stream monitoring subscriber
         if len(self.__camera_image_subscriber_map.keys())>0:
@@ -314,18 +301,6 @@ class AppWindow(QMainWindow):
             if hasattr(self, 'label_record_status'):
                 self.label_record_status.setText("IDLE")
                 self.label_record_status.setStyleSheet("color: #8e8e93; font-weight: bold;")
-
-    def on_check_option_disable_camera_monitor_stream(self):
-        pass
-
-    def on_check_option_show_frame_info(self):
-        if hasattr(self, 'chk_option_show_frame_info'):
-            self.__show_frame_info = self.chk_option_show_frame_info.isChecked()
-        else:
-            self.__show_frame_info = self.__config.get("option_show_frame_info", False)
-
-    def on_check_show_body_keypoints(self):
-        pass
 
     def load_can_signals(self):
         self.__can_signals_isc = []
@@ -528,25 +503,8 @@ class AppWindow(QMainWindow):
                 item_raw.setText(raw_str)
 
     def init_dms_controls(self):
-        dms_state_enums = ["INIT", "INACTIVE", "ACTIVE", "FAULT"]
-        dms_readiness_options = ["UNKNOWN", "HIGH", "MODERATE", "LOW"]
-
-        json_path = os.path.join(self.__config.get("root_path", ""), "bin", "x86_64", "osm_can", "kvaser_can_interface.json")
-        if not os.path.exists(json_path):
-            json_path = os.path.join(self.__config.get("root_path", ""), "kvaser_can_interface.json")
-
-        if os.path.exists(json_path):
-            try:
-                with open(json_path, 'r') as f:
-                    data = json.load(f)
-                    params = data.get("parameters", {})
-                    if "dms_state_enums" in params:
-                        dms_state_enums = params["dms_state_enums"]
-                    if "dms_driver_readiness_enums" in params:
-                        dms_readiness_options = params["dms_driver_readiness_enums"]
-                self.__console.info(f"Loaded DMS options from {json_path}")
-            except Exception as e:
-                self.__console.warning(f"Failed to load DMS options from json: {e}")
+        dms_state_enums = self.__config.get("dms_state_enums", ["Init", "Inactive", "Active", "Fault"])
+        dms_readiness_enums = self.__config.get("dms_driver_readiness_enums", ["Unknown", "High", "Moderate", "Low"])
 
         if hasattr(self, 'list_dms_state'):
             self.list_dms_state.clear()
@@ -555,7 +513,7 @@ class AppWindow(QMainWindow):
 
         if hasattr(self, 'list_dms_driver_readiness'):
             self.list_dms_driver_readiness.clear()
-            for opt in dms_readiness_options:
+            for opt in dms_readiness_enums:
                 self.list_dms_driver_readiness.addItem(str(opt))
 
     def update_dms_force_button_state(self):
@@ -578,20 +536,37 @@ class AppWindow(QMainWindow):
             self.__console.info(f"DMS Enable state changed: {enabled}")
 
     def on_btn_dms_update_force(self):
-        state_text = "None"
-        readiness_text = "None"
+        dms_state_val = 0
+        dms_driver_readiness_val = 0
         
         if hasattr(self, 'list_dms_state'):
-            current_item = self.list_dms_state.currentItem()
-            if current_item:
-                state_text = current_item.text()
+            dms_state_val = self.list_dms_state.currentRow()
+            if dms_state_val < 0:
+                dms_state_val = 0
                 
         if hasattr(self, 'list_dms_driver_readiness'):
-            current_item = self.list_dms_driver_readiness.currentItem()
-            if current_item:
-                readiness_text = current_item.text()
-                
-        self.__console.info(f"Force Update - DMS State: {state_text}, Driver Readiness: {readiness_text}")
+            dms_driver_readiness_val = self.list_dms_driver_readiness.currentRow()
+            if dms_driver_readiness_val < 0:
+                dms_driver_readiness_val = 0
+
+        msg_dict = {
+            "function": "update_force",
+            "kwargs": [
+                {"dms_state": dms_state_val},
+                {"dms_driver_readiness": dms_driver_readiness_val}
+            ]
+        }
+
+        topic = getattr(self, '_AppWindow__can_ch0_control_topic', 'can_ch0_control')
+        payload_str = json.dumps(msg_dict)
+
+        if hasattr(self, '_AppWindow__can_ch0_control_socket') and self.__can_ch0_control_socket:
+            try:
+                self.__can_ch0_control_socket.send_multipart([topic.encode('utf-8'), payload_str.encode('utf-8')])
+            except Exception as e:
+                self.__console.error(f"Failed to send can_ch0_control message: {e}")
+
+        self.__console.info(f"[CAN Control Message Sent] topic: '{topic}', payload: {payload_str}")
 
     def on_update_can_ch0_in(self, msg):
         # Basic structure for data integration
