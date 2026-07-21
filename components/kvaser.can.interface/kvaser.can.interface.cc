@@ -190,6 +190,24 @@ void kvaser_can_interface::onLoop()
             logger::debug("[{}] Sent periodic CAN FD message 0x220 (State: {}, Readiness: {})", getName(),
                           static_cast<int>(state), static_cast<int>(readiness));
         }
+
+        try {
+            json can_json;
+            can_json["id"] = 0x220;
+            can_json["dlc"] = 8;
+            can_json["flags"] = flags;
+            can_json["timestamp"] = 0;
+            vector<uint8_t> frame_bytes(tx_data, tx_data + 8);
+            can_json["data"] = frame_bytes;
+
+            flame::component::ZData zmsg;
+            zmsg.addstr(can_json.dump());
+            if (!dispatch("can_ch0_out", zmsg)) {
+                logger::warn("[{}] Failed to dispatch CAN message 0x220 to port can_ch0_out", getName());
+            }
+        } catch (const std::exception& e) {
+            logger::error("[{}] Error dispatching CAN message 0x220 to can_ch0_out: {}", getName(), e.what());
+        }
     }
 }
 

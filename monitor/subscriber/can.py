@@ -43,6 +43,7 @@ class CANMonitorSubscriber(QThread):
                 events = dict(self.__poller.poll(1000))
                 if self.__socket in events:
                     multipart = self.__socket.recv_multipart()
+                    self.__console.info(f"<CAN Monitor> Raw multipart frames count={len(multipart)}: {multipart}")
                     if len(multipart) >= 2:
                         topic = multipart[0].decode()
                         payload = multipart[1].decode()
