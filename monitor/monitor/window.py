@@ -105,9 +105,8 @@ class AppWindow(QMainWindow):
                     self.update_dms_force_button_state()
                 if hasattr(self, 'list_dms_state'):
                     self.list_dms_state.itemSelectionChanged.connect(self.update_dms_force_button_state)
-                list_driver = getattr(self, 'list_dms_driver_readiness', getattr(self, 'list_dms_driver_readiness', None))
-                if list_driver:
-                    list_driver.itemSelectionChanged.connect(self.update_dms_force_button_state)
+                if hasattr(self, 'list_dms_driver_readiness'):
+                    self.list_dms_driver_readiness.itemSelectionChanged.connect(self.update_dms_force_button_state)
 
                 if hasattr(self, 'chk_option_show_frame_info'):
                     self.chk_option_show_frame_info.stateChanged.connect(self.on_check_option_show_frame_info)
@@ -590,11 +589,10 @@ class AppWindow(QMainWindow):
             for opt in dms_state_enums:
                 self.list_dms_state.addItem(str(opt))
 
-        list_driver = getattr(self, 'list_dms_driver_readiness', getattr(self, 'list_dms_driver_readiness', None))
-        if list_driver:
-            list_driver.clear()
+        if hasattr(self, 'list_dms_driver_readiness'):
+            self.list_dms_driver_readiness.clear()
             for opt in dms_readiness_options:
-                list_driver.addItem(str(opt))
+                self.list_dms_driver_readiness.addItem(str(opt))
 
     def update_dms_force_button_state(self):
         if not hasattr(self, 'btn_dms_update_force'):
@@ -605,8 +603,7 @@ class AppWindow(QMainWindow):
             state_selected = True
 
         readiness_selected = False
-        list_driver = getattr(self, 'list_dms_driver_readiness', getattr(self, 'list_dms_driver_readiness', None))
-        if list_driver and list_driver.currentItem() is not None:
+        if hasattr(self, 'list_dms_driver_readiness') and self.list_dms_driver_readiness.currentItem() is not None:
             readiness_selected = True
 
         self.btn_dms_update_force.setEnabled(state_selected and readiness_selected)
@@ -625,9 +622,8 @@ class AppWindow(QMainWindow):
             if current_item:
                 state_text = current_item.text()
                 
-        list_driver = getattr(self, 'list_dms_driver_readiness', getattr(self, 'list_dms_driver_readiness', None))
-        if list_driver:
-            current_item = list_driver.currentItem()
+        if hasattr(self, 'list_dms_driver_readiness'):
+            current_item = self.list_dms_driver_readiness.currentItem()
             if current_item:
                 readiness_text = current_item.text()
                 
