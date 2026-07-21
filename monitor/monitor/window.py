@@ -227,15 +227,8 @@ class AppWindow(QMainWindow):
             self.__console.error(e)
     
     def on_update_processed_image(self, image:np.ndarray, tags:dict):
-        fps = round(tags.get("fps", 0.0), 1)
-
         # C++ camera_monitor already rotated the image, so no rotation here
         color_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        
-        if self.__show_frame_info:
-            t = datetime.now()
-            cv2.putText(color_image, t.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3], (5, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 1, cv2.LINE_AA)
-            cv2.putText(color_image, str(fps), (380, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,255), 1, cv2.LINE_AA)
             
         h, w, ch = color_image.shape
         qt_image = QImage(color_image.data, w, h, ch*w, QImage.Format.Format_RGB888)
