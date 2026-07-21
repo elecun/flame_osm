@@ -448,7 +448,7 @@ border-bottom-right-radius: 6px;</string>
       </widget>
      </item>
      <item>
-      <widget class="QListWidget" name="list_dms_driver_present">
+      <widget class="QListWidget" name="list_dms_driver_readiness">
        <property name="maximumSize">
         <size>
          <width>16777215</width>

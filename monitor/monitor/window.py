@@ -95,7 +95,7 @@ class AppWindow(QMainWindow):
                     self.__can_ch0_out_subscriber.can_message_received.connect(self.on_update_can_ch0_out)
                     self.__can_ch0_out_subscriber.start()
                 
-                # Populate list_dms_state and list_dms_driver_present from kvaser_can_interface.json
+                # Populate list_dms_state and list_dms_driver_readiness from kvaser_can_interface.json
                 self.init_dms_controls()
 
                 if hasattr(self, 'chk_dms_enable'):
@@ -105,7 +105,7 @@ class AppWindow(QMainWindow):
                     self.update_dms_force_button_state()
                 if hasattr(self, 'list_dms_state'):
                     self.list_dms_state.itemSelectionChanged.connect(self.update_dms_force_button_state)
-                list_driver = getattr(self, 'list_dms_driver_present', getattr(self, 'list_dms_driver_readiness', None))
+                list_driver = getattr(self, 'list_dms_driver_readiness', getattr(self, 'list_dms_driver_readiness', None))
                 if list_driver:
                     list_driver.itemSelectionChanged.connect(self.update_dms_force_button_state)
 
@@ -590,7 +590,7 @@ class AppWindow(QMainWindow):
             for opt in dms_state_enums:
                 self.list_dms_state.addItem(str(opt))
 
-        list_driver = getattr(self, 'list_dms_driver_present', getattr(self, 'list_dms_driver_readiness', None))
+        list_driver = getattr(self, 'list_dms_driver_readiness', getattr(self, 'list_dms_driver_readiness', None))
         if list_driver:
             list_driver.clear()
             for opt in dms_readiness_options:
@@ -605,7 +605,7 @@ class AppWindow(QMainWindow):
             state_selected = True
 
         readiness_selected = False
-        list_driver = getattr(self, 'list_dms_driver_present', getattr(self, 'list_dms_driver_readiness', None))
+        list_driver = getattr(self, 'list_dms_driver_readiness', getattr(self, 'list_dms_driver_readiness', None))
         if list_driver and list_driver.currentItem() is not None:
             readiness_selected = True
 
@@ -625,7 +625,7 @@ class AppWindow(QMainWindow):
             if current_item:
                 state_text = current_item.text()
                 
-        list_driver = getattr(self, 'list_dms_driver_present', getattr(self, 'list_dms_driver_readiness', None))
+        list_driver = getattr(self, 'list_dms_driver_readiness', getattr(self, 'list_dms_driver_readiness', None))
         if list_driver:
             current_item = list_driver.currentItem()
             if current_item:
