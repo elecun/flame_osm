@@ -48,6 +48,18 @@
             "visualize": true,
             "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/iae_dms_251212.torchscript",
             "gpu_id": 1
+        },
+        "driver_readiness_estimation_logical": {
+            "use": true,
+            "visualize": true,
+            "ref_yaw": 0.0,
+            "ref_pitch": 0.0,
+            "sigma_yaw": 15.0,
+            "sigma_pitch": 10.0,
+            "t_window": 2.0,
+            "readiness_low": 0.2,
+            "readiness_moderate": 0.6,
+            "readiness_high": 1.0
         }
     },
     "dataport": {

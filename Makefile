@@ -170,7 +170,7 @@ $(BUILDDIR)os.model.inference.o: $(CURRENT_DIR)/components/os.model.inference/os
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
 
 # OSM Monolithic Inference
-osm_monolithic_inference.comp: $(BUILDDIR)osm.monolithic.inference.o $(BUILDDIR)face_detection.o $(BUILDDIR)body_pose_estimation.o $(BUILDDIR)face_landmark_2d.o $(BUILDDIR)face_landmark_3d.o $(BUILDDIR)head_pose_estimation_from_2d.o $(BUILDDIR)head_pose_estimation_from_3d.o $(BUILDDIR)driver_readiness_estimation.o
+osm_monolithic_inference.comp: $(BUILDDIR)osm.monolithic.inference.o $(BUILDDIR)face_detection.o $(BUILDDIR)body_pose_estimation.o $(BUILDDIR)face_landmark_2d.o $(BUILDDIR)face_landmark_3d.o $(BUILDDIR)head_pose_estimation_from_2d.o $(BUILDDIR)head_pose_estimation_from_3d.o $(BUILDDIR)driver_readiness_estimation.o $(BUILDDIR)driver_readiness_estimation_logical.o
 	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_process/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_calib3d -lopencv_dnn $(TORCH_LIB)
 
 $(BUILDDIR)osm.monolithic.inference.o: $(CURRENT_DIR)/components/osm.monolithic.inference/osm.monolithic.inference.cc
@@ -195,6 +195,9 @@ $(BUILDDIR)head_pose_estimation_from_3d.o: $(CURRENT_DIR)/components/osm.monolit
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
 
 $(BUILDDIR)driver_readiness_estimation.o: $(CURRENT_DIR)/components/osm.monolithic.inference/driver_readiness_estimation.cc
+	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
+
+$(BUILDDIR)driver_readiness_estimation_logical.o: $(CURRENT_DIR)/components/osm.monolithic.inference/driver_readiness_estimation_logical.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
 
 # Headpose Model Inference

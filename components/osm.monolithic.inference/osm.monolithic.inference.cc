@@ -122,6 +122,28 @@ bool osm_monolithic_inference::onInit(){
             _vis_driver_readiness = dr_params.value("visualize", true);
         }
 
+        double ref_yaw = 0.0;
+        double ref_pitch = 0.0;
+        double sigma_yaw = 15.0;
+        double sigma_pitch = 10.0;
+        double t_window = 2.0;
+        double readiness_low = 0.2;
+        double readiness_moderate = 0.6;
+        double readiness_high = 1.0;
+        if (parameters.contains("driver_readiness_estimation_logical")) {
+            const auto& drl_params = parameters["driver_readiness_estimation_logical"];
+            _use_driver_readiness_logical = drl_params.value("use", _use_driver_readiness_logical);
+            _vis_driver_readiness_logical = drl_params.value("visualize", true);
+            ref_yaw = drl_params.value("ref_yaw", ref_yaw);
+            ref_pitch = drl_params.value("ref_pitch", ref_pitch);
+            sigma_yaw = drl_params.value("sigma_yaw", sigma_yaw);
+            sigma_pitch = drl_params.value("sigma_pitch", sigma_pitch);
+            t_window = drl_params.value("t_window", t_window);
+            readiness_low = drl_params.value("readiness_low", readiness_low);
+            readiness_moderate = drl_params.value("readiness_moderate", readiness_moderate);
+            readiness_high = drl_params.value("readiness_high", readiness_high);
+        }
+
         // Warnings for dependency checks
         if (!_use_face_det && (_use_landmark_2d || _use_landmark_3d)) {
             logger::warn("[{}] Face detection process is required for 2D/3D face landmark extraction, but face_detection 'use' is set to false!", getName());
@@ -222,6 +244,14 @@ bool osm_monolithic_inference::onInit(){
                 logger::error("[{}] Failed to load driver readiness estimation model: {}", getName(), readiness_model_path);
                 return false;
             }
+        }
+
+        if (_use_driver_readiness_logical) {
+            _driver_readiness_logical_estimator = std::make_unique<driver_readiness_estimation_logical>();
+            _driver_readiness_logical_estimator->setParameters(
+                ref_yaw, ref_pitch, sigma_yaw, sigma_pitch, t_window,
+                readiness_low, readiness_moderate, readiness_high
+            );
         }
 
         /* Start Inference thread */
@@ -598,11 +628,20 @@ void osm_monolithic_inference::_inference_process() {
                         cv::putText(out_image, txt_roll,  cv::Point(start_x + 10, start_y + 54), font_face, font_scale, cv::Scalar(255, 255, 255), thickness, cv::LINE_AA);
                     }
 
-                    /* 10. Run Driver Readiness Estimation (if enabled) */
+                    /* 10. Run Driver Readiness Estimation (Torch-based, if enabled) */
                     if (_use_driver_readiness && _driver_readiness_estimator) {
                         driver_readiness::ReadinessResult readiness_res = _driver_readiness_estimator->process(poses, last_pose, has_pose);
                         if (_vis_driver_readiness) {
                             _driver_readiness_estimator->drawResult(out_image, readiness_res);
+                        }
+                    }
+
+                    /* 11. Run Driver Readiness Estimation (Rule-based Logical, if enabled) */
+                    if (_use_driver_readiness_logical && _driver_readiness_logical_estimator) {
+                        driver_readiness_logical::LogicalReadinessResult logical_res = 
+                            _driver_readiness_logical_estimator->process(last_pose, has_pose);
+                        if (_vis_driver_readiness_logical) {
+                            _driver_readiness_logical_estimator->drawResult(out_image, logical_res);
                         }
                     }
 

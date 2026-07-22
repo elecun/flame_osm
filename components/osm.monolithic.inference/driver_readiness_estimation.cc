@@ -145,13 +145,36 @@ driver_readiness::ReadinessResult driver_readiness_estimation::process(
 }
 
 void driver_readiness_estimation::drawResult(cv::Mat& image, const driver_readiness::ReadinessResult& result) {
+    std::string text;
     if (!result.is_ready) {
-        std::string text = "Readiness: Buffering (" + std::to_string(_sequence_queue.size()) + "/" + std::to_string(SEQ_LEN) + ")";
-        cv::putText(image, text, cv::Point(20, 40), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
-        return;
+        text = "Driver Readiness (Torch): Buffering (" + std::to_string(_sequence_queue.size()) + "/" + std::to_string(SEQ_LEN) + ")";
+    } else {
+        text = "Driver Readiness (Torch): Class " + std::to_string(result.predicted_class) +
+               " (" + std::to_string(static_cast<int>(result.confidence * 100.0f)) + "%)";
     }
 
-    std::string text = "Readiness Class: " + std::to_string(result.predicted_class) +
-                       " (" + std::to_string(static_cast<int>(result.confidence * 100.0f)) + "%)";
-    cv::putText(image, text, cv::Point(20, 40), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
+    int font_face = cv::FONT_HERSHEY_SIMPLEX;
+    double font_scale = 0.6;
+    int thickness = 2;
+    int baseline = 0;
+
+    cv::Size text_size = cv::getTextSize(text, font_face, font_scale, thickness, &baseline);
+
+    int margin_x = 20;
+    int margin_y = 55; // Placed above the logical readiness text
+    int pos_x = image.cols - text_size.width - margin_x;
+    int pos_y = image.rows - margin_y;
+
+    if (pos_x < 10) pos_x = 10;
+
+    cv::Scalar color = (!result.is_ready) ? cv::Scalar(0, 255, 255) : cv::Scalar(0, 255, 0);
+
+    // Background box
+    cv::Rect box(pos_x - 5, pos_y - text_size.height - 5, text_size.width + 10, text_size.height + baseline + 10);
+    cv::Mat overlay;
+    image.copyTo(overlay);
+    cv::rectangle(overlay, box, cv::Scalar(0, 0, 0), cv::FILLED);
+    cv::addWeighted(overlay, 0.5, image, 0.5, 0, image);
+
+    cv::putText(image, text, cv::Point(pos_x, pos_y), font_face, font_scale, color, thickness, cv::LINE_AA);
 }
