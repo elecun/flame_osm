@@ -186,6 +186,10 @@ void kvaser_can_interface::onLoop()
             char err_buf[100];
             canGetErrorText(stat, err_buf, sizeof(err_buf));
             logger::error("[{}] Error sending periodic CAN message 0x220: {}", getName(), err_buf);
+            if (stat == canERR_TXBUFOFL) {
+                canFlushTransmitQueue(_can_handle);
+                logger::warn("[{}] Transmit buffer overflow detected. Flushed the CAN TX queue for recovery.", getName());
+            }
         } else {
             logger::debug("[{}] Sent periodic CAN FD message 0x220 (State: {}, Readiness: {})", getName(),
                           static_cast<int>(state), static_cast<int>(readiness));
@@ -296,6 +300,10 @@ void kvaser_can_interface::onData(flame::component::ZData& data)
                             char err_buf[100];
                             canGetErrorText(stat, err_buf, sizeof(err_buf));
                             logger::error("[{}] Error sending custom CAN message via onData: {}", getName(), err_buf);
+                            if (stat == canERR_TXBUFOFL) {
+                                canFlushTransmitQueue(_can_handle);
+                                logger::warn("[{}] Transmit buffer overflow detected in custom write. Flushed the CAN TX queue.", getName());
+                            }
                         } else {
                             logger::debug("[{}] Sent custom CAN message {} via onData", getName(), id);
                         }
