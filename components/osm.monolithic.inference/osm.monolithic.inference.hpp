@@ -102,6 +102,14 @@ class osm_monolithic_inference : public flame::component::Object {
         bool _vis_body_pose{true};
         bool _vis_head_pose_2d{true};
         bool _vis_head_pose_3d{true};
+
+        /* ROI configuration */
+        bool _use_roi{false};
+        bool _roi_visualize{true};
+        int _roi_x1{0};
+        int _roi_y1{0};
+        int _roi_x2{0};
+        int _roi_y2{0};
 };
 
 EXPORT_COMPONENT_API

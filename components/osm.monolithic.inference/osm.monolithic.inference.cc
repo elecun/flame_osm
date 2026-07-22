@@ -54,6 +54,21 @@ bool osm_monolithic_inference::onInit(){
             gpu_id = fd_params.value("gpu_id", gpu_id);
             _nms_threshold = fd_params.value("nms", _nms_threshold);
             _vis_face_det = fd_params.value("visualize", true);
+            _use_roi = fd_params.value("use_roi", false);
+            _roi_visualize = fd_params.value("roi_visualize", true);
+            if (fd_params.contains("roi") && fd_params["roi"].is_array()) {
+                if (fd_params["roi"].size() == 4) {
+                    _roi_x1 = fd_params["roi"][0].get<int>();
+                    _roi_y1 = fd_params["roi"][1].get<int>();
+                    _roi_x2 = fd_params["roi"][2].get<int>();
+                    _roi_y2 = fd_params["roi"][3].get<int>();
+                } else if (fd_params["roi"].size() == 2 && fd_params["roi"][0].is_array() && fd_params["roi"][1].is_array()) {
+                    _roi_x1 = fd_params["roi"][0][0].get<int>();
+                    _roi_y1 = fd_params["roi"][0][1].get<int>();
+                    _roi_x2 = fd_params["roi"][1][0].get<int>();
+                    _roi_y2 = fd_params["roi"][1][1].get<int>();
+                }
+            }
             if (fd_params.contains("padding") && fd_params["padding"].is_array() && fd_params["padding"].size() == 2) {
                 _padding_w = fd_params["padding"][0].get<float>();
                 _padding_h = fd_params["padding"][1].get<float>();
@@ -320,24 +335,39 @@ void osm_monolithic_inference::_inference_process() {
                     std::vector<cv::Rect> bboxes;
                     if (_use_face_det && _face_detector) {
                         bboxes = _face_detector->process(image, _nms_threshold, _padding_w, _padding_h);
+                        if (_use_roi) {
+                            std::vector<cv::Rect> filtered_bboxes;
+                            for (const auto& box : bboxes) {
+                                int cx = box.x + box.width / 2;
+                                int cy = box.y + box.height / 2;
+                                if (cx >= _roi_x1 && cx <= _roi_x2 && cy >= _roi_y1 && cy <= _roi_y2) {
+                                    filtered_bboxes.push_back(box);
+                                }
+                            }
+                            bboxes = filtered_bboxes;
+                        }
                     }
 
-                    /* 2. Run YOLO-Pose estimation (if enabled) */
+                    /* 2. Run body pose, 2D/3D landmarks (only if face detection is valid and found faces) */
                     std::vector<body_pose::PoseResult> poses;
-                    if (_use_body_pose && _body_pose_estimator) {
-                        poses = _body_pose_estimator->process(image, 0.5f, 0.45f);
-                    }
-
-                    /* 3. Run FAN 2D Face Landmark estimation (if enabled) */
                     std::vector<face_landmark::LandmarkResult> landmarks_2d;
-                    if (_use_landmark_2d && _face_landmark_2d && !bboxes.empty()) {
-                        landmarks_2d = _face_landmark_2d->process(image, bboxes);
-                    }
-
-                    /* 4. Run FAN 3D Face Landmark estimation (if enabled) */
                     std::vector<face_landmark_3d_ns::Landmark3DResult> landmarks_3d;
-                    if (_use_landmark_3d && _face_landmark_3d && !bboxes.empty()) {
-                        landmarks_3d = _face_landmark_3d->process(image, bboxes);
+
+                    if (!bboxes.empty()) {
+                        /* 2. Run YOLO-Pose estimation (if enabled) */
+                        if (_use_body_pose && _body_pose_estimator) {
+                            poses = _body_pose_estimator->process(image, 0.5f, 0.45f);
+                        }
+
+                        /* 3. Run FAN 2D Face Landmark estimation (if enabled) */
+                        if (_use_landmark_2d && _face_landmark_2d) {
+                            landmarks_2d = _face_landmark_2d->process(image, bboxes);
+                        }
+
+                        /* 4. Run FAN 3D Face Landmark estimation (if enabled) */
+                        if (_use_landmark_3d && _face_landmark_3d) {
+                            landmarks_3d = _face_landmark_3d->process(image, bboxes);
+                        }
                     }
 
                     /* 5. Resize if target monitor resolution is defined */
@@ -352,6 +382,18 @@ void osm_monolithic_inference::_inference_process() {
                     float scale_y = (float)out_image.rows / image.rows;
 
                     /* 6. Draw face bounding boxes on the resized out_image */
+                    if (_use_roi && _roi_visualize) {
+                        cv::Rect scaled_roi(
+                            _roi_x1 * scale_x,
+                            _roi_y1 * scale_y,
+                            (_roi_x2 - _roi_x1) * scale_x,
+                            (_roi_y2 - _roi_y1) * scale_y
+                        );
+                        cv::rectangle(out_image, scaled_roi, cv::Scalar(255, 255, 255), 1);
+                        cv::putText(out_image, "FL-bound", cv::Point(scaled_roi.x, scaled_roi.y - 5),
+                                    cv::FONT_HERSHEY_SIMPLEX, 0.45, cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
+                    }
+
                     if (_use_face_det && _vis_face_det) {
                         for (const auto& box : bboxes) {
                             cv::Rect scaled_box(

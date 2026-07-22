@@ -9,6 +9,9 @@
         "face_detection": {
             "use": true,
             "visualize": true,
+            "use_roi": true,
+            "roi": [50, 150, 740, 1800],
+            "roi_visualize": true,
             "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/yolo11n-face.torchscript",
             "gpu_id": 0,
             "nms": 0.45,
