@@ -24,6 +24,7 @@
 #include "face_landmark_3d.hpp"
 #include "head_pose_estimation_from_2d.hpp"
 #include "head_pose_estimation_from_3d.hpp"
+#include "driver_readiness_estimation.hpp"
 
 using namespace std;
 using namespace flame::component;
@@ -72,6 +73,9 @@ class osm_monolithic_inference : public flame::component::Object {
         std::unique_ptr<head_pose_estimation_from_2d> _head_pose_estimator_2d;
         std::unique_ptr<head_pose_estimation_from_3d> _head_pose_estimator_3d;
 
+        /* Driver Readiness Estimator Instance */
+        std::unique_ptr<driver_readiness_estimation> _driver_readiness_estimator;
+
         /* Model Execution Flags */
         bool _use_face_det{true};
         bool _use_landmark_2d{true};
@@ -79,6 +83,7 @@ class osm_monolithic_inference : public flame::component::Object {
         bool _use_body_pose{true};
         bool _use_head_pose_2d{true};
         bool _use_head_pose_3d{true};
+        bool _use_driver_readiness{false};
 
         /* Thread Control */
         std::thread _inference_worker;
@@ -102,6 +107,7 @@ class osm_monolithic_inference : public flame::component::Object {
         bool _vis_body_pose{true};
         bool _vis_head_pose_2d{true};
         bool _vis_head_pose_3d{true};
+        bool _vis_driver_readiness{true};
 
         /* ROI configuration */
         bool _use_roi{false};
