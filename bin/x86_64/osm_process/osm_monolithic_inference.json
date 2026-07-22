@@ -8,6 +8,7 @@
         "camera_calibration": "/home/osm/dev/flame_osm/bin/x86_64/osm_process/camera_parameter.json",
         "face_detection": {
             "use": true,
+            "visualize": true,
             "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/yolo11n-face.torchscript",
             "gpu_id": 0,
             "nms": 0.45,
@@ -15,22 +16,27 @@
         },
         "2d_face_landmark": {
             "use": false,
+            "visualize": true,
             "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/face_alignment_2d_fan_cuda.torchscript",
             "gpu_id": 0
         },
         "3d_face_landmark": {
             "use": true,
+            "visualize": true,
             "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/face_alignment_3d_fan_full_cuda.torchscript",
             "gpu_id": 0
         },
         "head_pose_estimation_from_2d": {
-            "use": false
+            "use": false,
+            "visualize": true
         },
         "head_pose_estimation_from_3d": {
-            "use": true
+            "use": true,
+            "visualize": true
         },
         "body_pose_estimation": {
             "use": true,
+            "visualize": true,
             "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/yolo26m-pose.torchscript",
             "gpu_id": 0
         }

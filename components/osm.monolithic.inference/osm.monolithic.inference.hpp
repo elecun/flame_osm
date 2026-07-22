@@ -94,6 +94,14 @@ class osm_monolithic_inference : public flame::component::Object {
         float _padding_w = 0.0f;
         float _padding_h = 0.0f;
         bool _show_info = true;
+
+        /* Visualization Flags */
+        bool _vis_face_det{true};
+        bool _vis_landmark_2d{true};
+        bool _vis_landmark_3d{true};
+        bool _vis_body_pose{true};
+        bool _vis_head_pose_2d{true};
+        bool _vis_head_pose_3d{true};
 };
 
 EXPORT_COMPONENT_API

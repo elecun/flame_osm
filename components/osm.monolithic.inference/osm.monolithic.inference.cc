@@ -34,11 +34,17 @@ bool osm_monolithic_inference::onInit(){
         if (parameters.contains("head_pose_estimation_from_2d")) {
             const auto& hp_params = parameters["head_pose_estimation_from_2d"];
             _use_head_pose_2d = hp_params.value("use", _use_head_pose_2d);
+            _vis_head_pose_2d = hp_params.value("visualize", true);
         }
 
         if (parameters.contains("head_pose_estimation_from_3d")) {
             const auto& hp_params = parameters["head_pose_estimation_from_3d"];
             _use_head_pose_3d = hp_params.value("use", _use_head_pose_3d);
+            _vis_head_pose_3d = hp_params.value("visualize", true);
+        } else if (parameters.contains("head_pose_estimation_3d")) {
+            const auto& hp_params = parameters["head_pose_estimation_3d"];
+            _use_head_pose_3d = hp_params.value("use", _use_head_pose_3d);
+            _vis_head_pose_3d = hp_params.value("visualize", true);
         }
 
         if (parameters.contains("face_detection")) {
@@ -47,6 +53,7 @@ bool osm_monolithic_inference::onInit(){
             model_path = fd_params.value("model_path", model_path);
             gpu_id = fd_params.value("gpu_id", gpu_id);
             _nms_threshold = fd_params.value("nms", _nms_threshold);
+            _vis_face_det = fd_params.value("visualize", true);
             if (fd_params.contains("padding") && fd_params["padding"].is_array() && fd_params["padding"].size() == 2) {
                 _padding_w = fd_params["padding"][0].get<float>();
                 _padding_h = fd_params["padding"][1].get<float>();
@@ -61,6 +68,7 @@ bool osm_monolithic_inference::onInit(){
             _use_body_pose = bp_params.value("use", _use_body_pose);
             body_model_path = bp_params.value("model_path", body_model_path);
             body_gpu_id = bp_params.value("gpu_id", body_gpu_id);
+            _vis_body_pose = bp_params.value("visualize", true);
         }
 
         std::string landmark_model_path = "/home/osm/dev/flame_osm/bin/x86_64/models/face_alignment_2d_fan_cuda.torchscript";
@@ -70,6 +78,13 @@ bool osm_monolithic_inference::onInit(){
             _use_landmark_2d = fl_params.value("use", _use_landmark_2d);
             landmark_model_path = fl_params.value("model_path", landmark_model_path);
             landmark_gpu_id = fl_params.value("gpu_id", landmark_gpu_id);
+            _vis_landmark_2d = fl_params.value("visualize", true);
+        } else if (parameters.contains("2d_face_landmar")) {
+            const auto& fl_params = parameters["2d_face_landmar"];
+            _use_landmark_2d = fl_params.value("use", _use_landmark_2d);
+            landmark_model_path = fl_params.value("model_path", landmark_model_path);
+            landmark_gpu_id = fl_params.value("gpu_id", landmark_gpu_id);
+            _vis_landmark_2d = fl_params.value("visualize", true);
         }
 
         std::string landmark_3d_model_path = "/home/osm/dev/flame_osm/bin/x86_64/models/face_alignment_3d_fan_cuda.torchscript";
@@ -79,6 +94,7 @@ bool osm_monolithic_inference::onInit(){
             _use_landmark_3d = fl3d_params.value("use", _use_landmark_3d);
             landmark_3d_model_path = fl3d_params.value("model_path", landmark_3d_model_path);
             landmark_3d_gpu_id = fl3d_params.value("gpu_id", landmark_3d_gpu_id);
+            _vis_landmark_3d = fl3d_params.value("visualize", true);
         }
 
         // Warnings for dependency checks
@@ -297,6 +313,8 @@ void osm_monolithic_inference::_inference_process() {
 
                 try {
                     auto proc_start = std::chrono::high_resolution_clock::now();
+                    head_pose::PoseResult last_pose;
+                    bool has_pose = false;
 
                     /* 1. Run YOLO11-Face detection (if enabled) */
                     std::vector<cv::Rect> bboxes;
@@ -334,7 +352,7 @@ void osm_monolithic_inference::_inference_process() {
                     float scale_y = (float)out_image.rows / image.rows;
 
                     /* 6. Draw face bounding boxes on the resized out_image */
-                    if (_use_face_det) {
+                    if (_use_face_det && _vis_face_det) {
                         for (const auto& box : bboxes) {
                             cv::Rect scaled_box(
                                 box.x * scale_x,
@@ -342,32 +360,61 @@ void osm_monolithic_inference::_inference_process() {
                                 box.width * scale_x,
                                 box.height * scale_y
                             );
-                            cv::rectangle(out_image, scaled_box, cv::Scalar(0, 255, 0), 3);
+                            cv::rectangle(out_image, scaled_box, cv::Scalar(0, 255, 0), 2);
                         }
                     }
 
                     /* 7. Draw 2D face landmarks and FAN crop region (RED Bounding Box) on out_image */
                     if (_use_landmark_2d) {
                         for (const auto& res : landmarks_2d) {
-                            // Draw RED bounding box for the actual landmark detection area (FAN Crop Patch)
-                            cv::Rect scaled_crop_box(
-                                res.crop_bbox.x * scale_x,
-                                res.crop_bbox.y * scale_y,
-                                res.crop_bbox.width * scale_x,
-                                res.crop_bbox.height * scale_y
-                            );
-                            cv::rectangle(out_image, scaled_crop_box, cv::Scalar(0, 0, 255), 2);
+                            if (_vis_landmark_2d) {
+                                // Draw RED bounding box for the actual landmark detection area (FAN Crop Patch)
+                                cv::Rect scaled_crop_box(
+                                    res.crop_bbox.x * scale_x,
+                                    res.crop_bbox.y * scale_y,
+                                    res.crop_bbox.width * scale_x,
+                                    res.crop_bbox.height * scale_y
+                                );
+                                cv::rectangle(out_image, scaled_crop_box, cv::Scalar(0, 0, 255), 2);
 
-                            // Draw 68 landmark points
-                            for (const auto& pt : res.points) {
-                                cv::circle(out_image, cv::Point2f(pt.x * scale_x, pt.y * scale_y), 1, cv::Scalar(0, 0, 255), -1);
+                                // Draw 68 landmark points
+                                for (const auto& pt : res.points) {
+                                    cv::circle(out_image, cv::Point2f(pt.x * scale_x, pt.y * scale_y), 1, cv::Scalar(0, 255, 255), -1);
+                                }
+
+                                // Connect eyes with white lines: Left (36-41), Right (42-47)
+                                if (res.points.size() >= 48) {
+                                    const std::vector<int> left_eye_idx = {36, 37, 38, 39, 40, 41};
+                                    for (size_t idx = 0; idx < left_eye_idx.size(); ++idx) {
+                                        int p1 = left_eye_idx[idx];
+                                        int p2 = left_eye_idx[(idx + 1) % left_eye_idx.size()];
+                                        cv::line(out_image, 
+                                                 cv::Point(res.points[p1].x * scale_x, res.points[p1].y * scale_y),
+                                                 cv::Point(res.points[p2].x * scale_x, res.points[p2].y * scale_y),
+                                                 cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
+                                    }
+                                    const std::vector<int> right_eye_idx = {42, 43, 44, 45, 46, 47};
+                                    for (size_t idx = 0; idx < right_eye_idx.size(); ++idx) {
+                                        int p1 = right_eye_idx[idx];
+                                        int p2 = right_eye_idx[(idx + 1) % right_eye_idx.size()];
+                                        cv::line(out_image, 
+                                                 cv::Point(res.points[p1].x * scale_x, res.points[p1].y * scale_y),
+                                                 cv::Point(res.points[p2].x * scale_x, res.points[p2].y * scale_y),
+                                                 cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
+                                    }
+                                }
                             }
+
 
                             // Estimate Head Pose using 68 2D landmarks (if head_pose_estimation_from_2d is enabled)
                             if (_use_head_pose_2d && _head_pose_estimator_2d) {
                                 head_pose::PoseResult pose_res = _head_pose_estimator_2d->estimate(res.points, image.size());
                                 if (pose_res.success) {
-                                    _head_pose_estimator_2d->drawPoseAxes(out_image, pose_res, image.size(), scale_x, scale_y);
+                                    last_pose = pose_res;
+                                    has_pose = true;
+                                    if (_vis_head_pose_2d) {
+                                        _head_pose_estimator_2d->drawPoseAxes(out_image, pose_res, image.size(), scale_x, scale_y);
+                                    }
                                 }
                             }
                         }
@@ -376,50 +423,135 @@ void osm_monolithic_inference::_inference_process() {
                     /* 8. Draw 3D face landmarks and estimate Head Pose from 3D points on out_image */
                     if (_use_landmark_3d) {
                         for (const auto& res : landmarks_3d) {
-                            for (const auto& pt : res.points_3d) {
-                                cv::circle(out_image, cv::Point2f(pt.x * scale_x, pt.y * scale_y), 1, cv::Scalar(0, 0, 255), -1);
+                            if (_vis_landmark_3d) {
+                                for (const auto& pt : res.points_3d) {
+                                    cv::circle(out_image, cv::Point2f(pt.x * scale_x, pt.y * scale_y), 1, cv::Scalar(0, 255, 255), -1);
+                                }
+
+                                // Connect eyes with white lines: Left (36-41), Right (42-47)
+                                if (res.points_3d.size() >= 48) {
+                                    const std::vector<int> left_eye_idx = {36, 37, 38, 39, 40, 41};
+                                    for (size_t idx = 0; idx < left_eye_idx.size(); ++idx) {
+                                        int p1 = left_eye_idx[idx];
+                                        int p2 = left_eye_idx[(idx + 1) % left_eye_idx.size()];
+                                        cv::line(out_image, 
+                                                 cv::Point(res.points_3d[p1].x * scale_x, res.points_3d[p1].y * scale_y),
+                                                 cv::Point(res.points_3d[p2].x * scale_x, res.points_3d[p2].y * scale_y),
+                                                 cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
+                                    }
+                                    const std::vector<int> right_eye_idx = {42, 43, 44, 45, 46, 47};
+                                    for (size_t idx = 0; idx < right_eye_idx.size(); ++idx) {
+                                        int p1 = right_eye_idx[idx];
+                                        int p2 = right_eye_idx[(idx + 1) % right_eye_idx.size()];
+                                        cv::line(out_image, 
+                                                 cv::Point(res.points_3d[p1].x * scale_x, res.points_3d[p1].y * scale_y),
+                                                 cv::Point(res.points_3d[p2].x * scale_x, res.points_3d[p2].y * scale_y),
+                                                 cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
+                                    }
+                                }
                             }
 
                             // Estimate Head Pose using 68 3D landmarks (if head_pose_estimation_from_3d is enabled)
                             if (_use_head_pose_3d && _head_pose_estimator_3d) {
                                 head_pose::PoseResult pose_res = _head_pose_estimator_3d->estimate(res.points_3d, image.size());
                                 if (pose_res.success) {
-                                    _head_pose_estimator_3d->drawPoseAxes(out_image, pose_res, image.size(), scale_x, scale_y);
+                                    last_pose = pose_res;
+                                    has_pose = true;
+                                    if (_vis_head_pose_3d) {
+                                        _head_pose_estimator_3d->drawPoseAxes(out_image, pose_res, image.size(), scale_x, scale_y);
+                                    }
                                 }
                             }
                         }
                     }
 
                     /* 7. Draw body poses on the resized out_image (limbs & body only) */
-                    const std::vector<std::pair<int, int>> SKELETON_CONNECTIONS = {
-                        {5, 6}, {5, 7}, {7, 9}, {6, 8}, {8, 10},
-                        {5, 11}, {6, 12}, {11, 12},
-                        {11, 13}, {13, 15}, {12, 14}, {14, 16}
-                    };
+                    if (_vis_body_pose) {
+                        const std::vector<std::pair<int, int>> SKELETON_CONNECTIONS = {
+                            {5, 6}, {5, 7}, {7, 9}, {6, 8}, {8, 10},
+                            {5, 11}, {6, 12}, {11, 12},
+                            {11, 13}, {13, 15}, {12, 14}, {14, 16}
+                        };
 
-                    for (const auto& pose : poses) {
-                        // Draw skeleton connections
-                        for (const auto& conn : SKELETON_CONNECTIONS) {
-                            if (conn.first < (int)pose.keypoints.size() && conn.second < (int)pose.keypoints.size()) {
-                                const auto& kp1 = pose.keypoints[conn.first];
-                                const auto& kp2 = pose.keypoints[conn.second];
-                                if (kp1.confidence > 0.5f && kp2.confidence > 0.5f) {
-                                    cv::line(out_image, 
-                                             cv::Point(kp1.x * scale_x, kp1.y * scale_y), 
-                                             cv::Point(kp2.x * scale_x, kp2.y * scale_y), 
-                                             cv::Scalar(0, 255, 255), 2);
+                        for (const auto& pose : poses) {
+                            // Draw skeleton connections
+                            for (const auto& conn : SKELETON_CONNECTIONS) {
+                                if (conn.first < (int)pose.keypoints.size() && conn.second < (int)pose.keypoints.size()) {
+                                    const auto& kp1 = pose.keypoints[conn.first];
+                                    const auto& kp2 = pose.keypoints[conn.second];
+                                    if (kp1.confidence > 0.5f && kp2.confidence > 0.5f) {
+                                        cv::line(out_image, 
+                                                 cv::Point(kp1.x * scale_x, kp1.y * scale_y), 
+                                                 cv::Point(kp2.x * scale_x, kp2.y * scale_y), 
+                                                 cv::Scalar(0, 255, 255), 2);
+                                    }
+                                }
+                            }
+
+                            // Draw keypoints (excluding face landmarks: index 0 to 4)
+                            for (int k = 5; k < (int)pose.keypoints.size(); ++k) {
+                                const auto& kpt = pose.keypoints[k];
+                                if (kpt.confidence > 0.5f) {
+                                    cv::circle(out_image, 
+                                               cv::Point(kpt.x * scale_x, kpt.y * scale_y), 
+                                               4, cv::Scalar(0, 0, 255), -1);
                                 }
                             }
                         }
+                    }
 
-                        // Draw keypoints (excluding face landmarks: index 0 to 4)
-                        for (int k = 5; k < (int)pose.keypoints.size(); ++k) {
-                            const auto& kpt = pose.keypoints[k];
-                            if (kpt.confidence > 0.5f) {
-                                cv::circle(out_image, 
-                                           cv::Point(kpt.x * scale_x, kpt.y * scale_y), 
-                                           4, cv::Scalar(0, 0, 255), -1);
-                            }
+                    // 9. Draw head pose angles in a white outline box at the bottom-left corner of the image
+                    if (has_pose && (_vis_head_pose_2d || _vis_head_pose_3d)) {
+                        double pitch = last_pose.euler[0];
+                        double yaw = last_pose.euler[1];
+                        double roll = last_pose.euler[2];
+
+                        char txt_pitch[64];
+                        char txt_yaw[64];
+                        char txt_roll[64];
+                        snprintf(txt_pitch, sizeof(txt_pitch), "X (Pitch): %.2f deg", pitch);
+                        snprintf(txt_yaw, sizeof(txt_yaw), "Y (Yaw):   %.2f deg", yaw);
+                        snprintf(txt_roll, sizeof(txt_roll), "Z (Roll):  %.2f deg", roll);
+
+                        std::vector<std::string> lines = {
+                            "Head Pose Angles",
+                            txt_pitch,
+                            txt_yaw,
+                            txt_roll
+                        };
+
+                        int font_face = cv::FONT_HERSHEY_SIMPLEX;
+                        double font_scale = 0.45;
+                        int thickness = 1;
+                        int baseline = 0;
+                        int max_w = 0;
+                        int total_h = 0;
+                        std::vector<cv::Size> sizes;
+
+                        for (const auto& line : lines) {
+                            cv::Size sz = cv::getTextSize(line, font_face, font_scale, thickness, &baseline);
+                            sizes.push_back(sz);
+                            if (sz.width > max_w) max_w = sz.width;
+                            total_h += sz.height + 8;
+                        }
+
+                        int margin = 10;
+                        int box_w = max_w + 2 * margin;
+                        int box_h = total_h + margin;
+
+                        int start_x = 10;
+                        int start_y = out_image.rows - box_h - 10;
+
+                        cv::Rect box(start_x, start_y, box_w, box_h);
+                        cv::rectangle(out_image, box, cv::Scalar(0, 0, 0), cv::FILLED);
+                        cv::rectangle(out_image, box, cv::Scalar(255, 255, 255), 1);
+
+                        int curr_y = start_y + margin;
+                        for (size_t i = 0; i < lines.size(); ++i) {
+                            curr_y += sizes[i].height;
+                            cv::putText(out_image, lines[i], cv::Point(start_x + margin, curr_y), 
+                                        font_face, font_scale, cv::Scalar(255, 255, 255), thickness, cv::LINE_AA);
+                            curr_y += 6;
                         }
                     }
 

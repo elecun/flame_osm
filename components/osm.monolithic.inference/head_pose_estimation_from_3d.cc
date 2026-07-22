@@ -260,14 +260,14 @@ void head_pose_estimation_from_3d::drawPoseAxes(cv::Mat& image, const head_pose:
             cv::Point pz((int)std::round((axis_points_2d[3].x - origin_proj.x + nose_tip.x) * scale_x),
                          (int)std::round((axis_points_2d[3].y - origin_proj.y + nose_tip.y) * scale_y));
 
-            int thickness = 3;
+            int thickness = 2;
             cv::line(image, p0, px, cv::Scalar(0, 0, 255), thickness);   // X-axis: Red
             cv::line(image, p0, py, cv::Scalar(0, 255, 0), thickness);   // Y-axis: Green
             cv::line(image, p0, pz, cv::Scalar(255, 0, 0), thickness);   // Z-axis: Blue
 
-            cv::putText(image, "X_3D", px, cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 255), 2);
-            cv::putText(image, "Y_3D", py, cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
-            cv::putText(image, "Z_3D", pz, cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 0, 0), 2);
+            cv::putText(image, "X", px, cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 1);
+            cv::putText(image, "Y", py, cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
+            cv::putText(image, "Z", pz, cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 0, 0), 1);
         }
     }
     catch (const std::exception& e) {
