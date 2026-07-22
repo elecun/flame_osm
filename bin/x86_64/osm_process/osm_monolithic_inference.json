@@ -42,6 +42,12 @@
             "visualize": true,
             "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/yolo26m-pose.torchscript",
             "gpu_id": 0
+        },
+        "driver_readiness_estimation": {
+            "use": false,
+            "visualize": true,
+            "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/iae_dms_251212.torchscript",
+            "gpu_id": 1
         }
     },
     "dataport": {
