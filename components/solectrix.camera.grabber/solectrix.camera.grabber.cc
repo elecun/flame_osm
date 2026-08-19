@@ -6,6 +6,7 @@
 #include <fstream>
 #include <filesystem>
 #include "core_frame_processing.h"
+#include "opencv2/core.hpp"
 
 using namespace flame;
 using namespace std;
@@ -237,6 +238,9 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
                         cv::remap(captured, undistorted, _map1, _map2, cv::INTER_LINEAR);
                         captured = undistorted;
                     }
+
+                    //image flip
+                    cv::flip(captured, captured,0);
 
                     // 1. Prepare raw Mat data instead of JPEG encoding
                     auto msg = make_shared<flame::component::ZData>();

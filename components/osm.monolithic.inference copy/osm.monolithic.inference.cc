@@ -112,38 +112,6 @@ bool osm_monolithic_inference::onInit(){
             _vis_landmark_3d = fl3d_params.value("visualize", true);
         }
 
-        std::string readiness_model_path = "/home/osm/dev/flame_osm/bin/x86_64/models/iae_dms_251212.torchscript";
-        int readiness_gpu_id = 1;
-        if (parameters.contains("driver_readiness_estimation")) {
-            const auto& dr_params = parameters["driver_readiness_estimation"];
-            _use_driver_readiness = dr_params.value("use", _use_driver_readiness);
-            readiness_model_path = dr_params.value("model_path", readiness_model_path);
-            readiness_gpu_id = dr_params.value("gpu_id", readiness_gpu_id);
-            _vis_driver_readiness = dr_params.value("visualize", true);
-        }
-
-        double ref_yaw = 0.0;
-        double ref_pitch = 0.0;
-        double sigma_yaw = 15.0;
-        double sigma_pitch = 10.0;
-        double t_window = 2.0;
-        double readiness_low = 0.2;
-        double readiness_moderate = 0.6;
-        double readiness_high = 1.0;
-        if (parameters.contains("driver_readiness_estimation_logical")) {
-            const auto& drl_params = parameters["driver_readiness_estimation_logical"];
-            _use_driver_readiness_logical = drl_params.value("use", _use_driver_readiness_logical);
-            _vis_driver_readiness_logical = drl_params.value("visualize", true);
-            ref_yaw = drl_params.value("ref_yaw", ref_yaw);
-            ref_pitch = drl_params.value("ref_pitch", ref_pitch);
-            sigma_yaw = drl_params.value("sigma_yaw", sigma_yaw);
-            sigma_pitch = drl_params.value("sigma_pitch", sigma_pitch);
-            t_window = drl_params.value("t_window", t_window);
-            readiness_low = drl_params.value("readiness_low", readiness_low);
-            readiness_moderate = drl_params.value("readiness_moderate", readiness_moderate);
-            readiness_high = drl_params.value("readiness_high", readiness_high);
-        }
-
         // Warnings for dependency checks
         if (!_use_face_det && (_use_landmark_2d || _use_landmark_3d)) {
             logger::warn("[{}] Face detection process is required for 2D/3D face landmark extraction, but face_detection 'use' is set to false!", getName());
@@ -236,22 +204,6 @@ bool osm_monolithic_inference::onInit(){
             if (!calib_path.empty()) {
                 _head_pose_estimator_3d->loadCalibration(calib_path);
             }
-        }
-
-        if (_use_driver_readiness) {
-            _driver_readiness_estimator = std::make_unique<driver_readiness_estimation>();
-            if (!_driver_readiness_estimator->loadModel(readiness_model_path, readiness_gpu_id)) {
-                logger::error("[{}] Failed to load driver readiness estimation model: {}", getName(), readiness_model_path);
-                return false;
-            }
-        }
-
-        if (_use_driver_readiness_logical) {
-            _driver_readiness_logical_estimator = std::make_unique<driver_readiness_estimation_logical>();
-            _driver_readiness_logical_estimator->setParameters(
-                ref_yaw, ref_pitch, sigma_yaw, sigma_pitch, t_window,
-                readiness_low, readiness_moderate, readiness_high
-            );
         }
 
         /* Start Inference thread */
@@ -599,23 +551,36 @@ void osm_monolithic_inference::_inference_process() {
                         char txt_pitch[64];
                         char txt_yaw[64];
                         char txt_roll[64];
+                        snprintf(txt_pitch, sizeof(txt_pitch), "X (Pitch): %.2f deg", pitch);
+                        snprintf(txt_yaw, sizeof(txt_yaw), "Y (Yaw):   %.2f deg", yaw);
+                        snprintf(txt_roll, sizeof(txt_roll), "Z (Roll):  %.2f deg", roll);
 
-                        snprintf(txt_pitch, sizeof(txt_pitch), "Pitch : %.1f", pitch);
-                        snprintf(txt_yaw, sizeof(txt_yaw), "Yaw   : %.1f", yaw);
-                        snprintf(txt_roll, sizeof(txt_roll), "Roll  : %.1f", roll);
+                        std::vector<std::string> lines = {
+                            "Head Pose Angles",
+                            txt_pitch,
+                            txt_yaw,
+                            txt_roll
+                        };
 
                         int font_face = cv::FONT_HERSHEY_SIMPLEX;
-                        double font_scale = 0.5;
+                        double font_scale = 0.45;
                         int thickness = 1;
                         int baseline = 0;
+                        int max_w = 0;
+                        int total_h = 0;
+                        std::vector<cv::Size> sizes;
 
-                        cv::Size s1 = cv::getTextSize(txt_pitch, font_face, font_scale, thickness, &baseline);
-                        cv::Size s2 = cv::getTextSize(txt_yaw, font_face, font_scale, thickness, &baseline);
-                        cv::Size s3 = cv::getTextSize(txt_roll, font_face, font_scale, thickness, &baseline);
-                        int max_w = std::max({s1.width, s2.width, s3.width});
+                        for (const auto& line : lines) {
+                            cv::Size sz = cv::getTextSize(line, font_face, font_scale, thickness, &baseline);
+                            sizes.push_back(sz);
+                            if (sz.width > max_w) max_w = sz.width;
+                            total_h += sz.height + 8;
+                        }
 
-                        int box_w = max_w + 20;
-                        int box_h = 65;
+                        int margin = 10;
+                        int box_w = max_w + 2 * margin;
+                        int box_h = total_h + margin;
+
                         int start_x = 10;
                         int start_y = out_image.rows - box_h - 10;
 
@@ -623,25 +588,12 @@ void osm_monolithic_inference::_inference_process() {
                         cv::rectangle(out_image, box, cv::Scalar(0, 0, 0), cv::FILLED);
                         cv::rectangle(out_image, box, cv::Scalar(255, 255, 255), 1);
 
-                        cv::putText(out_image, txt_pitch, cv::Point(start_x + 10, start_y + 18), font_face, font_scale, cv::Scalar(255, 255, 255), thickness, cv::LINE_AA);
-                        cv::putText(out_image, txt_yaw,   cv::Point(start_x + 10, start_y + 36), font_face, font_scale, cv::Scalar(255, 255, 255), thickness, cv::LINE_AA);
-                        cv::putText(out_image, txt_roll,  cv::Point(start_x + 10, start_y + 54), font_face, font_scale, cv::Scalar(255, 255, 255), thickness, cv::LINE_AA);
-                    }
-
-                    /* 10. Run Driver Readiness Estimation (Torch-based, if enabled) */
-                    if (_use_driver_readiness && _driver_readiness_estimator) {
-                        driver_readiness::ReadinessResult readiness_res = _driver_readiness_estimator->process(poses, last_pose, has_pose);
-                        if (_vis_driver_readiness) {
-                            _driver_readiness_estimator->drawResult(out_image, readiness_res);
-                        }
-                    }
-
-                    /* 11. Run Driver Readiness Estimation (Rule-based Logical, if enabled) */
-                    if (_use_driver_readiness_logical && _driver_readiness_logical_estimator) {
-                        driver_readiness_logical::LogicalReadinessResult logical_res = 
-                            _driver_readiness_logical_estimator->process(last_pose, has_pose);
-                        if (_vis_driver_readiness_logical) {
-                            _driver_readiness_logical_estimator->drawResult(out_image, logical_res);
+                        int curr_y = start_y + margin;
+                        for (size_t i = 0; i < lines.size(); ++i) {
+                            curr_y += sizes[i].height;
+                            cv::putText(out_image, lines[i], cv::Point(start_x + margin, curr_y), 
+                                        font_face, font_scale, cv::Scalar(255, 255, 255), thickness, cv::LINE_AA);
+                            curr_y += 6;
                         }
                     }
 
