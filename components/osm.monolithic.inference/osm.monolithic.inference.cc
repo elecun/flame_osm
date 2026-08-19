@@ -410,16 +410,52 @@ void osm_monolithic_inference::_inference_process() {
                     if (!bboxes.empty()) {
                         /* 2. Run YOLO-Pose estimation (if enabled) */
                         if (_use_body_pose && _body_pose_estimator) {
-                            poses = _body_pose_estimator->process(image, 0.5f, 0.45f);
+                            std::vector<body_pose::PoseResult> all_poses = _body_pose_estimator->process(image, 0.5f, 0.45f);
+
+                            /* 2-1. Match FL Bound-filtered face bbox with body pose using nose keypoint.
+                             *  Conditions:
+                             *    - face bbox center is already inside FL Bound (filtered above)
+                             *    - body pose nose keypoint (index 0) must lie inside the face bbox
+                             *  Selection: among all valid (bbox, pose) pairs, select the one
+                             *             with the largest face bbox area. */
+                            int selected_bbox_idx = -1;
+                            int selected_pose_idx = -1;
+                            int max_area = -1;
+
+                            for (int bi = 0; bi < (int)bboxes.size(); ++bi) {
+                                const cv::Rect& bbox = bboxes[bi];
+                                int area = bbox.width * bbox.height;
+                                for (int pi = 0; pi < (int)all_poses.size(); ++pi) {
+                                    const auto& pose = all_poses[pi];
+                                    if (!pose.keypoints.empty()) {
+                                        float nose_x = pose.keypoints[0].x;
+                                        float nose_y = pose.keypoints[0].y;
+                                        if (bbox.contains(cv::Point2f(nose_x, nose_y)) && area > max_area) {
+                                            max_area = area;
+                                            selected_bbox_idx = bi;
+                                            selected_pose_idx = pi;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (selected_bbox_idx >= 0) {
+                                bboxes = { bboxes[selected_bbox_idx] };
+                                poses  = { all_poses[selected_pose_idx] };
+                                logger::debug("[{}] Matched face bbox (area={}) with body pose index {}", getName(), max_area, selected_pose_idx);
+                            } else {
+                                logger::debug("[{}] No valid (face bbox, body pose) pair found in FL Bound. Skipping downstream.", getName());
+                                bboxes.clear();
+                            }
                         }
 
                         /* 3. Run FAN 2D Face Landmark estimation (if enabled) */
-                        if (_use_landmark_2d && _face_landmark_2d) {
+                        if (!bboxes.empty() && _use_landmark_2d && _face_landmark_2d) {
                             landmarks_2d = _face_landmark_2d->process(image, bboxes);
                         }
 
                         /* 4. Run FAN 3D Face Landmark estimation (if enabled) */
-                        if (_use_landmark_3d && _face_landmark_3d) {
+                        if (!bboxes.empty() && _use_landmark_3d && _face_landmark_3d) {
                             landmarks_3d = _face_landmark_3d->process(image, bboxes);
                         }
                     }
