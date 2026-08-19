@@ -34,6 +34,7 @@ bool solectrix_camera_grabber::onInit(){
 
         /* setup pipeline */
         _use_image_stream.store(parameters.value("use_image_stream", false));
+        _fault_reset.store(parameters.value("fault_reset", false));
 
         /* device instance */
         _frame_grabber = make_unique<sxpf_grabber>(parameters);
@@ -212,6 +213,7 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
             cv::Mat captured = captured_data.second;
 
             if(cam_channel>=0 && !captured.empty()){
+                _capture_fault.store(false);
                 if(_use_image_stream.load()){
 
                     string portname = "image_stream_0";
@@ -257,6 +259,7 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
                     tag["type"] = captured.type();
                     tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
                     tag["cam_channel"] = cam_channel;
+                    tag["capture_fault"] = false;
 
                     // logger::debug("[{}] cam channel {}, fps : {}", getName(), cam_channel, tag["fps"].get<double>());
                     msg->from = portname;
@@ -276,6 +279,54 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
                         }
                     }
                     _queue_cvs[cam_channel].notify_one();
+                }
+            }
+            else {
+                _capture_fault.store(true);
+                if(_use_image_stream.load()){
+                    for(const auto& [ch, portname] : _channel_ports){
+                        auto msg = make_shared<flame::component::ZData>();
+                        json tag;
+                        auto now = chrono::high_resolution_clock::now();
+                        tag["fps"] = 0.0;
+                        tag["height"] = 0;
+                        tag["width"] = 0;
+                        tag["type"] = 0;
+                        tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
+                        tag["cam_channel"] = ch;
+                        tag["capture_fault"] = true;
+
+                        msg->from = portname;
+                        msg->meta = tag.dump();
+                        msg->addmem(nullptr, 0);
+
+                        {
+                            lock_guard<mutex> lock(_queue_mtxs[ch]);
+                            if(_dispatch_queues[ch].size() < _max_queue_size){
+                                _dispatch_queues[ch].push(msg);
+                            }
+                            else {
+                                _dispatch_queues[ch].pop();
+                                _dispatch_queues[ch].push(msg);
+                            }
+                        }
+                        _queue_cvs[ch].notify_one();
+                    }
+                }
+
+                if (_fault_reset.load()) {
+                    logger::warn("[{}] Capture fault detected. Closing and re-initializing frame grabber...", getName());
+                    _frame_grabber->close();
+                    this_thread::sleep_for(chrono::milliseconds(500));
+                    if(!_frame_grabber->init()){
+                        logger::error("[{}] Failed to re-initialize frame grabber during reset", getName());
+                    }
+                    else if(!_frame_grabber->open()){
+                        logger::error("[{}] Failed to re-open frame grabber during reset", getName());
+                    }
+                    else {
+                        logger::info("[{}] Frame grabber successfully re-initialized and opened.", getName());
+                    }
                 }
             }
         }

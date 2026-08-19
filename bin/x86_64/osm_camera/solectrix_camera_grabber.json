@@ -32,7 +32,8 @@
         "left_shift": 8,
         "use_image_stream": true,
         "undistort": false,
-        "camera_calibration": "/home/osm/dev/flame_osm/bin/x86_64/osm_camera/camera_parameter.json"
+        "camera_calibration": "/home/osm/dev/flame_osm/bin/x86_64/osm_camera/camera_parameter.json",
+        "fault_reset": true
     },
     "dataport": {
         "status": {
