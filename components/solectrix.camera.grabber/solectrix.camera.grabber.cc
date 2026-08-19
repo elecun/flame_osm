@@ -258,7 +258,7 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
                     tag["timestamp"] = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
                     tag["cam_channel"] = cam_channel;
 
-                    logger::debug("[{}] cam channel {}, fps : {}", getName(), cam_channel, tag["fps"].get<double>());
+                    // logger::debug("[{}] cam channel {}, fps : {}", getName(), cam_channel, tag["fps"].get<double>());
                     msg->from = portname;
                     msg->meta = tag.dump();
 

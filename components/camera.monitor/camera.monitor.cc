@@ -157,6 +157,7 @@ void camera_monitor::_monitor_task(string stream_name, string monitor_portname)
 
             if (msg) {
                 auto start_time = chrono::high_resolution_clock::now();
+                logger::info("[{}] [{}] Received msg size: {}, meta: {}", getName(), stream_name, msg->size(), msg->meta);
 
                 if (msg->size() >= 2) {
                     zmq::message_t tag_msg = msg->pop();
@@ -215,7 +216,7 @@ void camera_monitor::_monitor_task(string stream_name, string monitor_portname)
 
                 auto end_time = chrono::high_resolution_clock::now();
                 chrono::duration<double, std::milli> elapsed = end_time - start_time;
-                logger::debug("[{}] [{}] Processing loop time: {:.3f} ms", getName(), stream_name, elapsed.count());
+                // logger::debug("[{}] [{}] Processing loop time: {:.3f} ms", getName(), stream_name, elapsed.count());
             }
         } catch (const std::exception& e) {
             if (!_stop_threads.load()) {
