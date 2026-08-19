@@ -43,12 +43,13 @@
             "socket_type": "pub",
             "queue_size": 100
         },
-        "can_ch0_out": {
+        "image_stream_1_processed_monitor": {
             "transport": "tcp",
             "host": "192.168.100.91",
-            "port": 5212,
-            "socket_type": "pub",
-            "queue_size": 100
-        }
+            "port": 5203,
+            "socket_type": "sub",
+            "queue_size": 10
+        },
+
     }
 }

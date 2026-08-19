@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <flame/def.hpp>
+#include <flame/json.hpp>
 #include <flame/log.hpp>
 #include <iomanip>
 #include <iostream>
@@ -310,7 +311,46 @@ void kvaser_can_interface::onData(flame::component::ZData& data)
                     }
                 }
             }
-        } else if (portname == "can_ch0_control") {
+        } else if (portname == "image_stream_1_processed_monitor") {
+            // Process logical readiness result from inference monitor
+            if (data.size() > 0) {
+                // The first part of the multipart message is the JSON metadata
+                string payload;
+                // If there are at least two parts, the first is the metadata string
+                if (data.size() >= 2) {
+                    zmq::message_t meta_msg = data.pop();
+                    payload = string(static_cast<char*>(meta_msg.data()), meta_msg.size());
+                    // Discard the image payload
+                    data.pop();
+                } else {
+                    zmq::message_t meta_msg = data.pop();
+                    payload = string(static_cast<char*>(meta_msg.data()), meta_msg.size());
+                }
+
+                if (!payload.empty() && (payload.front() == '{' || payload.front() == '[')) {
+                    json j = json::parse(payload);
+                    DMSDriverReadiness mapped = DMSDriverReadiness::UNKNOWN;
+                    if (j.contains("dms_logical_category")) {
+                        string cat = j["dms_logical_category"].get<string>();
+                        std::transform(cat.begin(), cat.end(), cat.begin(), ::tolower);
+                        if (cat == "high") mapped = DMSDriverReadiness::HIGH;
+                        else if (cat == "moderate") mapped = DMSDriverReadiness::MODERATE;
+                        else if (cat == "low") mapped = DMSDriverReadiness::LOW;
+                    } else if (j.contains("dms_logical_readiness")) {
+                        double score = j["dms_logical_readiness"].get<double>();
+                        if (score >= 0.7) mapped = DMSDriverReadiness::HIGH;
+                        else if (score >= 0.4) mapped = DMSDriverReadiness::MODERATE;
+                        else if (score > 0.0) mapped = DMSDriverReadiness::LOW;
+                    }
+                    if (mapped != DMSDriverReadiness::UNKNOWN) {
+                        set_dms_readiness(mapped);
+                        logger::info("[{}] Updated readiness from logical monitor: {}", getName(), static_cast<int>(mapped));
+                    } else {
+                        logger::debug("[{}] No valid logical readiness field in monitor payload", getName());
+                    }
+                }
+            }
+
             if (data.size() > 0) {
                 string payload;
                 if (data.size() >= 2) {

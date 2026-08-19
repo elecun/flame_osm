@@ -38,7 +38,8 @@ public:
     driver_readiness::ReadinessResult process(
         const std::vector<body_pose::PoseResult>& body_poses,
         const head_pose::PoseResult& head_pose_res,
-        bool has_valid_head_pose
+        bool has_valid_head_pose,
+        int image_width = 800
     );
 
     void drawResult(cv::Mat& image, const driver_readiness::ReadinessResult& result);
@@ -47,7 +48,8 @@ private:
     driver_readiness::FrameInput extractFeatures(
         const std::vector<body_pose::PoseResult>& body_poses,
         const head_pose::PoseResult& head_pose_res,
-        bool has_valid_head_pose
+        bool has_valid_head_pose,
+        int image_width = 800
     );
 
 private:

@@ -639,7 +639,7 @@ void osm_monolithic_inference::_inference_process() {
                     /* 10. Run Driver Readiness Estimation (Torch-based, if enabled) */
                     driver_readiness::ReadinessResult readiness_res;
                     if (_use_driver_readiness && _driver_readiness_estimator) {
-                        readiness_res = _driver_readiness_estimator->process(poses, last_pose, has_pose);
+                        readiness_res = _driver_readiness_estimator->process(poses, last_pose, has_pose, out_image.cols);
                         if (readiness_res.is_ready) {
                             std::lock_guard<std::mutex> lock(_history_mutex);
                             _readiness_history.push_back({std::chrono::steady_clock::now(), static_cast<double>(readiness_res.confidence)});
@@ -706,6 +706,7 @@ void osm_monolithic_inference::_inference_process() {
                         if (_use_driver_readiness && _driver_readiness_estimator && readiness_res.is_ready) {
                             tag["dms_dl_class"] = readiness_res.predicted_class;
                             tag["dms_dl_confidence"] = readiness_res.confidence;
+                            tag["dms_dl_attention_score"] = readiness_res.confidence;
                         }
                         if (_use_driver_readiness_logical && _driver_readiness_logical_estimator) {
                             tag["dms_logical_readiness"] = logical_res.readiness_score;

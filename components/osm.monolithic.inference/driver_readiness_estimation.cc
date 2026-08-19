@@ -39,27 +39,36 @@ bool driver_readiness_estimation::loadModel(const std::string& model_path, int g
 driver_readiness::FrameInput driver_readiness_estimation::extractFeatures(
     const std::vector<body_pose::PoseResult>& body_poses,
     const head_pose::PoseResult& head_pose_res,
-    bool has_valid_head_pose
+    bool has_valid_head_pose,
+    int image_width
 ) {
     driver_readiness::FrameInput frame;
     frame.body_kps_22.assign(BODY_FEAT_DIM, 0.0f);
     frame.head_pose_3.assign(HEAD_FEAT_DIM, 0.0f);
 
-    // 1. Extract 11 Upper body keypoints (indices 0 to 10)
+    // 1. Extract and flip 11 Upper body keypoints (indices 0 to 10)
     if (!body_poses.empty() && body_poses[0].keypoints.size() >= 11) {
         const auto& kps = body_poses[0].keypoints;
+        // Symmetric mapping indices for horizontal flip:
+        // nose(0) -> nose(0)
+        // l_eye(1) <-> r_eye(2), l_ear(3) <-> r_ear(4)
+        // l_shoulder(5) <-> r_shoulder(6), l_elbow(7) <-> r_elbow(8), l_wrist(9) <-> r_wrist(10)
+        int flip_idx_map[11] = { 0, 2, 1, 4, 3, 6, 5, 8, 7, 10, 9 };
+
         for (size_t i = 0; i < 11; ++i) {
-            frame.body_kps_22[i * 2 + 0] = kps[i].x;
-            frame.body_kps_22[i * 2 + 1] = kps[i].y;
+            int target_idx = flip_idx_map[i];
+            // Mirror x coordinate: width - x
+            frame.body_kps_22[i * 2 + 0] = static_cast<float>(image_width) - kps[target_idx].x;
+            frame.body_kps_22[i * 2 + 1] = kps[target_idx].y;
         }
         frame.is_valid = true;
     }
 
     // 2. Extract Head Pose Euler Angles (pitch, yaw, roll)
     if (has_valid_head_pose && head_pose_res.success) {
-        frame.head_pose_3[0] = static_cast<float>(head_pose_res.euler[0]); // pitch
-        frame.head_pose_3[1] = static_cast<float>(head_pose_res.euler[1]); // yaw
-        frame.head_pose_3[2] = static_cast<float>(head_pose_res.euler[2]); // roll
+        frame.head_pose_3[0] = static_cast<float>(head_pose_res.euler[0]);  // pitch
+        frame.head_pose_3[1] = static_cast<float>(-head_pose_res.euler[1]); // yaw (sign flipped for horizontal mirrored input)
+        frame.head_pose_3[2] = static_cast<float>(-head_pose_res.euler[2]); // roll (sign flipped for horizontal mirrored input)
         frame.is_valid = true;
     }
 
@@ -69,15 +78,16 @@ driver_readiness::FrameInput driver_readiness_estimation::extractFeatures(
 driver_readiness::ReadinessResult driver_readiness_estimation::process(
     const std::vector<body_pose::PoseResult>& body_poses,
     const head_pose::PoseResult& head_pose_res,
-    bool has_valid_head_pose
+    bool has_valid_head_pose,
+    int image_width
 ) {
     driver_readiness::ReadinessResult result;
     if (!_is_loaded) {
         return result;
     }
 
-    // Extract current frame feature
-    driver_readiness::FrameInput current_frame = extractFeatures(body_poses, head_pose_res, has_valid_head_pose);
+    // Extract current frame feature with image_width for horizontal mirroring
+    driver_readiness::FrameInput current_frame = extractFeatures(body_poses, head_pose_res, has_valid_head_pose, image_width);
 
     // Queue management (Maintain fixed size SEQ_LEN = 64)
     _sequence_queue.push_back(current_frame);
@@ -114,26 +124,36 @@ driver_readiness::ReadinessResult driver_readiness_estimation::process(
         c10::IValue output_ivalue = _module.forward(inputs);
         torch::Tensor output_tensor = output_ivalue.toTensor().to(torch::kCPU);
 
-        // Apply Softmax to get probabilities
-        torch::Tensor probs = torch::softmax(output_tensor, 1);
-        auto accessor = probs.accessor<float, 2>();
+        // Determine if model output is a single scalar (regression) or multi‑class logits
+        if (output_tensor.numel() == 1) {
+            // ----- Regression path -----
+            float attention_score = output_tensor.item<float>();
+            if (attention_score < 0.0f) attention_score = 0.0f;
+            if (attention_score > 1.0f) attention_score = 1.0f;
 
-        int num_classes = probs.size(1);
-        result.probabilities.resize(num_classes);
-        int best_cls = 0;
-        float max_p = -1.0f;
-
-        for (int c = 0; c < num_classes; ++c) {
-            float p = accessor[0][c];
-            result.probabilities[c] = p;
-            if (p > max_p) {
-                max_p = p;
-                best_cls = c;
+            result.probabilities.resize(1);
+            result.probabilities[0] = attention_score;
+            result.predicted_class = -1; // No discrete class
+            result.confidence = attention_score;
+        } else {
+            // ----- Classification path (original behavior) -----
+            torch::Tensor probs = torch::softmax(output_tensor, 1);
+            auto accessor = probs.accessor<float, 2>();
+            int num_classes = probs.size(1);
+            result.probabilities.resize(num_classes);
+            int best_cls = 0;
+            float max_p = -1.0f;
+            for (int c = 0; c < num_classes; ++c) {
+                float p = accessor[0][c];
+                result.probabilities[c] = p;
+                if (p > max_p) {
+                    max_p = p;
+                    best_cls = c;
+                }
             }
+            result.predicted_class = best_cls;
+            result.confidence = max_p;
         }
-
-        result.predicted_class = best_cls;
-        result.confidence = max_p;
         result.is_ready = true;
     }
     catch (const std::exception& e) {
