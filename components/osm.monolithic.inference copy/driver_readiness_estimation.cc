@@ -147,9 +147,9 @@ driver_readiness::ReadinessResult driver_readiness_estimation::process(
 void driver_readiness_estimation::drawResult(cv::Mat& image, const driver_readiness::ReadinessResult& result) {
     std::string text;
     if (!result.is_ready) {
-        text = "Driver Readiness (Torch): Buffering (" + std::to_string(_sequence_queue.size()) + "/" + std::to_string(SEQ_LEN) + ")";
+        text = "Driver Readiness : Buffering (" + std::to_string(_sequence_queue.size()) + "/" + std::to_string(SEQ_LEN) + ")";
     } else {
-        text = "Driver Readiness (Torch): Class " + std::to_string(result.predicted_class) +
+        text = "Driver Readiness : Class " + std::to_string(result.predicted_class) +
                " (" + std::to_string(static_cast<int>(result.confidence * 100.0f)) + "%)";
     }
 

@@ -10,7 +10,7 @@
             "use": true,
             "visualize": true,
             "use_roi": true,
-            "roi": [100, 150, 1040, 1500],
+            "roi": [100, 150, 1040, 1300],
             "roi_visualize": true,
             "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/yolo11n-face.torchscript",
             "gpu_id": 0,
@@ -44,13 +44,13 @@
             "gpu_id": 0
         },
         "driver_readiness_estimation": {
-            "use": false,
+            "use": true,
             "visualize": true,
             "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/iae_dms_251212.torchscript",
             "gpu_id": 1
         },
         "driver_readiness_estimation_logical": {
-            "use": true,
+            "use": false,
             "visualize": true,
             "ref_yaw": 0.0,
             "ref_pitch": 0.0,

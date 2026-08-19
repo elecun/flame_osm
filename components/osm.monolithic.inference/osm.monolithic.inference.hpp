@@ -120,6 +120,11 @@ class osm_monolithic_inference : public flame::component::Object {
         int _roi_y1{0};
         int _roi_x2{0};
         int _roi_y2{0};
+
+        /* DMS Score History for Visualization Graph */
+        std::deque<std::pair<std::chrono::steady_clock::time_point, double>> _readiness_history;
+        std::mutex _history_mutex;
+        void draw_readiness_graph(cv::Mat& image, int x, int y, int width, int height);
 };
 
 EXPORT_COMPONENT_API

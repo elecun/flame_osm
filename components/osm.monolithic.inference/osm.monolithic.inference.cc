@@ -144,6 +144,12 @@ bool osm_monolithic_inference::onInit(){
             readiness_high = drl_params.value("readiness_high", readiness_high);
         }
 
+        // Mutual exclusion of DMS estimators: deep learning has priority
+        if (_use_driver_readiness) {
+            _use_driver_readiness_logical = false;
+            logger::info("[{}] Driver readiness estimation (deep learning) is enabled. Forcing logical readiness estimation to false.", getName());
+        }
+
         // Warnings for dependency checks
         if (!_use_face_det && (_use_landmark_2d || _use_landmark_3d)) {
             logger::warn("[{}] Face detection process is required for 2D/3D face landmark extraction, but face_detection 'use' is set to false!", getName());
@@ -372,7 +378,7 @@ void osm_monolithic_inference::_inference_process() {
                     _latest_image_1.release();
                 }
 
-                logger::debug("[{}] Received Stream 1 Image - Size: {}x{}, Channels: {}, Type: {}", getName(), image.cols, image.rows, image.channels(), image.type());
+                // logger::debug("[{}] Received Stream 1 Image - Size: {}x{}, Channels: {}, Type: {}", getName(), image.cols, image.rows, image.channels(), image.type());
 
                 try {
                     auto proc_start = std::chrono::high_resolution_clock::now();
@@ -591,6 +597,7 @@ void osm_monolithic_inference::_inference_process() {
                     }
 
                     // 9. Draw head pose angles in a white outline box at the bottom-left corner of the image
+                    int pose_box_w = 0;
                     if (has_pose && (_vis_head_pose_2d || _vis_head_pose_3d)) {
                         double pitch = last_pose.euler[0];
                         double yaw = last_pose.euler[1];
@@ -615,6 +622,7 @@ void osm_monolithic_inference::_inference_process() {
                         int max_w = std::max({s1.width, s2.width, s3.width});
 
                         int box_w = max_w + 20;
+                        pose_box_w = box_w;
                         int box_h = 65;
                         int start_x = 10;
                         int start_y = out_image.rows - box_h - 10;
@@ -629,20 +637,32 @@ void osm_monolithic_inference::_inference_process() {
                     }
 
                     /* 10. Run Driver Readiness Estimation (Torch-based, if enabled) */
+                    driver_readiness::ReadinessResult readiness_res;
                     if (_use_driver_readiness && _driver_readiness_estimator) {
-                        driver_readiness::ReadinessResult readiness_res = _driver_readiness_estimator->process(poses, last_pose, has_pose);
-                        if (_vis_driver_readiness) {
-                            _driver_readiness_estimator->drawResult(out_image, readiness_res);
+                        readiness_res = _driver_readiness_estimator->process(poses, last_pose, has_pose);
+                        if (readiness_res.is_ready) {
+                            std::lock_guard<std::mutex> lock(_history_mutex);
+                            _readiness_history.push_back({std::chrono::steady_clock::now(), static_cast<double>(readiness_res.confidence)});
                         }
                     }
 
                     /* 11. Run Driver Readiness Estimation (Rule-based Logical, if enabled) */
+                    driver_readiness_logical::LogicalReadinessResult logical_res;
                     if (_use_driver_readiness_logical && _driver_readiness_logical_estimator) {
-                        driver_readiness_logical::LogicalReadinessResult logical_res = 
-                            _driver_readiness_logical_estimator->process(last_pose, has_pose);
-                        if (_vis_driver_readiness_logical) {
-                            _driver_readiness_logical_estimator->drawResult(out_image, logical_res);
+                        logical_res = _driver_readiness_logical_estimator->process(last_pose, has_pose);
+                        if (logical_res.valid) {
+                            std::lock_guard<std::mutex> lock(_history_mutex);
+                            _readiness_history.push_back({std::chrono::steady_clock::now(), logical_res.readiness_score});
                         }
+                    }
+
+                    // Render readiness score changes graph at the bottom right corner of the image
+                    if ((_use_driver_readiness && _vis_driver_readiness) || (_use_driver_readiness_logical && _vis_driver_readiness_logical)) {
+                        int graph_w = 400;
+                        int graph_h = 65;
+                        int graph_x = out_image.cols - graph_w - 10;
+                        int graph_y = out_image.rows - graph_h - 10;
+                        draw_readiness_graph(out_image, graph_x, graph_y, graph_w, graph_h);
                     }
 
                     // Calculate FPS
@@ -683,6 +703,15 @@ void osm_monolithic_inference::_inference_process() {
                         tag["cam_channel"] = 1;
                         tag["fps"] = fps;
 
+                        if (_use_driver_readiness && _driver_readiness_estimator && readiness_res.is_ready) {
+                            tag["dms_dl_class"] = readiness_res.predicted_class;
+                            tag["dms_dl_confidence"] = readiness_res.confidence;
+                        }
+                        if (_use_driver_readiness_logical && _driver_readiness_logical_estimator) {
+                            tag["dms_logical_readiness"] = logical_res.readiness_score;
+                            tag["dms_logical_category"] = logical_res.category;
+                        }
+
                         /* 6. Send multipart message */
                         flame::component::ZData out_msg;
                         out_msg.from = "image_stream_1_processed_monitor";
@@ -692,13 +721,13 @@ void osm_monolithic_inference::_inference_process() {
                         if (!dispatch("image_stream_1_processed_monitor", out_msg)) {
                             logger::warn("[{}] Failed to dispatch processed image 1", getName());
                         } else {
-                            logger::debug("[{}] Successfully dispatched processed image 1", getName());
+                            // logger::debug("[{}] Successfully dispatched processed image 1", getName());
                         }
                     }
 
                     auto proc_end = std::chrono::high_resolution_clock::now();
                     double proc_elapsed = std::chrono::duration<double, std::milli>(proc_end - proc_start).count();
-                    logger::info("[{}] Stream 1 inference worker thread loop execution time: {} ms", getName(), proc_elapsed);
+                    // logger::info("[{}] Stream 1 inference worker thread loop execution time: {} ms", getName(), proc_elapsed);
                 } catch (const std::exception& e) {
                     logger::error("[{}] Error in stream 1 inference: {}", getName(), e.what());
                 }
@@ -794,13 +823,13 @@ void osm_monolithic_inference::_inference_process() {
                         if (!dispatch("image_stream_2_processed_monitor", out_msg)) {
                             logger::warn("[{}] Failed to dispatch processed image 2", getName());
                         } else {
-                            logger::info("[{}] Successfully dispatched processed image 2", getName());
+                            // logger::info("[{}] Successfully dispatched processed image 2", getName());
                         }
                     }
 
                     auto proc_end = std::chrono::high_resolution_clock::now();
                     double proc_elapsed = std::chrono::duration<double, std::milli>(proc_end - proc_start).count();
-                    logger::info("[{}] Stream 2 inference worker thread loop execution time: {} ms", getName(), proc_elapsed);
+                    // logger::info("[{}] Stream 2 inference worker thread loop execution time: {} ms", getName(), proc_elapsed);
                 } catch (const std::exception& e) {
                     logger::error("[{}] Error in stream 2 inference: {}", getName(), e.what());
                 }
@@ -830,5 +859,79 @@ cv::Mat osm_monolithic_inference::getLatestImage1() {
 cv::Mat osm_monolithic_inference::getLatestImage2() {
     std::lock_guard<std::mutex> lock(_img_mutex_2);
     return _latest_image_2.clone();
+}
+
+void osm_monolithic_inference::draw_readiness_graph(cv::Mat& image, int x, int y, int width, int height) {
+    auto now = std::chrono::steady_clock::now();
+    
+    std::lock_guard<std::mutex> lock(_history_mutex);
+    
+    // Evict data older than 3 seconds
+    while (!_readiness_history.empty()) {
+        double time_span = std::chrono::duration<double>(now - _readiness_history.front().first).count();
+        if (time_span > 3.0) {
+            _readiness_history.pop_front();
+        } else {
+            break;
+        }
+    }
+    
+    if (_readiness_history.empty()) {
+        return;
+    }
+
+    // Draw background box
+    cv::Rect bg_box(x, y, width, height);
+    cv::Mat overlay;
+    image.copyTo(overlay);
+    cv::rectangle(overlay, bg_box, cv::Scalar(0, 0, 0), cv::FILLED);
+    cv::addWeighted(overlay, 0.4, image, 0.6, 0, image);
+    cv::rectangle(image, bg_box, cv::Scalar(255, 255, 255), 1);
+
+    // Guide lines (0.0, 0.5, 1.0)
+    cv::line(image, cv::Point(x, y + height / 2), cv::Point(x + width, y + height / 2), cv::Scalar(100, 100, 100), 1, cv::LINE_AA);
+    cv::putText(image, "0.5", cv::Point(x + 2, y + height / 2 - 2), cv::FONT_HERSHEY_SIMPLEX, 0.3, cv::Scalar(150, 150, 150), 1, cv::LINE_AA);
+    cv::putText(image, "1.0", cv::Point(x + 2, y + 10), cv::FONT_HERSHEY_SIMPLEX, 0.3, cv::Scalar(150, 150, 150), 1, cv::LINE_AA);
+    cv::putText(image, "0.0", cv::Point(x + 2, y + height - 2), cv::FONT_HERSHEY_SIMPLEX, 0.3, cv::Scalar(150, 150, 150), 1, cv::LINE_AA);
+
+    // Collect coordinates mapping time span to width, and score to height
+    std::vector<cv::Point> pts;
+    double oldest_t = std::chrono::duration<double>(_readiness_history.front().first.time_since_epoch()).count();
+    double latest_t = std::chrono::duration<double>(_readiness_history.back().first.time_since_epoch()).count();
+    double total_span = latest_t - oldest_t;
+
+    for (const auto& item : _readiness_history) {
+        double current_t = std::chrono::duration<double>(item.first.time_since_epoch()).count();
+        double x_ratio = (total_span > 0.0) ? ((current_t - oldest_t) / total_span) : 0.5;
+        if (x_ratio < 0.0) x_ratio = 0.0;
+        if (x_ratio > 1.0) x_ratio = 1.0;
+
+        int px = x + static_cast<int>(x_ratio * width);
+        // Map 0~1 score to Y coordinate (invert since OpenCV 0 is top)
+        int py = y + height - static_cast<int>(item.second * (height - 10)) - 5;
+        if (py < y) py = y;
+        if (py > y + height) py = y + height;
+
+        pts.push_back(cv::Point(px, py));
+    }
+
+    // Draw graph line (green color)
+    if (pts.size() > 1) {
+        for (size_t i = 0; i < pts.size() - 1; ++i) {
+            cv::line(image, pts[i], pts[i+1], cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
+        }
+    }
+
+    // Draw the latest score value in green at the bottom-right of the graph
+    double latest_score = _readiness_history.back().second;
+    char score_txt[32];
+    snprintf(score_txt, sizeof(score_txt), "Score: %.2f", latest_score);
+    int font_face = cv::FONT_HERSHEY_SIMPLEX;
+    double font_scale = 0.45;
+    int thickness = 1;
+    int baseline = 0;
+    cv::Size txt_size = cv::getTextSize(score_txt, font_face, font_scale, thickness, &baseline);
+    cv::Point txt_org(x + width - txt_size.width - 5, y + height - 5);
+    cv::putText(image, score_txt, txt_org, font_face, font_scale, cv::Scalar(0, 255, 0), thickness, cv::LINE_AA);
 }
 

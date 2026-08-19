@@ -324,7 +324,7 @@ void osm_monolithic_inference::_inference_process() {
                     _latest_image_1.release();
                 }
 
-                logger::debug("[{}] Received Stream 1 Image - Size: {}x{}, Channels: {}, Type: {}", getName(), image.cols, image.rows, image.channels(), image.type());
+                // logger::debug("[{}] Received Stream 1 Image - Size: {}x{}, Channels: {}, Type: {}", getName(), image.cols, image.rows, image.channels(), image.type());
 
                 try {
                     auto proc_start = std::chrono::high_resolution_clock::now();
@@ -644,13 +644,13 @@ void osm_monolithic_inference::_inference_process() {
                         if (!dispatch("image_stream_1_processed_monitor", out_msg)) {
                             logger::warn("[{}] Failed to dispatch processed image 1", getName());
                         } else {
-                            logger::debug("[{}] Successfully dispatched processed image 1", getName());
+                            // logger::debug("[{}] Successfully dispatched processed image 1", getName());
                         }
                     }
 
                     auto proc_end = std::chrono::high_resolution_clock::now();
                     double proc_elapsed = std::chrono::duration<double, std::milli>(proc_end - proc_start).count();
-                    logger::info("[{}] Stream 1 inference worker thread loop execution time: {} ms", getName(), proc_elapsed);
+                    // logger::info("[{}] Stream 1 inference worker thread loop execution time: {} ms", getName(), proc_elapsed);
                 } catch (const std::exception& e) {
                     logger::error("[{}] Error in stream 1 inference: {}", getName(), e.what());
                 }
@@ -746,13 +746,13 @@ void osm_monolithic_inference::_inference_process() {
                         if (!dispatch("image_stream_2_processed_monitor", out_msg)) {
                             logger::warn("[{}] Failed to dispatch processed image 2", getName());
                         } else {
-                            logger::info("[{}] Successfully dispatched processed image 2", getName());
+                            // logger::info("[{}] Successfully dispatched processed image 2", getName());
                         }
                     }
 
                     auto proc_end = std::chrono::high_resolution_clock::now();
                     double proc_elapsed = std::chrono::duration<double, std::milli>(proc_end - proc_start).count();
-                    logger::info("[{}] Stream 2 inference worker thread loop execution time: {} ms", getName(), proc_elapsed);
+                    // logger::info("[{}] Stream 2 inference worker thread loop execution time: {} ms", getName(), proc_elapsed);
                 } catch (const std::exception& e) {
                     logger::error("[{}] Error in stream 2 inference: {}", getName(), e.what());
                 }
