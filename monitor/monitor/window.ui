@@ -524,6 +524,38 @@ border-bottom-right-radius: 6px;</string>
      </item>
     </layout>
    </widget>
+   <widget class="QGroupBox" name="group_video_simulation">
+    <property name="geometry">
+     <rect>
+      <x>1330</x>
+      <y>480</y>
+      <width>281</width>
+      <height>101</height>
+     </rect>
+    </property>
+    <property name="title">
+     <string>Video Simulation</string>
+    </property>
+    <layout class="QGridLayout" name="gridLayout_sim">
+     <property name="spacing">
+      <number>10</number>
+     </property>
+     <item row="0" column="0">
+      <widget class="QPushButton" name="btn_sim_play">
+       <property name="text">
+        <string>PLAY</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="1">
+      <widget class="QPushButton" name="btn_sim_stop">
+       <property name="text">
+        <string>STOP</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </widget>
    <widget class="QTextBrowser" name="text_log">
     <property name="geometry">
      <rect>
