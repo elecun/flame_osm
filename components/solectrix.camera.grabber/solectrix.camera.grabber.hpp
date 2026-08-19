@@ -61,6 +61,8 @@ class solectrix_camera_grabber : public flame::component::Object {
         atomic<bool> _use_image_stream { false };
         atomic<bool> _fault_reset { false };
         atomic<bool> _capture_fault { false };
+        atomic<int> _fault_limit { 3 };
+        atomic<int> _fault_count { 0 };
         unordered_map<int, chrono::time_point<chrono::high_resolution_clock>> _last_capture_times;
         unordered_map<int, string> _channel_ports;
         unordered_map<string, string> _port_rotations;

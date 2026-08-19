@@ -35,6 +35,7 @@ bool solectrix_camera_grabber::onInit(){
         /* setup pipeline */
         _use_image_stream.store(parameters.value("use_image_stream", false));
         _fault_reset.store(parameters.value("fault_reset", false));
+        _fault_limit.store(parameters.value("fault_limit", 3));
 
         /* device instance */
         _frame_grabber = make_unique<sxpf_grabber>(parameters);
@@ -283,6 +284,9 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
             }
             else {
                 _capture_fault.store(true);
+                int current_faults = ++_fault_count;
+                logger::warn("[{}] Capture fault detected. (Current faults: {})", getName(), current_faults);
+
                 if(_use_image_stream.load()){
                     for(const auto& [ch, portname] : _channel_ports){
                         auto msg = make_shared<flame::component::ZData>();
@@ -315,17 +319,20 @@ void solectrix_camera_grabber::_grab_task(json camera_parameters){
                 }
 
                 if (_fault_reset.load()) {
-                    logger::warn("[{}] Capture fault detected. Closing and re-initializing frame grabber...", getName());
-                    _frame_grabber->close();
-                    this_thread::sleep_for(chrono::milliseconds(500));
-                    if(!_frame_grabber->init()){
-                        logger::error("[{}] Failed to re-initialize frame grabber during reset", getName());
-                    }
-                    else if(!_frame_grabber->open()){
-                        logger::error("[{}] Failed to re-open frame grabber during reset", getName());
-                    }
-                    else {
-                        logger::info("[{}] Frame grabber successfully re-initialized and opened.", getName());
+                    int limit = _fault_limit.load();
+                    if (limit > 0 && current_faults % limit == 0) {
+                        logger::warn("[{}] Fault count reached limit ({}). Total faults: {}. Closing and re-initializing frame grabber...", getName(), limit, current_faults);
+                        _frame_grabber->close();
+                        this_thread::sleep_for(chrono::milliseconds(500));
+                        if(!_frame_grabber->init()){
+                            logger::error("[{}] Failed to re-initialize frame grabber during reset (Total faults: {})", getName(), current_faults);
+                        }
+                        else if(!_frame_grabber->open()){
+                            logger::error("[{}] Failed to re-open frame grabber during reset (Total faults: {})", getName(), current_faults);
+                        }
+                        else {
+                            logger::info("[{}] Frame grabber successfully re-initialized and opened. (Total faults: {})", getName(), current_faults);
+                        }
                     }
                 }
             }

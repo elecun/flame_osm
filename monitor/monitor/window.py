@@ -196,7 +196,7 @@ class AppWindow(QMainWindow):
                 w_w = lbl_size.width() if lbl_size.width() > 0 else 800
                 w_h = lbl_size.height() if lbl_size.height() > 0 else 450
                 black_image = np.zeros((w_h, w_w, 3), dtype=np.uint8)
-                cv2.putText(black_image, "CAMERA FAULT", (int(w_w * 0.25), int(w_h * 0.5)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 3, cv2.LINE_AA)
+                cv2.putText(black_image, "CAMERA RECOVERY", (int(w_w * 0.25), int(w_h * 0.5)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 3, cv2.LINE_AA)
                 qt_image = QImage(black_image.data, w_w, w_h, 3 * w_w, QImage.Format.Format_RGB888)
                 pixmap = QPixmap.fromImage(qt_image)
                 lbl.setPixmap(pixmap)

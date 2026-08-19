@@ -33,7 +33,8 @@
         "use_image_stream": true,
         "undistort": false,
         "camera_calibration": "/home/osm/dev/flame_osm/bin/x86_64/osm_camera/camera_parameter.json",
-        "fault_reset": true
+        "fault_reset": true,
+        "fault_limit": 3
     },
     "dataport": {
         "status": {
