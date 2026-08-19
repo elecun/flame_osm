@@ -88,6 +88,11 @@ class CameraMonitorSubscriber(QThread):
                     dict_tags = json.loads(tags)
 
                     if topic.decode() == self.__topic:
+                        capture_fault = dict_tags.get("capture_fault", False)
+                        if capture_fault or not image_data or len(image_data) == 0:
+                            self.frame_update_signal.emit(np.array([]), dict_tags)
+                            continue
+
                         nparr = np.frombuffer(image_data, np.uint8)
                         decoded_image = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
                         if decoded_image is not None:

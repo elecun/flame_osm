@@ -186,6 +186,24 @@ class AppWindow(QMainWindow):
             id = list(self.__frame_window_map.keys())[0]
         fps = round(tags.get("fps", 0.0), 1)
 
+        # Check for capture fault or empty image
+        capture_fault = tags.get("capture_fault", False)
+        if capture_fault or image is None or image.size == 0:
+            lbl = self.__frame_window_map.get(id)
+            if lbl:
+                # Render a black screen with CAMERA FAULT warning text
+                lbl_size = lbl.size()
+                w_w = lbl_size.width() if lbl_size.width() > 0 else 800
+                w_h = lbl_size.height() if lbl_size.height() > 0 else 450
+                black_image = np.zeros((w_h, w_w, 3), dtype=np.uint8)
+                cv2.putText(black_image, "CAMERA FAULT", (int(w_w * 0.25), int(w_h * 0.5)), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3, cv2.LINE_AA)
+                qt_image = QImage(black_image.data, w_w, w_h, 3 * w_w, QImage.Format.Format_RGB888)
+                pixmap = QPixmap.fromImage(qt_image)
+                lbl.setPixmap(pixmap)
+                lbl.show()
+            return
+
         # C++ camera_monitor already rotated the image, so no rotation here
         color_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         if self.__show_frame_info:
@@ -217,6 +235,20 @@ class AppWindow(QMainWindow):
             self.__console.error(e)
     
     def on_update_processed_image(self, image:np.ndarray, tags:dict):
+        if image is None or image.size == 0 or tags.get("capture_fault", False):
+            if self.__processed_frame_window:
+                lbl_size = self.__processed_frame_window.size()
+                w_w = lbl_size.width() if lbl_size.width() > 0 else 800
+                w_h = lbl_size.height() if lbl_size.height() > 0 else 450
+                black_image = np.zeros((w_h, w_w, 3), dtype=np.uint8)
+                cv2.putText(black_image, "PROCESSED FAULT", (int(w_w * 0.2), int(w_h * 0.5)), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3, cv2.LINE_AA)
+                qt_image = QImage(black_image.data, w_w, w_h, 3 * w_w, QImage.Format.Format_RGB888)
+                pixmap = QPixmap.fromImage(qt_image)
+                self.__processed_frame_window.setPixmap(pixmap)
+                self.__processed_frame_window.show()
+            return
+
         # C++ camera_monitor already rotated the image, so no rotation here
         color_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             
