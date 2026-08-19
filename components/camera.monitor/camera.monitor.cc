@@ -157,7 +157,7 @@ void camera_monitor::_monitor_task(string stream_name, string monitor_portname)
 
             if (msg) {
                 auto start_time = chrono::high_resolution_clock::now();
-                logger::info("[{}] [{}] Received msg size: {}, meta: {}", getName(), stream_name, msg->size(), msg->meta);
+                // logger::info("[{}] [{}] Received msg size: {}, meta: {}", getName(), stream_name, msg->size(), msg->meta);
 
                 if (msg->size() >= 2) {
                     zmq::message_t tag_msg = msg->pop();
@@ -174,6 +174,28 @@ void camera_monitor::_monitor_task(string stream_name, string monitor_portname)
                     /* Wrap raw buffer into cv::Mat (no copy) */
                     cv::Mat src_image(src_height, src_width, src_type,
                                      img_msg.data());
+
+                    /* ---- Handle capture fault or empty image states ---- */
+                    bool is_fault = false;
+                    if (tag.contains("capture_fault") && tag["capture_fault"].get<bool>()) {
+                        is_fault = true;
+                    }
+                    if (src_image.empty() || src_height <= 0 || src_width <= 0) {
+                        is_fault = true;
+                    }
+
+                    if (is_fault) {
+                        string out_tag_str = tag.dump();
+                        flame::component::ZData out_msg;
+                        out_msg.from = monitor_portname;
+                        out_msg.meta = out_tag_str;
+                        out_msg.addmem(nullptr, 0);
+
+                        if (!dispatch(monitor_portname, out_msg)) {
+                            logger::warn("[{}] Failed to dispatch fault state message to port {}", getName(), monitor_portname);
+                        }
+                        continue;
+                    }
 
                     /* ---- Resize if a target resolution is configured ---- */
                     cv::Mat out_image;
