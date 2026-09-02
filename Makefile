@@ -62,7 +62,7 @@ else ifeq ($(ARCH), aarch64)
 
 else
 	# LibTorch Paths
-	TORCH_DIR = /home/osm/dev/flame_osm/venv/lib/python3.10/site-packages/torch
+	TORCH_DIR = $(CURRENT_DIR)/test/venv/lib/python3.11/site-packages/torch
 	TORCH_INC = -I$(TORCH_DIR)/include -I$(TORCH_DIR)/include/torch/csrc/api/include
 	TORCH_LIB = -L$(TORCH_DIR)/lib -Wl,--no-as-needed -ltorch -ltorch_cpu -ltorch_cuda -lc10 -lc10_cuda -Wl,--as-needed
 
@@ -223,8 +223,17 @@ camera_monitor.comp: $(BUILDDIR)camera.monitor.o
 $(BUILDDIR)camera.monitor.o: $(CURRENT_DIR)/components/camera.monitor/camera.monitor.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
 
+# Blink Detection Inference
+blink_detection_inference.comp: $(BUILDDIR)blink.detection.inference.o
+	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_process/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_objdetect $(TORCH_LIB)
+	cp $(BUILDDIR)/osm_process/$@ $(BUILDDIR)/osm_camera/$@
+	cp $(BUILDDIR)/osm_process/$@ $(BUILDDIR)/osm_video/$@
+
+$(BUILDDIR)blink.detection.inference.o: $(CURRENT_DIR)/components/blink.detection.inference/blink.detection.inference.cc
+	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
+
 # OSM Group Target
-osm : flame uvc_camera_grabber.comp solectrix_camera_grabber.comp body_kps_inference.comp os_model_inference.comp headpose_model_inference.comp video_file_grabber.comp face_detection_inference.comp camera_monitor.comp osm_monolithic_inference.comp
+osm : flame uvc_camera_grabber.comp solectrix_camera_grabber.comp body_kps_inference.comp os_model_inference.comp headpose_model_inference.comp video_file_grabber.comp face_detection_inference.comp camera_monitor.comp osm_monolithic_inference.comp blink_detection_inference.comp
 
 deploy : FORCE
 	cp $(BUILDDIR)/*.comp $(BUILDDIR)/flame $(BINDIR)
