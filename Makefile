@@ -91,6 +91,7 @@ $(shell mkdir -p $(BUILDDIR))
 $(shell mkdir -p $(BUILDDIR)/osm_can)
 $(shell mkdir -p $(BUILDDIR)/osm_camera)
 $(shell mkdir -p $(BUILDDIR)/osm_process)
+$(shell mkdir -p $(BUILDDIR)/osm_video)
 
 .PHONY: all clean debug deploy FORCE osm flame
 
@@ -209,7 +210,7 @@ $(BUILDDIR)headpose.model.inference.o: $(CURRENT_DIR)/components/headpose.model.
 
 # Video File Grabber
 video_file_grabber.comp: $(BUILDDIR)video.file.grabber.o
-	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_camera/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio
+	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_video/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio
 
 $(BUILDDIR)video.file.grabber.o: $(CURRENT_DIR)/components/video.file.grabber/video.file.grabber.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
@@ -217,6 +218,7 @@ $(BUILDDIR)video.file.grabber.o: $(CURRENT_DIR)/components/video.file.grabber/vi
 # Camera Monitor
 camera_monitor.comp: $(BUILDDIR)camera.monitor.o
 	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_camera/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgproc -lopencv_imgcodecs
+	cp $(BUILDDIR)/osm_camera/$@ $(BUILDDIR)/osm_video/$@
 
 $(BUILDDIR)camera.monitor.o: $(CURRENT_DIR)/components/camera.monitor/camera.monitor.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
@@ -228,7 +230,7 @@ deploy : FORCE
 	cp $(BUILDDIR)/*.comp $(BUILDDIR)/flame $(BINDIR)
 
 clean : FORCE 
-	$(RM) $(BUILDDIR)/*.o $(BUILDDIR)/*.comp $(BUILDDIR)/osm/*.comp $(BUILDDIR)/osm_can/*.comp $(BUILDDIR)/osm_camera/*.comp $(BUILDDIR)/osm_process/*.comp $(BUILDDIR)/flame
+	$(RM) $(BUILDDIR)/*.o $(BUILDDIR)/*.comp $(BUILDDIR)/osm/*.comp $(BUILDDIR)/osm_can/*.comp $(BUILDDIR)/osm_camera/*.comp $(BUILDDIR)/osm_process/*.comp $(BUILDDIR)/osm_video/*.comp $(BUILDDIR)/flame
 
 debug:
 	@echo "Building for Architecture : $(ARCH)"

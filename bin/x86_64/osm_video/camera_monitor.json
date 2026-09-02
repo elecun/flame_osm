@@ -1,0 +1,51 @@
+{
+    "rt_cycle_ns": 1000000000,
+    "verbose": 1,
+    "info": {
+
+    },
+    "parameters": {
+
+    },
+    "dataport": {
+        "status": {
+            "transport": "tcp",
+            "host": "*",
+            "port": 5104,
+            "socket_type": "pub",
+            "queue_size": 10
+        },
+        "image_stream_1": {
+            "transport": "ipc",
+            "socket_type": "sub",
+            "queue_size": 10
+        },
+        "image_stream_2": {
+            "transport": "ipc",
+            "socket_type": "sub",
+            "queue_size": 10
+        },
+        "image_stream_1_monitor":{
+            "transport": "tcp",
+            "host": "100.120.210.70",
+            "port": 5201,
+            "socket_type": "pub",
+            "queue_size": 10,
+            "resolution": {
+                "width": 450,
+                "height": 800
+            }
+        },
+        "image_stream_2_monitor":{
+            "transport": "tcp",
+            "host": "100.120.210.70",
+            "port": 5202,
+            "socket_type": "pub",
+            "queue_size": 10,
+            "resolution": {
+                "width": 450,
+                "height": 800
+            }
+        }
+    }
+}

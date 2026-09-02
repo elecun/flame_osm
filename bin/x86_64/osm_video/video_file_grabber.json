@@ -1,0 +1,36 @@
+{
+    "rt_cycle_ns": 1000000000,
+    "verbose": 1,
+    "info": {
+    },
+    "parameters": {
+        "video_files":[
+            "/home/iae-vc/dev/flame_osm/bin/video/20260723_110439_cam1.avi",
+            "/home/iae-vc/dev/flame_osm/bin/video/20260723_110731_cam1.avi"
+        ],
+        "use_image_stream": true,
+        "undistort": false,
+        "camera_calibration": "/home/osm/dev/flame_osm/bin/x86_64/osm_camera/camera_parameter.json",
+        "fault_reset": true,
+        "fault_limit": 3
+    },
+    "dataport": {
+        "status": {
+            "transport": "tcp",
+            "host": "*",
+            "port": 5101,
+            "socket_type": "pub",
+            "queue_size": 10
+        },
+        "image_stream_1": {
+            "transport": "ipc",
+            "socket_type": "pub",
+            "queue_size": 10
+        },
+        "image_stream_2": {
+            "transport": "ipc",
+            "socket_type": "pub",
+            "queue_size": 10
+        }
+    }
+}

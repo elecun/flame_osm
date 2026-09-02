@@ -101,13 +101,10 @@ void camera_monitor::onClose()
 void camera_monitor::onData(flame::component::ZData& data)
 {
     try {
-        string portname = data.from;
+        const string& portname = data.from;
 
         if (portname == "image_stream_1" || portname == "image_stream_2") {
-            // Move received ZData frames into a new shared_ptr<ZData>
             auto msg = make_shared<flame::component::ZData>(std::move(data));
-            msg->from = data.from;
-            msg->meta = data.meta;
 
             /* push to channel queue */
             {
@@ -120,7 +117,6 @@ void camera_monitor::onData(flame::component::ZData& data)
                 }
             }
             _queue_cvs[portname].notify_one();
-            // logger::info("[{}] Received data from port: {}, frames count: {}", getName(), portname, msg->size());
         }
     } catch (const std::exception& e) {
         logger::error("[{}] Error in onData: {}", getName(), e.what());
@@ -164,27 +160,54 @@ void camera_monitor::_monitor_task(string stream_name, string monitor_portname)
                     zmq::message_t img_msg = msg->pop();
 
                     /* ---- Parse the tag JSON to reconstruct cv::Mat ---- */
-                    string tag_str(static_cast<char*>(tag_msg.data()), tag_msg.size());
-                    json tag = json::parse(tag_str);
+                    json tag;
+                    try {
+                        string tag_str(static_cast<char*>(tag_msg.data()), tag_msg.size());
+                        tag = json::parse(tag_str);
+                    } catch (const std::exception& e) {
+                        logger::warn("[{}] Failed to parse tag JSON: {}", getName(), e.what());
+                        continue;
+                    }
 
-                    int src_height = tag["height"].get<int>();
-                    int src_width  = tag["width"].get<int>();
-                    int src_type   = tag["type"].get<int>();
-
-                    /* Wrap raw buffer into cv::Mat (no copy) */
-                    cv::Mat src_image(src_height, src_width, src_type,
-                                     img_msg.data());
+                    int src_height = tag.value("height", 0);
+                    int src_width  = tag.value("width", 0);
+                    int src_type   = tag.value("type", CV_8UC3);
 
                     /* ---- Handle capture fault or empty image states ---- */
                     bool is_fault = false;
                     if (tag.contains("capture_fault") && tag["capture_fault"].get<bool>()) {
                         is_fault = true;
                     }
-                    if (src_image.empty() || src_height <= 0 || src_width <= 0) {
+                    if (src_height <= 0 || src_width <= 0 || img_msg.size() == 0 || img_msg.data() == nullptr) {
                         is_fault = true;
                     }
 
-                    if (is_fault) {
+                    cv::Mat src_image;
+                    if (!is_fault) {
+                        size_t elem_size = CV_ELEM_SIZE(src_type);
+                        size_t raw_expected_size = static_cast<size_t>(src_height) * src_width * elem_size;
+
+                        const unsigned char* data_ptr = static_cast<const unsigned char*>(img_msg.data());
+                        size_t data_size = img_msg.size();
+
+                        // Check if buffer is JPEG compressed (starts with SOI marker 0xFF 0xD8)
+                        if (data_size >= 2 && data_ptr[0] == 0xFF && data_ptr[1] == 0xD8) {
+                            cv::Mat raw_buf(1, data_size, CV_8UC1, const_cast<unsigned char*>(data_ptr));
+                            src_image = cv::imdecode(raw_buf, cv::IMREAD_COLOR);
+                            if (src_image.empty()) {
+                                is_fault = true;
+                            }
+                        } else if (data_size >= raw_expected_size) {
+                            // Raw uncompressed cv::Mat buffer
+                            src_image = cv::Mat(src_height, src_width, src_type, const_cast<unsigned char*>(data_ptr)).clone();
+                        } else {
+                            logger::warn("[{}] [{}] Image buffer size mismatch (got: {}, expected at least: {})",
+                                         getName(), stream_name, data_size, raw_expected_size);
+                            is_fault = true;
+                        }
+                    }
+
+                    if (is_fault || src_image.empty()) {
                         string out_tag_str = tag.dump();
                         flame::component::ZData out_msg;
                         out_msg.from = monitor_portname;
@@ -202,14 +225,14 @@ void camera_monitor::_monitor_task(string stream_name, string monitor_portname)
                     json out_tag = tag; // copy tag for potential modification
 
                     if (target_res.has_resolution &&
-                        (target_res.width != src_width || target_res.height != src_height)) {
+                        (target_res.width != src_image.cols || target_res.height != src_image.rows)) {
                         cv::resize(src_image, out_image,
                                    cv::Size(target_res.width, target_res.height),
                                    0, 0, cv::INTER_LINEAR);
                         out_tag["width"]  = target_res.width;
                         out_tag["height"] = target_res.height;
                     } else {
-                        out_image = src_image.clone(); // clone to ensure contiguous memory for encoding
+                        out_image = src_image;
                     }
 
                     /* ---- JPEG encoding ---- */
@@ -220,10 +243,6 @@ void camera_monitor::_monitor_task(string stream_name, string monitor_portname)
                     }
 
                     /* ---- Build output ZData multipart message ---- */
-                    // Frame layout expected by camera.py:
-                    //   Frame 0: topic (monitor portname string)
-                    //   Frame 1: tag JSON string (metadata)
-                    //   Frame 2: JPEG encoded image data
                     string out_tag_str = out_tag.dump();
 
                     flame::component::ZData out_msg;
