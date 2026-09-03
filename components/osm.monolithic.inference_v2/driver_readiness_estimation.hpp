@@ -8,7 +8,7 @@
 #include <vector>
 #include <deque>
 #include "body_pose_estimation.hpp"
-#include "head_pose_estimation_from_2d.hpp"
+#include "face_analysis_e2e.hpp"
 
 namespace driver_readiness {
     struct FrameInput {

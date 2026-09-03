@@ -1,39 +1,37 @@
 /**
- * @file osm.monolithic.inference.hpp
+ * @file osm.monolithic.inference_v2.hpp
  * @author Byunghun Hwang <bh.hwang@iae.re.kr>
- * @brief OSM Monolithic Inference Component
- * @version 0.1
- * @date 2026-07-08
+ * @brief OSM Monolithic Inference Component V2 (with DAD-3DHeads E2E)
+ * @version 0.2
+ * @date 2026-09-03
  * 
  * @copyright Copyright (c) 2026
  * 
  */
 
-#ifndef FLAME_OSM_MONOLITHIC_INFERENCE_HPP_INCLUDED
-#define FLAME_OSM_MONOLITHIC_INFERENCE_HPP_INCLUDED
+#ifndef FLAME_OSM_MONOLITHIC_INFERENCE_V2_HPP_INCLUDED
+#define FLAME_OSM_MONOLITHIC_INFERENCE_V2_HPP_INCLUDED
 
 #include <flame/component/object.hpp>
 #include <atomic>
 #include <thread>
 #include <mutex>
 #include <memory>
+#include <deque>
 #include <opencv2/opencv.hpp>
 #include "face_detection.hpp"
+#include "face_analysis_e2e.hpp"
 #include "body_pose_estimation.hpp"
-#include "face_landmark_2d.hpp"
-#include "face_landmark_3d.hpp"
-#include "head_pose_estimation_from_2d.hpp"
-#include "head_pose_estimation_from_3d.hpp"
 #include "driver_readiness_estimation.hpp"
 #include "driver_readiness_estimation_logical.hpp"
 
 using namespace std;
 using namespace flame::component;
 
-class osm_monolithic_inference : public flame::component::Object {
+class osm_monolithic_inference_v2 : public flame::component::Object {
     public:
-        osm_monolithic_inference();
-        virtual ~osm_monolithic_inference() = default;
+        osm_monolithic_inference_v2();
+        virtual ~osm_monolithic_inference_v2() = default;
 
         /* default interface functions */
         bool onInit() override;
@@ -58,21 +56,14 @@ class osm_monolithic_inference : public flame::component::Object {
         std::mutex _img_mutex_1;
         std::mutex _img_mutex_2;
 
-        /* Face Detector Instance */
+        /* Face Detector Instance (YOLO) */
         std::unique_ptr<face_detection> _face_detector;
+
+        /* DAD-3DHeads E2E Face Analysis Instance */
+        std::unique_ptr<face_analysis_e2e> _face_analyzer_e2e;
 
         /* Body Pose Estimator Instance */
         std::unique_ptr<body_pose_estimation> _body_pose_estimator;
-
-        /* Face Landmark 2D Instance */
-        std::unique_ptr<face_landmark_2d> _face_landmark_2d;
-
-        /* Face Landmark 3D Instance */
-        std::unique_ptr<face_landmark_3d> _face_landmark_3d;
-
-        /* Head Pose Estimator Instances */
-        std::unique_ptr<head_pose_estimation_from_2d> _head_pose_estimator_2d;
-        std::unique_ptr<head_pose_estimation_from_3d> _head_pose_estimator_3d;
 
         /* Driver Readiness Estimator Instances */
         std::unique_ptr<driver_readiness_estimation> _driver_readiness_estimator;
@@ -80,11 +71,8 @@ class osm_monolithic_inference : public flame::component::Object {
 
         /* Model Execution Flags */
         bool _use_face_det{true};
-        bool _use_landmark_2d{true};
-        bool _use_landmark_3d{true};
+        bool _use_face_analysis_e2e{true};
         bool _use_body_pose{true};
-        bool _use_head_pose_2d{true};
-        bool _use_head_pose_3d{true};
         bool _use_driver_readiness{false};
         bool _use_driver_readiness_logical{true};
 
@@ -106,11 +94,13 @@ class osm_monolithic_inference : public flame::component::Object {
 
         /* Visualization Flags */
         bool _vis_face_det{true};
-        bool _vis_landmark_2d{true};
-        bool _vis_landmark_3d{true};
+        bool _vis_face_analysis_e2e{true};
+        bool _vis_landmarks_68{true};
+        bool _vis_landmarks_191{false};
+        bool _vis_head_pose{true};
+        bool _vis_square_box{true};
+        bool _vis_head_mesh{false};
         bool _vis_body_pose{true};
-        bool _vis_head_pose_2d{true};
-        bool _vis_head_pose_3d{true};
         bool _vis_driver_readiness{true};
         bool _vis_driver_readiness_logical{true};
 

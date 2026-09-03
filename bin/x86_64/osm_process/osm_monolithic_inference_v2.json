@@ -4,9 +4,8 @@
     "info": {},
     "parameters": {
         "show_info": true,
-        "vertical_flip": false,
-        "use_image_stream":[1],
-        "camera_calibration": "/home/iae-vc/dev/flame_osm/bin/x86_64/osm_process/camera_parameter.json",
+        "vertical_flip": true,
+        "use_image_stream": [1],
         "face_detection": {
             "use": true,
             "visualize": true,
@@ -16,27 +15,18 @@
             "model_path": "/home/iae-vc/dev/flame_osm/bin/x86_64/models/yolo11n-face.torchscript",
             "gpu_id": 0,
             "nms": 0.45,
-            "padding":[0.3, 0.2]
+            "padding": [0.3, 0.2]
         },
-        "2d_face_landmark": {
+        "face_analysis_e2e": {
             "use": true,
             "visualize": true,
-            "model_path": "/home/iae-vc/dev/flame_osm/bin/x86_64/models/face_alignment_2d_fan_cuda.torchscript",
-            "gpu_id": 0
-        },
-        "3d_face_landmark": {
-            "use": false,
-            "visualize": true,
-            "model_path": "/home/iae-vc/dev/flame_osm/bin/x86_64/models/face_alignment_3d_fan_full_cuda.torchscript",
-            "gpu_id": 0
-        },
-        "head_pose_estimation_from_2d": {
-            "use": false,
-            "visualize": true
-        },
-        "head_pose_estimation_from_3d": {
-            "use": true,
-            "visualize": true
+            "model_path": "/home/iae-vc/dev/flame_osm/bin/x86_64/models/dad_3dheads_e2e.torchscript",
+            "gpu_id": 0,
+            "vis_landmarks_68": true,
+            "vis_landmarks_191": false,
+            "vis_head_pose": true,
+            "vis_square_box": true,
+            "vis_head_mesh": false
         },
         "body_pose_estimation": {
             "use": true,
@@ -45,17 +35,17 @@
             "gpu_id": 0
         },
         "driver_readiness_estimation": {
-            "use": true,
+            "use": false,
             "visualize": true,
             "model_path": "/home/iae-vc/dev/flame_osm/bin/x86_64/models/iae_dms_251212.torchscript",
             "gpu_id": 1,
             "threshold": 0.5,
             "readiness_low": 0.2,
-            "readiness_moderate": 0.7,
+            "readiness_moderate": 0.5,
             "readiness_high": 1.0
         },
         "driver_readiness_estimation_logical": {
-            "use": false,
+            "use": true,
             "visualize": true,
             "ref_yaw": 41.0,
             "ref_pitch": -130.0,

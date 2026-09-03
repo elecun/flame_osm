@@ -201,6 +201,28 @@ $(BUILDDIR)driver_readiness_estimation.o: $(CURRENT_DIR)/components/osm.monolith
 $(BUILDDIR)driver_readiness_estimation_logical.o: $(CURRENT_DIR)/components/osm.monolithic.inference/driver_readiness_estimation_logical.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
 
+# OSM Monolithic Inference V2 (with DAD-3DHeads E2E)
+osm_monolithic_inference_v2.comp: $(BUILDDIR)osm.monolithic.inference_v2.o $(BUILDDIR)face_analysis_e2e.o $(BUILDDIR)face_detection_v2.o $(BUILDDIR)body_pose_estimation_v2.o $(BUILDDIR)driver_readiness_estimation_v2.o $(BUILDDIR)driver_readiness_estimation_logical_v2.o
+	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_process/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_calib3d -lopencv_dnn $(TORCH_LIB)
+
+$(BUILDDIR)osm.monolithic.inference_v2.o: $(CURRENT_DIR)/components/osm.monolithic.inference_v2/osm.monolithic.inference_v2.cc
+	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
+
+$(BUILDDIR)face_analysis_e2e.o: $(CURRENT_DIR)/components/osm.monolithic.inference_v2/face_analysis_e2e.cc
+	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
+
+$(BUILDDIR)face_detection_v2.o: $(CURRENT_DIR)/components/osm.monolithic.inference_v2/face_detection.cc
+	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
+
+$(BUILDDIR)body_pose_estimation_v2.o: $(CURRENT_DIR)/components/osm.monolithic.inference_v2/body_pose_estimation.cc
+	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
+
+$(BUILDDIR)driver_readiness_estimation_v2.o: $(CURRENT_DIR)/components/osm.monolithic.inference_v2/driver_readiness_estimation.cc
+	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
+
+$(BUILDDIR)driver_readiness_estimation_logical_v2.o: $(CURRENT_DIR)/components/osm.monolithic.inference_v2/driver_readiness_estimation_logical.cc
+	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
+
 # Headpose Model Inference
 headpose_model_inference.comp: $(BUILDDIR)headpose.model.inference.o
 	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_camera/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_calib3d -lmediapipe

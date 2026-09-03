@@ -20,6 +20,9 @@ bool osm_monolithic_inference::onInit(){
         _show_info = parameters.value("show_info", true);
         logger::info("[{}] Show info parameter: {}", getName(), _show_info);
 
+        _vertical_flip = parameters.value("vertical_flip", false);
+        logger::info("[{}] Vertical flip parameter: {}", getName(), _vertical_flip);
+
         /* Model parameters & use flags */
         std::string model_path = "bin/x86_64/models/yolo11n-face.torchscript";
         int gpu_id = 0;
@@ -114,12 +117,20 @@ bool osm_monolithic_inference::onInit(){
 
         std::string readiness_model_path = "/home/osm/dev/flame_osm/bin/x86_64/models/iae_dms_251212.torchscript";
         int readiness_gpu_id = 1;
+        float dr_threshold = 0.5f;
+        float dr_readiness_low = 0.2f;
+        float dr_readiness_moderate = 0.5f;
+        float dr_readiness_high = 1.0f;
         if (parameters.contains("driver_readiness_estimation")) {
             const auto& dr_params = parameters["driver_readiness_estimation"];
             _use_driver_readiness = dr_params.value("use", _use_driver_readiness);
             readiness_model_path = dr_params.value("model_path", readiness_model_path);
             readiness_gpu_id = dr_params.value("gpu_id", readiness_gpu_id);
             _vis_driver_readiness = dr_params.value("visualize", true);
+            dr_threshold = dr_params.value("threshold", dr_threshold);
+            dr_readiness_low = dr_params.value("readiness_low", dr_readiness_low);
+            dr_readiness_moderate = dr_params.value("readiness_moderate", dr_readiness_moderate);
+            dr_readiness_high = dr_params.value("readiness_high", dr_readiness_high);
         }
 
         double ref_yaw = 0.0;
@@ -250,6 +261,7 @@ bool osm_monolithic_inference::onInit(){
                 logger::error("[{}] Failed to load driver readiness estimation model: {}", getName(), readiness_model_path);
                 return false;
             }
+            _driver_readiness_estimator->setParameters(dr_threshold, dr_readiness_low, dr_readiness_moderate, dr_readiness_high);
         }
 
         if (_use_driver_readiness_logical) {
@@ -339,6 +351,10 @@ void osm_monolithic_inference::onData(flame::component::ZData& data){
                 // Restore image Mat from payload
                 cv::Mat raw_img(height, width, type, img_msg.data());
                 cv::Mat cloned_img = raw_img.clone();
+
+                if (_vertical_flip) {
+                    cv::flip(cloned_img, cloned_img, 1); // 좌우 반전 (Horizontal flip)
+                }
 
                 if (portname == "image_stream_1") {
                     std::lock_guard<std::mutex> lock(_img_mutex_1);
@@ -743,6 +759,7 @@ void osm_monolithic_inference::_inference_process() {
                             tag["dms_dl_class"] = readiness_res.predicted_class;
                             tag["dms_dl_confidence"] = readiness_res.confidence;
                             tag["dms_dl_attention_score"] = readiness_res.confidence;
+                            tag["dms_dl_category"] = readiness_res.category;
                         }
                         if (_use_driver_readiness_logical && _driver_readiness_logical_estimator) {
                             tag["dms_logical_readiness"] = logical_res.readiness_score;
