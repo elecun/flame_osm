@@ -42,8 +42,7 @@ bool camera_monitor::onInit()
                         res.has_resolution = true;
                         res.width  = r["width"].get<int>();
                         res.height = r["height"].get<int>();
-                        logger::info("[{}] Monitor port '{}' target resolution: {}x{}",
-                                     getName(), monitor_portname, res.width, res.height);
+                        logger::info("[{}] Monitor port '{}' target resolution: {}x{}", getName(), monitor_portname, res.width, res.height);
                     }
                 }
             }
@@ -52,6 +51,10 @@ bool camera_monitor::onInit()
 
         load_resolution("image_stream_1_monitor");
         load_resolution("image_stream_2_monitor");
+
+        // Pre-allocate channels before starting threads
+        _channels["image_stream_1"] = make_unique<StreamChannel>();
+        _channels["image_stream_2"] = make_unique<StreamChannel>();
 
         // Start threads for image_stream_1 and image_stream_2
         _monitor_threads["image_stream_1"] = thread(&camera_monitor::_monitor_task, this, "image_stream_1", "image_stream_1_monitor");
@@ -73,8 +76,10 @@ void camera_monitor::onClose()
         _stop_threads.store(true);
 
         // Notify all queue condition variables to wake up threads
-        for (auto& [name, cv] : _queue_cvs) {
-            cv.notify_all();
+        for (auto& [name, ch] : _channels) {
+            if (ch) {
+                ch->cv.notify_all();
+            }
         }
 
         // Join monitor threads
@@ -87,9 +92,12 @@ void camera_monitor::onClose()
         _monitor_threads.clear();
 
         // Clear all queues
-        for (auto& [name, q] : _monitor_queues) {
-            queue<shared_ptr<flame::component::ZData>> empty_q;
-            swap(q, empty_q);
+        for (auto& [name, ch] : _channels) {
+            if (ch) {
+                lock_guard<mutex> lock(ch->mtx);
+                queue<shared_ptr<flame::component::ZData>> empty_q;
+                swap(ch->q, empty_q);
+            }
         }
 
         logger::info("[{}] Component successfully closed.", getName());
@@ -103,20 +111,21 @@ void camera_monitor::onData(flame::component::ZData& data)
     try {
         const string& portname = data.from;
 
-        if (portname == "image_stream_1" || portname == "image_stream_2") {
+        auto it = _channels.find(portname);
+        if (it != _channels.end() && it->second) {
             auto msg = make_shared<flame::component::ZData>(std::move(data));
 
             /* push to channel queue */
             {
-                lock_guard<mutex> lock(_queue_mtxs[portname]);
-                if (_monitor_queues[portname].size() < _max_queue_size) {
-                    _monitor_queues[portname].push(msg);
+                lock_guard<mutex> lock(it->second->mtx);
+                if (it->second->q.size() < _max_queue_size) {
+                    it->second->q.push(msg);
                 } else {
-                    _monitor_queues[portname].pop();
-                    _monitor_queues[portname].push(msg);
+                    it->second->q.pop();
+                    it->second->q.push(msg);
                 }
             }
-            _queue_cvs[portname].notify_one();
+            it->second->cv.notify_one();
         }
     } catch (const std::exception& e) {
         logger::error("[{}] Error in onData: {}", getName(), e.what());
@@ -130,6 +139,17 @@ void camera_monitor::_monitor_task(string stream_name, string monitor_portname)
     /* Retrieve the target resolution for this monitor port */
     const MonitorResolution& target_res = _monitor_resolutions[monitor_portname];
 
+    /* Retrieve channel pointer */
+    StreamChannel* ch = nullptr;
+    auto it = _channels.find(stream_name);
+    if (it != _channels.end()) {
+        ch = it->second.get();
+    }
+    if (!ch) {
+        logger::error("[{}] Stream channel '{}' not found in _channels!", getName(), stream_name);
+        return;
+    }
+
     /* JPEG encoding parameters */
     vector<int> encode_params = {cv::IMWRITE_JPEG_QUALITY, 80};
 
@@ -137,23 +157,22 @@ void camera_monitor::_monitor_task(string stream_name, string monitor_portname)
         try {
             shared_ptr<flame::component::ZData> msg = nullptr;
             {
-                unique_lock<mutex> lock(_queue_mtxs[stream_name]);
-                _queue_cvs[stream_name].wait(lock, [this, stream_name] {
-                    return !_monitor_queues[stream_name].empty() || _stop_threads.load();
+                unique_lock<mutex> lock(ch->mtx);
+                ch->cv.wait(lock, [this, ch] {
+                    return !ch->q.empty() || _stop_threads.load();
                 });
 
-                if (_stop_threads.load() && _monitor_queues[stream_name].empty())
+                if (_stop_threads.load() && ch->q.empty())
                     break;
 
-                if (!_monitor_queues[stream_name].empty()) {
-                    msg = _monitor_queues[stream_name].front();
-                    _monitor_queues[stream_name].pop();
+                if (!ch->q.empty()) {
+                    msg = ch->q.front();
+                    ch->q.pop();
                 }
             }
 
             if (msg) {
                 auto start_time = chrono::high_resolution_clock::now();
-                // logger::info("[{}] [{}] Received msg size: {}, meta: {}", getName(), stream_name, msg->size(), msg->meta);
 
                 if (msg->size() >= 2) {
                     zmq::message_t tag_msg = msg->pop();

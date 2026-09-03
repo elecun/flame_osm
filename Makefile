@@ -226,8 +226,6 @@ $(BUILDDIR)camera.monitor.o: $(CURRENT_DIR)/components/camera.monitor/camera.mon
 # Blink Detection Inference
 blink_detection_inference.comp: $(BUILDDIR)blink.detection.inference.o
 	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_process/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_objdetect $(TORCH_LIB)
-	cp $(BUILDDIR)/osm_process/$@ $(BUILDDIR)/osm_camera/$@
-	cp $(BUILDDIR)/osm_process/$@ $(BUILDDIR)/osm_video/$@
 
 $(BUILDDIR)blink.detection.inference.o: $(CURRENT_DIR)/components/blink.detection.inference/blink.detection.inference.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@

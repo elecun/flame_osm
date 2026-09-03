@@ -56,11 +56,15 @@ private:
     mutex _mtx;
 
     /* Thread and Queue management */
+    struct StreamChannel {
+        queue<shared_ptr<flame::component::ZData>> q;
+        mutex mtx;
+        condition_variable cv;
+    };
+
     atomic<bool> _stop_threads{false};
     unordered_map<string, thread> _monitor_threads;
-    unordered_map<string, queue<shared_ptr<flame::component::ZData>>> _monitor_queues;
-    unordered_map<string, mutex> _queue_mtxs;
-    unordered_map<string, condition_variable> _queue_cvs;
+    unordered_map<string, unique_ptr<StreamChannel>> _channels;
     const size_t _max_queue_size = 5;
 
     /* Per-monitor-port target resolution (keyed by monitor portname) */
