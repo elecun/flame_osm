@@ -203,7 +203,7 @@ $(BUILDDIR)driver_readiness_estimation_logical.o: $(CURRENT_DIR)/components/osm.
 
 # OSM Monolithic Inference V2 (with DAD-3DHeads E2E)
 osm_monolithic_inference_v2.comp: $(BUILDDIR)osm.monolithic.inference_v2.o $(BUILDDIR)face_analysis_e2e.o $(BUILDDIR)face_detection_v2.o $(BUILDDIR)body_pose_estimation_v2.o $(BUILDDIR)driver_readiness_estimation_v2.o $(BUILDDIR)driver_readiness_estimation_logical_v2.o
-	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_process/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_calib3d -lopencv_dnn $(TORCH_LIB)
+	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_process_v2/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_calib3d -lopencv_dnn $(TORCH_LIB)
 
 $(BUILDDIR)osm.monolithic.inference_v2.o: $(CURRENT_DIR)/components/osm.monolithic.inference_v2/osm.monolithic.inference_v2.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
