@@ -9,9 +9,10 @@
         "face_detection": {
             "use": true,
             "visualize": true,
-            "use_roi": false,
-            "roi": [100, 150, 1040, 1300],
-            "roi_visualize": false,
+            "use_poi": true,
+            "poi": [630, 560],
+            "poi_dist": 200.0,
+            "poi_visualize": true,
             "model_path": "/home/iae-vc/dev/flame_osm/bin/x86_64/models/yolo11n-face.torchscript",
             "gpu_id": 0,
             "conf": 0.7,

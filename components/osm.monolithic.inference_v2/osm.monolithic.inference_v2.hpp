@@ -113,13 +113,12 @@ class osm_monolithic_inference_v2 : public flame::component::Object {
         bool _vis_driver_readiness{true};
         bool _vis_driver_readiness_logical{true};
 
-        /* ROI configuration */
-        bool _use_roi{false};
-        bool _roi_visualize{true};
-        int _roi_x1{0};
-        int _roi_y1{0};
-        int _roi_x2{0};
-        int _roi_y2{0};
+        /* POI (Point of Interest) configuration */
+        bool _use_poi{false};
+        bool _poi_visualize{true};
+        int _poi_x{0};
+        int _poi_y{0};
+        float _poi_dist{200.0f};
 
         /* DMS Score History for Visualization Graph */
         std::deque<std::pair<std::chrono::steady_clock::time_point, double>> _readiness_history;

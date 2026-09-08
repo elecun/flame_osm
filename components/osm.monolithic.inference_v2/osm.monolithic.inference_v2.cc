@@ -54,25 +54,27 @@ bool osm_monolithic_inference_v2::onInit(){
             _nms_threshold = get_json_float(fd_params, {"nms", "iou", "nms_thresh", "nms_threshold", "iou_thresh"}, _nms_threshold);
             _conf_threshold = get_json_float(fd_params, {"conf", "threshold", "conf_thresh", "conf_threshold", "confidence"}, _conf_threshold);
             _padding_scale = get_json_float(fd_params, {"padding_scale", "pad_scale", "scale"}, _padding_scale);
-            _max_faces = fd_params.value("max_faces", _max_faces);
             _vis_face_det = fd_params.value("visualize", true);
-            _use_roi = fd_params.value("use_roi", false);
-            _roi_visualize = fd_params.value("roi_visualize", true);
-            if (fd_params.contains("roi") && fd_params["roi"].is_array()) {
-                if (fd_params["roi"].size() == 4) {
-                    _roi_x1 = fd_params["roi"][0].get<int>();
-                    _roi_y1 = fd_params["roi"][1].get<int>();
-                    _roi_x2 = fd_params["roi"][2].get<int>();
-                    _roi_y2 = fd_params["roi"][3].get<int>();
-                }
+
+            /* POI (Point of Interest) parameters */
+            _use_poi = fd_params.value("use_poi", fd_params.value("use_roi", _use_poi));
+            _poi_visualize = fd_params.value("poi_visualize", fd_params.value("roi_visualize", true));
+            _poi_dist = get_json_float(fd_params, {"poi_dist", "dist", "poi_distance"}, _poi_dist);
+            if (fd_params.contains("poi") && fd_params["poi"].is_array() && fd_params["poi"].size() >= 2) {
+                _poi_x = fd_params["poi"][0].get<int>();
+                _poi_y = fd_params["poi"][1].get<int>();
+            } else if (fd_params.contains("roi") && fd_params["roi"].is_array() && fd_params["roi"].size() >= 2) {
+                _poi_x = fd_params["roi"][0].get<int>();
+                _poi_y = fd_params["roi"][1].get<int>();
             }
+
             if (fd_params.contains("padding") && fd_params["padding"].is_array() && fd_params["padding"].size() == 2) {
                 _padding_w = fd_params["padding"][0].get<float>();
                 _padding_h = fd_params["padding"][1].get<float>();
                 logger::info("[{}] Loaded face detection padding: w={}, h={}", getName(), _padding_w, _padding_h);
             }
-            logger::info("[{}] Face detection configured: model={}, gpu={}, conf={:.3f}, nms={:.3f}, padding_scale={:.3f}, max_faces={}, use_roi={}",
-                         getName(), face_det_model_path, face_det_gpu_id, _conf_threshold, _nms_threshold, _padding_scale, _max_faces, _use_roi);
+            logger::info("[{}] Face detection configured: model={}, gpu={}, conf={:.3f}, nms={:.3f}, padding_scale={:.3f}, use_poi={}, poi=[{}, {}], poi_dist={:.1f}, poi_visualize={}",
+                         getName(), face_det_model_path, face_det_gpu_id, _conf_threshold, _nms_threshold, _padding_scale, _use_poi, _poi_x, _poi_y, _poi_dist, _poi_visualize);
         }
 
         std::string face_analysis_model_path = "/home/iae-vc/dev/flame_osm/bin/x86_64/models/dad_3dheads_e2e.torchscript";
@@ -459,18 +461,32 @@ void osm_monolithic_inference_v2::_inference_process() {
                     std::vector<FaceBox> detected_faces;
                     if (_use_face_det && _face_detector) {
                         detected_faces = _face_detector->detect(image, _conf_threshold, _nms_threshold, _padding_scale);
-                        if (_use_roi) {
-                            std::vector<FaceBox> filtered_faces;
-                            for (const auto& face : detected_faces) {
-                                int cx = face.bbox.x + face.bbox.width / 2;
-                                int cy = face.bbox.y + face.bbox.height / 2;
-                                if (cx >= _roi_x1 && cx <= _roi_x2 && cy >= _roi_y1 && cy <= _roi_y2) {
-                                    filtered_faces.push_back(face);
+                        if (_use_poi) {
+                            int best_face_idx = -1;
+                            double min_dist = std::numeric_limits<double>::max();
+
+                            for (size_t i = 0; i < detected_faces.size(); ++i) {
+                                const auto& face = detected_faces[i];
+                                double cx = face.bbox.x + face.bbox.width / 2.0;
+                                double cy = face.bbox.y + face.bbox.height / 2.0;
+                                double dx = cx - _poi_x;
+                                double dy = cy - _poi_y;
+                                double dist = std::sqrt(dx * dx + dy * dy);
+
+                                if (dist <= _poi_dist) {
+                                    if (dist < min_dist) {
+                                        min_dist = dist;
+                                        best_face_idx = static_cast<int>(i);
+                                    }
                                 }
                             }
-                            detected_faces = filtered_faces;
-                        }
-                        if (_max_faces > 0 && (int)detected_faces.size() > _max_faces) {
+
+                            if (best_face_idx >= 0) {
+                                detected_faces = { detected_faces[best_face_idx] };
+                            } else {
+                                detected_faces.clear();
+                            }
+                        } else if (_max_faces > 0 && (int)detected_faces.size() > _max_faces) {
                             detected_faces.resize(_max_faces);
                         }
                     }
@@ -569,15 +585,18 @@ void osm_monolithic_inference_v2::_inference_process() {
                     float scale_x = static_cast<float>(out_image.cols) / static_cast<float>(image.cols);
                     float scale_y = static_cast<float>(out_image.rows) / static_cast<float>(image.rows);
 
-                    // Visualize ROI
-                    if (_use_roi && _roi_visualize) {
-                        cv::Rect scaled_roi(
-                            static_cast<int>(_roi_x1 * scale_x),
-                            static_cast<int>(_roi_y1 * scale_y),
-                            static_cast<int>((_roi_x2 - _roi_x1) * scale_x),
-                            static_cast<int>((_roi_y2 - _roi_y1) * scale_y)
-                        );
-                        cv::rectangle(out_image, scaled_roi, cv::Scalar(0, 165, 255), 2);
+                    // Visualize POI (Point of Interest) & distance threshold circle
+                    if (_use_poi && _poi_visualize) {
+                        int spoi_x = static_cast<int>(_poi_x * scale_x);
+                        int spoi_y = static_cast<int>(_poi_y * scale_y);
+                        int spoi_r = static_cast<int>(_poi_dist * ((scale_x + scale_y) * 0.5f));
+
+                        // Draw POI distance threshold circle
+                        //cv::circle(out_image, cv::Point(spoi_x, spoi_y), spoi_r, cv::Scalar(0, 165, 255), 1, cv::LINE_AA);
+
+                        // Draw POI center crosshair marker
+                        cv::drawMarker(out_image, cv::Point(spoi_x, spoi_y), cv::Scalar(0, 165, 255), cv::MARKER_CROSS, 16, 1, cv::LINE_AA);
+                        // cv::circle(out_image, cv::Point(spoi_x, spoi_y), 4, cv::Scalar(0, 165, 255), -1, cv::LINE_AA);
                     }
 
                     // Visualize DAD-3DHeads E2E Results (1:1 Box with Score, 191 Landmarks, 3D Pose Axis, Info Panel)

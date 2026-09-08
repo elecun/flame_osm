@@ -62,7 +62,7 @@ else ifeq ($(ARCH), aarch64)
 
 else
 	# LibTorch Paths
-	TORCH_DIR = $(CURRENT_DIR)/test/venv/lib/python3.11/site-packages/torch
+	TORCH_DIR = /home/iae-vc/dev/DAD-3DHeads/venv/lib/python3.10/site-packages/torch
 	TORCH_INC = -I$(TORCH_DIR)/include -I$(TORCH_DIR)/include/torch/csrc/api/include
 	TORCH_LIB = -L$(TORCH_DIR)/lib -Wl,--no-as-needed -ltorch -ltorch_cpu -ltorch_cuda -lc10 -lc10_cuda -Wl,--as-needed
 
@@ -201,8 +201,8 @@ $(BUILDDIR)driver_readiness_estimation.o: $(CURRENT_DIR)/components/osm.monolith
 $(BUILDDIR)driver_readiness_estimation_logical.o: $(CURRENT_DIR)/components/osm.monolithic.inference/driver_readiness_estimation_logical.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
 
-# OSM Monolithic Inference V2 (with DAD-3DHeads E2E)
-osm_monolithic_inference_v2.comp: $(BUILDDIR)osm.monolithic.inference_v2.o $(BUILDDIR)face_analysis_e2e.o $(BUILDDIR)face_detection_v2.o $(BUILDDIR)body_pose_estimation_v2.o $(BUILDDIR)driver_readiness_estimation_v2.o $(BUILDDIR)driver_readiness_estimation_logical_v2.o
+# OSM Monolithic Inference V2 (with DAD-3DHeads E2E + BlinkLinMulT)
+osm_monolithic_inference_v2.comp: $(BUILDDIR)osm.monolithic.inference_v2.o $(BUILDDIR)face_analysis_e2e.o $(BUILDDIR)face_detection_v2.o $(BUILDDIR)body_pose_estimation_v2.o $(BUILDDIR)driver_readiness_estimation_v2.o $(BUILDDIR)driver_readiness_estimation_logical_v2.o $(BUILDDIR)blink_analysis_v2.o
 	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_process_v2/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_calib3d -lopencv_dnn $(TORCH_LIB)
 
 $(BUILDDIR)osm.monolithic.inference_v2.o: $(CURRENT_DIR)/components/osm.monolithic.inference_v2/osm.monolithic.inference_v2.cc
@@ -223,6 +223,9 @@ $(BUILDDIR)driver_readiness_estimation_v2.o: $(CURRENT_DIR)/components/osm.monol
 $(BUILDDIR)driver_readiness_estimation_logical_v2.o: $(CURRENT_DIR)/components/osm.monolithic.inference_v2/driver_readiness_estimation_logical.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
 
+$(BUILDDIR)blink_analysis_v2.o: $(CURRENT_DIR)/components/osm.monolithic.inference_v2/blink_analysis.cc
+	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
+
 # Headpose Model Inference
 headpose_model_inference.comp: $(BUILDDIR)headpose.model.inference.o
 	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_camera/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_calib3d -lmediapipe
@@ -240,7 +243,7 @@ $(BUILDDIR)video.file.grabber.o: $(CURRENT_DIR)/components/video.file.grabber/vi
 # Camera Monitor
 camera_monitor.comp: $(BUILDDIR)camera.monitor.o
 	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_camera/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgproc -lopencv_imgcodecs
-	cp $(BUILDDIR)/osm_camera/$@ $(BUILDDIR)/osm_video/$@
+
 
 $(BUILDDIR)camera.monitor.o: $(CURRENT_DIR)/components/camera.monitor/camera.monitor.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@
