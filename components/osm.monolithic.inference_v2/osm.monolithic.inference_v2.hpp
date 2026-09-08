@@ -20,6 +20,7 @@
 #include <deque>
 #include <opencv2/opencv.hpp>
 #include "face_detection.hpp"
+#include "blink_analysis.hpp"
 #include "face_analysis_e2e.hpp"
 #include "body_pose_estimation.hpp"
 #include "driver_readiness_estimation.hpp"
@@ -75,10 +76,15 @@ class osm_monolithic_inference_v2 : public flame::component::Object {
         bool _use_body_pose{true};
         bool _use_driver_readiness{false};
         bool _use_driver_readiness_logical{true};
+        /* Blink Detection */
+        bool _use_blink_detection{true};
+        bool _vis_blink_detection{true};
+        std::unique_ptr<blink_analysis_component> _blink_analyzer;
 
         /* Thread Control */
         std::thread _inference_worker;
         std::atomic<bool> _worker_stop{false};
+        std::atomic<bool> _worker_finished{false};
 
         /* Monitor port configuration */
         int _target_width = 800;
@@ -87,6 +93,9 @@ class osm_monolithic_inference_v2 : public flame::component::Object {
         bool _enable_stream_1 = false;
         bool _enable_stream_2 = false;
         float _nms_threshold = 0.45f;
+        float _conf_threshold = 0.7f;
+        float _padding_scale = 1.25f;
+        int _max_faces = 0;
         float _padding_w = 0.0f;
         float _padding_h = 0.0f;
         bool _show_info = true;
@@ -95,8 +104,8 @@ class osm_monolithic_inference_v2 : public flame::component::Object {
         /* Visualization Flags */
         bool _vis_face_det{true};
         bool _vis_face_analysis_e2e{true};
-        bool _vis_landmarks_68{true};
-        bool _vis_landmarks_191{false};
+        bool _vis_landmarks_68{false};
+        bool _vis_landmarks_191{true};
         bool _vis_head_pose{true};
         bool _vis_square_box{true};
         bool _vis_head_mesh{false};

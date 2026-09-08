@@ -5,8 +5,8 @@
     },
     "parameters": {
         "video_files":[
-            "/home/iae-vc/dev/flame_osm/bin/video/20260723_110439_cam1.avi",
-            "/home/iae-vc/dev/flame_osm/bin/video/20260723_110731_cam1.avi"
+            "/home/iae-vc/dev/flame_osm/bin/video/20260723_110439_cam1_scaled.avi",
+            "/home/iae-vc/dev/flame_osm/bin/video/20260723_110731_cam1_scaled.avi"
         ],
         "use_image_stream": true,
         "undistort": false,

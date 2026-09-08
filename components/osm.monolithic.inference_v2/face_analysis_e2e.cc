@@ -38,15 +38,81 @@ bool face_analysis_e2e::loadModel(const std::string& model_path, int gpu_id) {
     }
 }
 
-cv::Rect face_analysis_e2e::makeSquareBox(const cv::Rect& bbox, int img_w, int img_h) {
-    float cx = bbox.x + bbox.width / 2.0f;
-    float cy = bbox.y + bbox.height / 2.0f;
-    int max_side = std::max(bbox.width, bbox.height);
+void face_analysis_e2e::calculateRPYFrom6D(
+    const float* r6d,
+    double& out_roll,
+    double& out_pitch,
+    double& out_yaw,
+    cv::Mat& out_rvec
+) {
+    // Continuous 6D rotation vector: vx = r6d[0..2], vy = r6d[3..5]
+    double vx0 = r6d[0], vx1 = r6d[1], vx2 = r6d[2];
+    double vy0 = r6d[3], vy1 = r6d[4], vy2 = r6d[5];
 
-    int x1 = static_cast<int>(std::round(cx - max_side / 2.0f));
-    int y1 = static_cast<int>(std::round(cy - max_side / 2.0f));
+    // b1 = normalize(vx)
+    double norm_vx = std::sqrt(vx0 * vx0 + vx1 * vx1 + vx2 * vx2);
+    if (norm_vx < 1e-8) norm_vx = 1e-8;
+    double b1_0 = vx0 / norm_vx;
+    double b1_1 = vx1 / norm_vx;
+    double b1_2 = vx2 / norm_vx;
 
-    return cv::Rect(x1, y1, max_side, max_side);
+    // c = cross(b1, vy)
+    double c0 = b1_1 * vy2 - b1_2 * vy1;
+    double c1 = b1_2 * vy0 - b1_0 * vy2;
+    double c2 = b1_0 * vy1 - b1_1 * vy0;
+
+    // b3 = normalize(c)
+    double norm_c = std::sqrt(c0 * c0 + c1 * c1 + c2 * c2);
+    if (norm_c < 1e-8) norm_c = 1e-8;
+    double b3_0 = c0 / norm_c;
+    double b3_1 = c1 / norm_c;
+    double b3_2 = c2 / norm_c;
+
+    // b2 = -cross(b1, b3) = cross(b3, b1)
+    double b2_0 = b3_1 * b1_2 - b3_2 * b1_1;
+    double b2_1 = b3_2 * b1_0 - b3_0 * b1_2;
+    double b2_2 = b3_0 * b1_1 - b3_1 * b1_0;
+
+    // In demo_e2e_test.py:
+    // rot_mat has columns [b1, b2, b3]
+    // rot_mat_2 = np.transpose(rot_mat)
+    // Rows of rot_mat_2 are b1, b2, b3.
+    // Scipy as_euler('xyz', degrees=True) on rot_mat_2:
+    double sin_y = std::clamp(-b3_0, -1.0, 1.0);
+    double y = std::asin(sin_y);
+    double x = 0.0;
+    double z = 0.0;
+
+    if (std::abs(b3_0) < 0.9999999) {
+        x = std::atan2(b3_1, b3_2);
+        z = std::atan2(b2_0, b1_0);
+    } else {
+        x = std::atan2(-b1_1, b2_1);
+        z = 0.0;
+    }
+
+    constexpr double RAD2DEG = 180.0 / M_PI;
+    double angle_x = x * RAD2DEG;
+    double angle_y = y * RAD2DEG;
+    double angle_z = z * RAD2DEG;
+
+    auto limit_angle = [](double ang) {
+        while (ang < -180.0) ang += 360.0;
+        while (ang > 180.0) ang -= 360.0;
+        return ang;
+    };
+
+    out_roll = limit_angle(angle_z);
+    out_pitch = limit_angle(angle_x - 180.0);
+    out_yaw = limit_angle(angle_y);
+
+    // Rotation matrix R = [b1, b2, b3]
+    cv::Mat R = (cv::Mat_<double>(3, 3) <<
+        b1_0, b2_0, b3_0,
+        b1_1, b2_1, b3_1,
+        b1_2, b2_2, b3_2
+    );
+    cv::Rodrigues(R, out_rvec);
 }
 
 void face_analysis_e2e::computeHeadPose(
@@ -54,49 +120,13 @@ void face_analysis_e2e::computeHeadPose(
     const cv::Point2f& nose_tip,
     head_pose::PoseResult& out_pose
 ) {
-    // Rotation 6D is stored at indices 403 to 408 (size 6)
-    // x_raw: [0, 1, 2], y_raw: [3, 4, 5]
     const float* r6d = pred_3dmm_ptr + 403;
+    double roll = 0.0, pitch = 0.0, yaw = 0.0;
+    calculateRPYFrom6D(r6d, roll, pitch, yaw, out_pose.rvec);
 
-    double x0 = r6d[0], x1 = r6d[1], x2 = r6d[2];
-    double y0 = r6d[3], y1 = r6d[4], y2 = r6d[5];
-
-    double norm_x = std::sqrt(x0 * x0 + x1 * x1 + x2 * x2);
-    if (norm_x < 1e-8) norm_x = 1e-8;
-    x0 /= norm_x; x1 /= norm_x; x2 /= norm_x;
-
-    // z = cross(x, y_raw)
-    double z0 = x1 * y2 - x2 * y1;
-    double z1 = x2 * y0 - x0 * y2;
-    double z2 = x0 * y1 - x1 * y0;
-
-    double norm_z = std::sqrt(z0 * z0 + z1 * z1 + z2 * z2);
-    if (norm_z < 1e-8) norm_z = 1e-8;
-    z0 /= norm_z; z1 /= norm_z; z2 /= norm_z;
-
-    // y = cross(z, x)
-    double vy0 = z1 * x2 - z2 * x1;
-    double vy1 = z2 * x0 - z0 * x2;
-    double vy2 = z0 * x1 - z1 * x0;
-
-    cv::Mat R = (cv::Mat_<double>(3, 3) <<
-        x0, vy0, z0,
-        x1, vy1, z1,
-        x2, vy2, z2
-    );
-
-    cv::Mat rvec;
-    cv::Rodrigues(R, rvec);
-
-    cv::Vec3d euler_angles;
-    cv::Mat mtxR, mtxQ, qx, qy, qz;
-    euler_angles = cv::RQDecomp3x3(R, mtxR, mtxQ, qx, qy, qz);
-
-    out_pose.rvec = rvec;
-    out_pose.euler = euler_angles; // pitch, yaw, roll in degrees
+    out_pose.euler = cv::Vec3d(pitch, yaw, roll); // (pitch, yaw, roll) in degrees
     out_pose.nose_tip_2d = nose_tip;
 
-    // Translation at indices 409 to 411
     const float* trans = pred_3dmm_ptr + 409;
     out_pose.tvec = (cv::Mat_<double>(3, 1) << trans[0], trans[1], trans[2]);
     out_pose.success = true;
@@ -104,53 +134,51 @@ void face_analysis_e2e::computeHeadPose(
 
 face_analysis::FaceAnalysisResult face_analysis_e2e::process(
     const cv::Mat& orig_image,
-    const cv::Rect& face_bbox
+    const cv::Rect& face_bbox,
+    float score
 ) {
     face_analysis::FaceAnalysisResult result;
     if (!_is_loaded || orig_image.empty() || face_bbox.width <= 0 || face_bbox.height <= 0) {
         return result;
     }
 
-    // 1. Compute 1:1 square bounding box centered around longest side
-    cv::Rect sq_box = makeSquareBox(face_bbox, orig_image.cols, orig_image.rows);
-    result.square_bbox = sq_box;
+    // 1. Clamped square crop matching demo_e2e_test.py
+    int bx = std::max(0, std::min(face_bbox.x, orig_image.cols - 1));
+    int by = std::max(0, std::min(face_bbox.y, orig_image.rows - 1));
+    int bw = std::max(1, std::min(face_bbox.width, orig_image.cols - bx));
+    int bh = std::max(1, std::min(face_bbox.height, orig_image.rows - by));
 
-    // 2. Safely crop square face patch with padding if outside image boundaries
-    int src_x1 = std::max(0, sq_box.x);
-    int src_y1 = std::max(0, sq_box.y);
-    int src_x2 = std::min(orig_image.cols, sq_box.x + sq_box.width);
-    int src_y2 = std::min(orig_image.rows, sq_box.y + sq_box.height);
-
-    if (src_x2 <= src_x1 || src_y2 <= src_y1) {
+    cv::Rect crop_rect(bx, by, bw, bh);
+    cv::Mat crop = orig_image(crop_rect);
+    if (crop.empty()) {
         return result;
     }
 
-    cv::Mat cropped_valid = orig_image(cv::Rect(src_x1, src_y1, src_x2 - src_x1, src_y2 - src_y1));
-    cv::Mat square_patch = cv::Mat::zeros(sq_box.height, sq_box.width, orig_image.type());
+    result.square_bbox = crop_rect;
+    result.score = score;
+    result.center = cv::Point2f(bx + bw / 2.0f, by + bh / 2.0f);
+    result.scale_size = static_cast<float>(std::min(bw, bh));
 
-    int dst_x1 = src_x1 - sq_box.x;
-    int dst_y1 = src_y1 - sq_box.y;
-    cropped_valid.copyTo(square_patch(cv::Rect(dst_x1, dst_y1, src_x2 - src_x1, src_y2 - src_y1)));
+    // 2. Resize to model input size (256x256)
+    cv::Mat resized_crop;
+    cv::resize(crop, resized_crop, cv::Size(MODEL_INPUT_SIZE, MODEL_INPUT_SIZE), 0, 0, cv::INTER_LINEAR);
 
-    // 3. Resize to model input size (256x256)
-    cv::Mat resized_patch;
-    cv::resize(square_patch, resized_patch, cv::Size(MODEL_INPUT_SIZE, MODEL_INPUT_SIZE), 0, 0, cv::INTER_LINEAR);
-
-    // 4. Convert BGR to RGB and normalize (ImageNet Mean/Std)
-    cv::Mat rgb_patch;
-    cv::cvtColor(resized_patch, rgb_patch, cv::COLOR_BGR2RGB);
+    // 3. Convert BGR to RGB and normalize with ImageNet Mean/Std
+    cv::Mat rgb_crop;
+    cv::cvtColor(resized_crop, rgb_crop, cv::COLOR_BGR2RGB);
 
     cv::Mat float_patch;
-    rgb_patch.convertTo(float_patch, CV_32FC3, 1.0 / 255.0);
+    rgb_crop.convertTo(float_patch, CV_32FC3, 1.0f / 255.0f);
     cv::subtract(float_patch, cv::Scalar(0.485f, 0.456f, 0.406f), float_patch);
     cv::divide(float_patch, cv::Scalar(0.229f, 0.224f, 0.225f), float_patch);
 
-    // 5. Construct Tensor: [1, 3, 256, 256]
+    // 4. Construct Tensor: [1, 3, 256, 256]
     torch::Tensor input_tensor = torch::from_blob(float_patch.data, {1, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE, 3}, torch::kFloat32);
-    input_tensor = input_tensor.permute({0, 3, 1, 2}).clone().to(_device);
+    input_tensor = input_tensor.permute({0, 3, 1, 2}).to(_device);
 
-    // 6. Run Inference
+    // 5. Run Inference
     try {
+        torch::NoGradGuard no_grad;
         auto output_tuple = _module.forward({input_tensor}).toTuple();
         auto elements = output_tuple->elements();
 
@@ -165,38 +193,39 @@ face_analysis::FaceAnalysisResult face_analysis_e2e::process(
         torch::Tensor t_v3d = elements[3].toTensor().to(torch::kCPU);
         torch::Tensor t_v2d = elements[4].toTensor().to(torch::kCPU);
 
-        float scale_ratio = static_cast<float>(sq_box.width) / static_cast<float>(MODEL_INPUT_SIZE);
+        float scale_w = static_cast<float>(bw) / static_cast<float>(MODEL_INPUT_SIZE);
+        float scale_h = static_cast<float>(bh) / static_cast<float>(MODEL_INPUT_SIZE);
 
-        // 7. Parse 68 Landmarks
+        // 6. Parse 68 Landmarks
         int num_lm68 = t_lm68.size(1);
         auto lm68_acc = t_lm68.accessor<float, 3>();
         result.landmarks_68.reserve(num_lm68);
         for (int i = 0; i < num_lm68; ++i) {
-            float px = lm68_acc[0][i][0] * scale_ratio + sq_box.x;
-            float py = lm68_acc[0][i][1] * scale_ratio + sq_box.y;
+            float px = lm68_acc[0][i][0] * scale_w + bx;
+            float py = lm68_acc[0][i][1] * scale_h + by;
             result.landmarks_68.emplace_back(px, py);
         }
 
-        // 8. Parse 191 Head Landmarks
+        // 7. Parse 191 Head Landmarks
         int num_lm191 = t_lm191.size(1);
         auto lm191_acc = t_lm191.accessor<float, 3>();
         result.landmarks_191.reserve(num_lm191);
         for (int i = 0; i < num_lm191; ++i) {
-            float px = lm191_acc[0][i][0] * scale_ratio + sq_box.x;
-            float py = lm191_acc[0][i][1] * scale_ratio + sq_box.y;
+            float px = lm191_acc[0][i][0] * scale_w + bx;
+            float py = lm191_acc[0][i][1] * scale_h + by;
             result.landmarks_191.emplace_back(px, py);
         }
 
-        // 9. Parse 3DMM Parameters
+        // 8. Parse 3DMM Parameters
         int num_3dmm = t_3dmm.size(1);
         const float* p_3dmm = t_3dmm.data_ptr<float>();
         result.params_3dmm.assign(p_3dmm, p_3dmm + num_3dmm);
 
-        // 10. Compute 3D Head Pose
-        cv::Point2f nose_anchor = (result.landmarks_68.size() > 30) ? result.landmarks_68[30] : cv::Point2f(sq_box.x + sq_box.width / 2.0f, sq_box.y + sq_box.height / 2.0f);
+        // 9. Compute 3D Head Pose
+        cv::Point2f nose_anchor = (result.landmarks_68.size() > 30) ? result.landmarks_68[30] : result.center;
         computeHeadPose(p_3dmm, nose_anchor, result.pose);
 
-        // 11. Parse 3D Mesh Vertices & 2D Projected Vertices (5023 vertices)
+        // 10. Parse 3D Mesh Vertices & 2D Projected Vertices (5023 vertices)
         int num_v = t_v3d.size(1);
         auto v3d_acc = t_v3d.accessor<float, 3>();
         auto v2d_acc = t_v2d.accessor<float, 3>();
@@ -205,8 +234,8 @@ face_analysis::FaceAnalysisResult face_analysis_e2e::process(
 
         for (int i = 0; i < num_v; ++i) {
             result.vertices_3d.emplace_back(v3d_acc[0][i][0], v3d_acc[0][i][1], v3d_acc[0][i][2]);
-            float px = v2d_acc[0][i][0] * scale_ratio + sq_box.x;
-            float py = v2d_acc[0][i][1] * scale_ratio + sq_box.y;
+            float px = v2d_acc[0][i][0] * scale_w + bx;
+            float py = v2d_acc[0][i][1] * scale_h + by;
             result.projected_vertices.emplace_back(px, py);
         }
 
@@ -233,70 +262,95 @@ void face_analysis_e2e::drawResult(
         return;
     }
 
-    // 1. Draw 1:1 Square Bounding Box
+    // 1. Draw Bounding Box (1:1 Head Region) matching demo_e2e_test.py
     if (draw_box) {
-        cv::rectangle(image, result.square_bbox, cv::Scalar(0, 255, 255), 2);
+        cv::rectangle(image, result.square_bbox, cv::Scalar(0, 255, 128), 1);
     }
 
-    // 2. Draw 68 Facial Landmarks
-    if (draw_68) {
-        for (size_t i = 0; i < result.landmarks_68.size(); ++i) {
-            cv::circle(image, result.landmarks_68[i], 2, cv::Scalar(0, 255, 0), -1, cv::LINE_AA);
+    // 2. Draw 191 Landmarks (Yellow points) matching demo_e2e_test.py
+    if (draw_191 && !result.landmarks_191.empty()) {
+        int pt_radius = std::max(1, static_cast<int>(std::min(image.rows, image.cols) * 0.003f));
+        for (const auto& pt : result.landmarks_191) {
+            cv::circle(image, cv::Point(static_cast<int>(pt.x), static_cast<int>(pt.y)),
+                       pt_radius, cv::Scalar(0, 255, 255), -1, cv::LINE_AA);
         }
     }
 
-    // 3. Draw 191 Head Landmarks
-    if (draw_191) {
-        for (size_t i = 0; i < result.landmarks_191.size(); ++i) {
-            cv::circle(image, result.landmarks_191[i], 1, cv::Scalar(255, 0, 255), -1, cv::LINE_AA);
+    // Optional: Draw 68 Facial Landmarks
+    if (draw_68 && !result.landmarks_68.empty()) {
+        for (const auto& pt : result.landmarks_68) {
+            cv::circle(image, cv::Point(static_cast<int>(pt.x), static_cast<int>(pt.y)),
+                       2, cv::Scalar(0, 255, 0), -1, cv::LINE_AA);
         }
     }
 
-    // 4. Draw 3D Head Mesh (Projected Vertices)
-    if (draw_mesh) {
+    // Optional: Draw 3D Head Mesh (Projected Vertices)
+    if (draw_mesh && !result.projected_vertices.empty()) {
         for (size_t i = 0; i < result.projected_vertices.size(); i += 5) {
-            cv::circle(image, result.projected_vertices[i], 1, cv::Scalar(200, 200, 200), -1, cv::LINE_AA);
+            cv::circle(image, cv::Point(static_cast<int>(result.projected_vertices[i].x),
+                                        static_cast<int>(result.projected_vertices[i].y)),
+                       1, cv::Scalar(200, 200, 200), -1, cv::LINE_AA);
         }
     }
 
-    // 5. Draw 3D Pose Axes (Pitch, Yaw, Roll)
+    // 3. Draw 3D Head Pose Axis matching _draw_pose_axis in demo_e2e_test.py
     if (draw_pose && result.pose.success) {
-        double pitch = result.pose.euler[0];
-        double yaw = result.pose.euler[1];
-        double roll = result.pose.euler[2];
+        float tdx = result.center.x;
+        float tdy = result.center.y;
+        int size = std::max(10, static_cast<int>(result.scale_size * 0.35f));
 
-        // Draw pose angle text
-        std::string pose_text = cv::format("P:%.1f Y:%.1f R:%.1f", pitch, yaw, roll);
-        cv::putText(image, pose_text, cv::Point(result.square_bbox.x, std::max(20, result.square_bbox.y - 10)),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
+        double roll = result.pose.euler[2] * CV_PI / 180.0;
+        double pitch = result.pose.euler[0] * CV_PI / 180.0;
+        double yaw = -(result.pose.euler[1] * CV_PI / 180.0);
 
-        // Render 3D coordinate axes from nose tip
-        cv::Point2f origin = result.pose.nose_tip_2d;
-        float axis_len = static_cast<float>(result.square_bbox.width) * 0.4f;
+        // X-Axis (Pitch / Red)
+        double x1 = size * (std::cos(yaw) * std::cos(roll)) + tdx;
+        double y1 = size * (std::cos(pitch) * std::sin(roll) + std::cos(roll) * std::sin(pitch) * std::sin(yaw)) + tdy;
 
-        // Approximate 2D projection of axes based on pitch, yaw, roll
-        double pitch_rad = pitch * CV_PI / 180.0;
-        double yaw_rad = yaw * CV_PI / 180.0;
-        double roll_rad = roll * CV_PI / 180.0;
+        // Y-Axis (Yaw / Green)
+        double x2 = size * (-std::cos(yaw) * std::sin(roll)) + tdx;
+        double y2 = size * (std::cos(pitch) * std::cos(roll) - std::sin(pitch) * std::sin(yaw) * std::sin(roll)) + tdy;
 
-        // X-axis (Red: Right)
-        cv::Point2f x_end(
-            origin.x + axis_len * static_cast<float>(std::cos(yaw_rad) * std::cos(roll_rad)),
-            origin.y + axis_len * static_cast<float>(std::cos(yaw_rad) * std::sin(roll_rad))
-        );
-        // Y-axis (Green: Down)
-        cv::Point2f y_end(
-            origin.x - axis_len * static_cast<float>(std::sin(roll_rad) * std::cos(pitch_rad)),
-            origin.y + axis_len * static_cast<float>(std::cos(roll_rad) * std::cos(pitch_rad))
-        );
-        // Z-axis (Blue: Out / Forward)
-        cv::Point2f z_end(
-            origin.x + axis_len * static_cast<float>(std::sin(yaw_rad)),
-            origin.y - axis_len * static_cast<float>(std::sin(pitch_rad))
-        );
+        // Z-Axis (Roll / Blue)
+        double x3 = size * (std::sin(yaw)) + tdx;
+        double y3 = size * (-std::cos(yaw) * std::sin(pitch)) + tdy;
 
-        cv::line(image, origin, x_end, cv::Scalar(0, 0, 255), 2, cv::LINE_AA); // X: Red
-        cv::line(image, origin, y_end, cv::Scalar(0, 255, 0), 2, cv::LINE_AA); // Y: Green
-        cv::line(image, origin, z_end, cv::Scalar(255, 0, 0), 2, cv::LINE_AA); // Z: Blue
+        int thickness = std::max(2, static_cast<int>(size * 0.05f));
+        cv::arrowedLine(image, cv::Point(static_cast<int>(tdx), static_cast<int>(tdy)),
+                        cv::Point(static_cast<int>(x1), static_cast<int>(y1)),
+                        cv::Scalar(0, 0, 255), thickness, cv::LINE_AA, 0.2);
+        cv::arrowedLine(image, cv::Point(static_cast<int>(tdx), static_cast<int>(tdy)),
+                        cv::Point(static_cast<int>(x2), static_cast<int>(y2)),
+                        cv::Scalar(0, 255, 0), thickness, cv::LINE_AA, 0.2);
+        cv::arrowedLine(image, cv::Point(static_cast<int>(tdx), static_cast<int>(tdy)),
+                        cv::Point(static_cast<int>(x3), static_cast<int>(y3)),
+                        cv::Scalar(255, 0, 0), thickness, cv::LINE_AA, 0.2);
     }
+}
+
+void face_analysis_e2e::drawInfoPanel(
+    cv::Mat& image,
+    const head_pose::PoseResult& pose,
+    int num_faces
+) {
+    int panel_w = 260, panel_h = 115;
+    if (image.cols < panel_w + 20 || image.rows < panel_h + 20) return;
+
+    cv::Rect panel_rect(10, 10, panel_w, panel_h);
+    cv::Mat overlay = image.clone();
+    cv::rectangle(overlay, panel_rect, cv::Scalar(0, 0, 0), cv::FILLED);
+    cv::addWeighted(overlay, 0.65, image, 0.35, 0, image);
+    cv::rectangle(image, panel_rect, cv::Scalar(255, 255, 255), 1);
+
+    int font = cv::FONT_HERSHEY_SIMPLEX;
+    char title[64], txt_pitch[64], txt_yaw[64], txt_roll[64];
+    snprintf(title, sizeof(title), "E2E TorchScript (%d face%s)", num_faces, num_faces > 1 ? "s" : "");
+    snprintf(txt_pitch, sizeof(txt_pitch), "Pitch: %+6.1f deg", pose.euler[0]);
+    snprintf(txt_yaw,   sizeof(txt_yaw),   "Yaw:   %+6.1f deg", pose.euler[1]);
+    snprintf(txt_roll,  sizeof(txt_roll),  "Roll:  %+6.1f deg", pose.euler[2]);
+
+    cv::putText(image, title,     cv::Point(18, 30),  font, 0.45, cv::Scalar(200, 200, 200), 1, cv::LINE_AA);
+    cv::putText(image, txt_pitch, cv::Point(18, 55),  font, 0.55, cv::Scalar(0, 0, 255),     1, cv::LINE_AA);
+    cv::putText(image, txt_yaw,   cv::Point(18, 80),  font, 0.55, cv::Scalar(0, 255, 0),     1, cv::LINE_AA);
+    cv::putText(image, txt_roll,  cv::Point(18, 105), font, 0.55, cv::Scalar(255, 150, 50),   1, cv::LINE_AA);
 }

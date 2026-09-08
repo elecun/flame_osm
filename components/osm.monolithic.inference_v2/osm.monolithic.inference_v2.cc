@@ -31,12 +31,30 @@ bool osm_monolithic_inference_v2::onInit(){
         _use_face_analysis_e2e = true;
         _use_body_pose = true;
 
+        auto get_json_float = [](const json& j, const std::vector<std::string>& keys, float default_val) -> float {
+            for (const auto& k : keys) {
+                if (j.contains(k)) {
+                    if (j[k].is_number()) {
+                        return j[k].get<float>();
+                    } else if (j[k].is_string()) {
+                        try {
+                            return std::stof(j[k].get<std::string>());
+                        } catch (...) {}
+                    }
+                }
+            }
+            return default_val;
+        };
+
         if (parameters.contains("face_detection")) {
             const auto& fd_params = parameters["face_detection"];
             _use_face_det = fd_params.value("use", _use_face_det);
             face_det_model_path = fd_params.value("model_path", face_det_model_path);
             face_det_gpu_id = fd_params.value("gpu_id", face_det_gpu_id);
-            _nms_threshold = fd_params.value("nms", _nms_threshold);
+            _nms_threshold = get_json_float(fd_params, {"nms", "iou", "nms_thresh", "nms_threshold", "iou_thresh"}, _nms_threshold);
+            _conf_threshold = get_json_float(fd_params, {"conf", "threshold", "conf_thresh", "conf_threshold", "confidence"}, _conf_threshold);
+            _padding_scale = get_json_float(fd_params, {"padding_scale", "pad_scale", "scale"}, _padding_scale);
+            _max_faces = fd_params.value("max_faces", _max_faces);
             _vis_face_det = fd_params.value("visualize", true);
             _use_roi = fd_params.value("use_roi", false);
             _roi_visualize = fd_params.value("roi_visualize", true);
@@ -53,6 +71,8 @@ bool osm_monolithic_inference_v2::onInit(){
                 _padding_h = fd_params["padding"][1].get<float>();
                 logger::info("[{}] Loaded face detection padding: w={}, h={}", getName(), _padding_w, _padding_h);
             }
+            logger::info("[{}] Face detection configured: model={}, gpu={}, conf={:.3f}, nms={:.3f}, padding_scale={:.3f}, max_faces={}, use_roi={}",
+                         getName(), face_det_model_path, face_det_gpu_id, _conf_threshold, _nms_threshold, _padding_scale, _max_faces, _use_roi);
         }
 
         std::string face_analysis_model_path = "/home/iae-vc/dev/flame_osm/bin/x86_64/models/dad_3dheads_e2e.torchscript";
@@ -63,8 +83,8 @@ bool osm_monolithic_inference_v2::onInit(){
             face_analysis_model_path = fa_params.value("model_path", face_analysis_model_path);
             face_analysis_gpu_id = fa_params.value("gpu_id", face_analysis_gpu_id);
             _vis_face_analysis_e2e = fa_params.value("visualize", true);
-            _vis_landmarks_68 = fa_params.value("vis_landmarks_68", true);
-            _vis_landmarks_191 = fa_params.value("vis_landmarks_191", false);
+            _vis_landmarks_68 = fa_params.value("vis_landmarks_68", false);
+            _vis_landmarks_191 = fa_params.value("vis_landmarks_191", true);
             _vis_head_pose = fa_params.value("vis_head_pose", true);
             _vis_square_box = fa_params.value("vis_square_box", true);
             _vis_head_mesh = fa_params.value("vis_head_mesh", false);
@@ -124,6 +144,13 @@ bool osm_monolithic_inference_v2::onInit(){
         if (_use_driver_readiness) {
             _use_driver_readiness_logical = false;
             logger::info("[{}] Driver readiness estimation (deep learning) is enabled. Forcing logical readiness estimation to false.", getName());
+        }
+
+        /* Blink detection parameters */
+        if (parameters.contains("blink_detection")) {
+            const auto& bd_params = parameters["blink_detection"];
+            _use_blink_detection = bd_params.value("use", _use_blink_detection);
+            _vis_blink_detection = bd_params.value("visualize", _vis_blink_detection);
         }
 
         /* Stream configuration */
@@ -193,8 +220,25 @@ bool osm_monolithic_inference_v2::onInit(){
             );
         }
 
+        /* Initialize Blink Detection Analyzer */
+        if (_use_blink_detection) {
+            _blink_analyzer = std::make_unique<blink_analysis_component>();
+            nlohmann::json bd_params;
+            if (parameters.contains("blink_detection")) {
+                bd_params = parameters["blink_detection"];
+            }
+            if (!_blink_analyzer->init(bd_params)) {
+                logger::warn("[{}] Blink detection model init failed. Disabling blink detection.", getName());
+                _use_blink_detection = false;
+                _blink_analyzer.reset();
+            } else {
+                logger::info("[{}] Blink detection analyzer initialized successfully", getName());
+            }
+        }
+
         /* Start background worker thread */
         _worker_stop.store(false);
+        _worker_finished.store(false);
         _inference_worker = std::thread(&osm_monolithic_inference_v2::_inference_process, this);
     }
     catch(const std::exception& e){
@@ -210,11 +254,53 @@ void osm_monolithic_inference_v2::onLoop(){
 }
 
 void osm_monolithic_inference_v2::onClose(){
+    logger::info("[{}] Closing osm.monolithic.inference_v2 component", getName());
+
     _worker_stop.store(true);
     if (_inference_worker.joinable()) {
+        auto start_wait = std::chrono::steady_clock::now();
+        while (!_worker_finished.load() && 
+               std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_wait).count() < 1000) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        if (!_worker_finished.load()) {
+            logger::warn("[{}] Inference worker thread did not stop in time, canceling...", getName());
+            pthread_cancel(_inference_worker.native_handle());
+        }
         _inference_worker.join();
     }
     logger::info("[{}] Monolithic inference V2 worker thread stopped", getName());
+
+    if (_face_detector) {
+        _face_detector.reset();
+        logger::info("[{}] Face detector instance successfully released", getName());
+    }
+
+    if (_face_analyzer_e2e) {
+        _face_analyzer_e2e.reset();
+        logger::info("[{}] Face analyzer E2E instance successfully released", getName());
+    }
+
+    if (_body_pose_estimator) {
+        _body_pose_estimator.reset();
+        logger::info("[{}] Body pose estimator instance successfully released", getName());
+    }
+
+    if (_driver_readiness_estimator) {
+        _driver_readiness_estimator.reset();
+        logger::info("[{}] Driver readiness estimator instance successfully released", getName());
+    }
+
+    if (_driver_readiness_logical_estimator) {
+        _driver_readiness_logical_estimator.reset();
+        logger::info("[{}] Driver readiness logical estimator instance successfully released", getName());
+    }
+
+    if (_blink_analyzer) {
+        _blink_analyzer.reset();
+        logger::info("[{}] Blink analyzer instance successfully released", getName());
+    }
 }
 
 void osm_monolithic_inference_v2::onData(flame::component::ZData& data){
@@ -347,6 +433,8 @@ void osm_monolithic_inference_v2::_inference_process() {
 
     std::vector<int> encode_params = {cv::IMWRITE_JPEG_QUALITY, 100};
     auto last_time_1 = std::chrono::high_resolution_clock::now();
+    uint64_t frame_count = 0;
+    auto last_idle_warning = std::chrono::steady_clock::now();
 
     while (!_worker_stop.load()) {
         if (_enable_stream_1) {
@@ -358,40 +446,85 @@ void osm_monolithic_inference_v2::_inference_process() {
                     _latest_image_1.release();
                 }
 
+                frame_count++;
+                auto t_frame_start = std::chrono::high_resolution_clock::now();
+
                 try {
                     head_pose::PoseResult last_pose;
                     bool has_pose = false;
                     face_analysis::FaceAnalysisResult face_res;
 
                     /* 1. Run YOLO11-Face detection */
-                    std::vector<cv::Rect> bboxes;
+                    auto t_det_start = std::chrono::high_resolution_clock::now();
+                    std::vector<FaceBox> detected_faces;
                     if (_use_face_det && _face_detector) {
-                        bboxes = _face_detector->process(image, _nms_threshold, _padding_w, _padding_h);
+                        detected_faces = _face_detector->detect(image, _conf_threshold, _nms_threshold, _padding_scale);
                         if (_use_roi) {
-                            std::vector<cv::Rect> filtered_bboxes;
-                            for (const auto& box : bboxes) {
-                                int cx = box.x + box.width / 2;
-                                int cy = box.y + box.height / 2;
+                            std::vector<FaceBox> filtered_faces;
+                            for (const auto& face : detected_faces) {
+                                int cx = face.bbox.x + face.bbox.width / 2;
+                                int cy = face.bbox.y + face.bbox.height / 2;
                                 if (cx >= _roi_x1 && cx <= _roi_x2 && cy >= _roi_y1 && cy <= _roi_y2) {
-                                    filtered_bboxes.push_back(box);
+                                    filtered_faces.push_back(face);
                                 }
                             }
-                            bboxes = filtered_bboxes;
+                            detected_faces = filtered_faces;
                         }
+                        if (_max_faces > 0 && (int)detected_faces.size() > _max_faces) {
+                            detected_faces.resize(_max_faces);
+                        }
+                    }
+                    double det_ms = std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - t_det_start).count();
+
+                    std::vector<cv::Rect> bboxes;
+                    bboxes.reserve(detected_faces.size());
+                    for (const auto& f : detected_faces) {
+                        bboxes.push_back(f.bbox);
                     }
 
                     /* 2. Run DAD-3DHeads E2E Face Analysis (End-to-End FLAME 3DMM + 68/191 Landmarks + 3D Pose) */
-                    if (_use_face_analysis_e2e && _face_analyzer_e2e && !bboxes.empty()) {
-                        face_res = _face_analyzer_e2e->process(image, bboxes[0]);
-                        if (face_res.valid) {
+                    double fa_ms = 0.0;
+                    std::vector<face_analysis::FaceAnalysisResult> face_results;
+                    if (_use_face_analysis_e2e && _face_analyzer_e2e && !detected_faces.empty()) {
+                        auto t_fa_start = std::chrono::high_resolution_clock::now();
+                        for (const auto& f : detected_faces) {
+                            auto res = _face_analyzer_e2e->process(image, f.bbox, f.score);
+                            if (res.valid) {
+                                face_results.push_back(res);
+                            }
+                        }
+                        fa_ms = std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - t_fa_start).count();
+                        if (!face_results.empty()) {
+                            face_res = face_results[0];
                             last_pose = face_res.pose;
                             has_pose = face_res.pose.success;
                         }
                     }
 
+                    /* 2.5 Run Blink Detection (BlinkLinMulT) */
+                    double blink_ms = 0.0;
+                    blink_analysis::DetectionResult blink_res;
+                    if (_use_blink_detection && _blink_analyzer && !bboxes.empty()) {
+                        auto t_blink_start = std::chrono::high_resolution_clock::now();
+                        // Build head pose euler array from face analysis result
+                        std::array<float, 3> euler = {0.0f, 0.0f, 0.0f};
+                        float ear = 0.0f;
+                        if (has_pose) {
+                            euler[0] = static_cast<float>(last_pose.euler[0]); // pitch
+                            euler[1] = static_cast<float>(last_pose.euler[1]); // yaw
+                            euler[2] = static_cast<float>(last_pose.euler[2]); // roll
+                        }
+                        int64_t ts = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now().time_since_epoch()).count();
+                        blink_res = _blink_analyzer->process(image, bboxes[0], euler, ear, ts);
+                        blink_ms = std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - t_blink_start).count();
+                    }
+
                     /* 3. Run Body Pose Estimation */
+                    double pose_ms = 0.0;
                     std::vector<body_pose::PoseResult> poses;
                     if (_use_body_pose && _body_pose_estimator && !bboxes.empty()) {
+                        auto t_pose_start = std::chrono::high_resolution_clock::now();
                         std::vector<body_pose::PoseResult> all_poses = _body_pose_estimator->process(image, 0.5f, 0.45f);
 
                         // Match face bbox with body pose using nose keypoint (index 0)
@@ -422,6 +555,7 @@ void osm_monolithic_inference_v2::_inference_process() {
                         } else if (!all_poses.empty()) {
                             poses = { all_poses[0] };
                         }
+                        pose_ms = std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - t_pose_start).count();
                     }
 
                     /* 4. Prepare Output Mat for Visualization */
@@ -435,19 +569,6 @@ void osm_monolithic_inference_v2::_inference_process() {
                     float scale_x = static_cast<float>(out_image.cols) / static_cast<float>(image.cols);
                     float scale_y = static_cast<float>(out_image.rows) / static_cast<float>(image.rows);
 
-                    // Visualize Face BBox
-                    if (_use_face_det && _vis_face_det && !bboxes.empty()) {
-                        for (const auto& box : bboxes) {
-                            cv::Rect scaled_box(
-                                static_cast<int>(box.x * scale_x),
-                                static_cast<int>(box.y * scale_y),
-                                static_cast<int>(box.width * scale_x),
-                                static_cast<int>(box.height * scale_y)
-                            );
-                            cv::rectangle(out_image, scaled_box, cv::Scalar(0, 255, 0), 2);
-                        }
-                    }
-
                     // Visualize ROI
                     if (_use_roi && _roi_visualize) {
                         cv::Rect scaled_roi(
@@ -459,24 +580,45 @@ void osm_monolithic_inference_v2::_inference_process() {
                         cv::rectangle(out_image, scaled_roi, cv::Scalar(0, 165, 255), 2);
                     }
 
-                    // Visualize DAD-3DHeads E2E Results (68/191 Landmarks, 3D Pose, 1:1 Square Box)
-                    if (_use_face_analysis_e2e && _vis_face_analysis_e2e && _face_analyzer_e2e && face_res.valid) {
-                        if (scale_x != 1.0f || scale_y != 1.0f) {
-                            face_analysis::FaceAnalysisResult scaled_res = face_res;
-                            scaled_res.square_bbox.x = static_cast<int>(scaled_res.square_bbox.x * scale_x);
-                            scaled_res.square_bbox.y = static_cast<int>(scaled_res.square_bbox.y * scale_y);
-                            scaled_res.square_bbox.width = static_cast<int>(scaled_res.square_bbox.width * scale_x);
-                            scaled_res.square_bbox.height = static_cast<int>(scaled_res.square_bbox.height * scale_y);
-                            scaled_res.pose.nose_tip_2d.x *= scale_x;
-                            scaled_res.pose.nose_tip_2d.y *= scale_y;
+                    // Visualize DAD-3DHeads E2E Results (1:1 Box with Score, 191 Landmarks, 3D Pose Axis, Info Panel)
+                    if (_use_face_analysis_e2e && _vis_face_analysis_e2e && _face_analyzer_e2e && !face_results.empty()) {
+                        for (const auto& res : face_results) {
+                            if (!res.valid) continue;
+                            if (scale_x != 1.0f || scale_y != 1.0f) {
+                                face_analysis::FaceAnalysisResult scaled_res = res;
+                                scaled_res.square_bbox.x = static_cast<int>(scaled_res.square_bbox.x * scale_x);
+                                scaled_res.square_bbox.y = static_cast<int>(scaled_res.square_bbox.y * scale_y);
+                                scaled_res.square_bbox.width = static_cast<int>(scaled_res.square_bbox.width * scale_x);
+                                scaled_res.square_bbox.height = static_cast<int>(scaled_res.square_bbox.height * scale_y);
+                                scaled_res.center.x *= scale_x;
+                                scaled_res.center.y *= scale_y;
+                                scaled_res.scale_size = static_cast<float>(std::min(scaled_res.square_bbox.width, scaled_res.square_bbox.height));
+                                scaled_res.pose.nose_tip_2d.x *= scale_x;
+                                scaled_res.pose.nose_tip_2d.y *= scale_y;
 
-                            for (auto& pt : scaled_res.landmarks_68) { pt.x *= scale_x; pt.y *= scale_y; }
-                            for (auto& pt : scaled_res.landmarks_191) { pt.x *= scale_x; pt.y *= scale_y; }
-                            for (auto& pt : scaled_res.projected_vertices) { pt.x *= scale_x; pt.y *= scale_y; }
+                                for (auto& pt : scaled_res.landmarks_68) { pt.x *= scale_x; pt.y *= scale_y; }
+                                for (auto& pt : scaled_res.landmarks_191) { pt.x *= scale_x; pt.y *= scale_y; }
+                                for (auto& pt : scaled_res.projected_vertices) { pt.x *= scale_x; pt.y *= scale_y; }
 
-                            _face_analyzer_e2e->drawResult(out_image, scaled_res, _vis_landmarks_68, _vis_landmarks_191, _vis_head_pose, _vis_square_box, _vis_head_mesh);
-                        } else {
-                            _face_analyzer_e2e->drawResult(out_image, face_res, _vis_landmarks_68, _vis_landmarks_191, _vis_head_pose, _vis_square_box, _vis_head_mesh);
+                                _face_analyzer_e2e->drawResult(out_image, scaled_res, _vis_landmarks_68, _vis_landmarks_191, _vis_head_pose, _vis_square_box, _vis_head_mesh);
+                            } else {
+                                _face_analyzer_e2e->drawResult(out_image, res, _vis_landmarks_68, _vis_landmarks_191, _vis_head_pose, _vis_square_box, _vis_head_mesh);
+                            }
+                        }
+
+                        // Draw Info Panel at top-left matching demo_e2e_test.py
+                        if (_vis_head_pose) {
+                            face_analysis_e2e::drawInfoPanel(out_image, face_results[0].pose, static_cast<int>(face_results.size()));
+                        }
+                    } else if (_use_face_det && _vis_face_det && !bboxes.empty()) {
+                        for (const auto& box : bboxes) {
+                            cv::Rect scaled_box(
+                                static_cast<int>(box.x * scale_x),
+                                static_cast<int>(box.y * scale_y),
+                                static_cast<int>(box.width * scale_x),
+                                static_cast<int>(box.height * scale_y)
+                            );
+                            cv::rectangle(out_image, scaled_box, cv::Scalar(0, 255, 128), 2);
                         }
                     }
 
@@ -513,42 +655,15 @@ void osm_monolithic_inference_v2::_inference_process() {
                         }
                     }
 
-                    // Draw Head Pose text box at bottom-left corner
-                    if (has_pose && _vis_head_pose) {
-                        double pitch = last_pose.euler[0];
-                        double yaw = last_pose.euler[1];
-                        double roll = last_pose.euler[2];
-
-                        char txt_pitch[64], txt_yaw[64], txt_roll[64];
-                        snprintf(txt_pitch, sizeof(txt_pitch), "Pitch : %.1f", pitch);
-                        snprintf(txt_yaw, sizeof(txt_yaw), "Yaw   : %.1f", yaw);
-                        snprintf(txt_roll, sizeof(txt_roll), "Roll  : %.1f", roll);
-
-                        int font_face = cv::FONT_HERSHEY_SIMPLEX;
-                        double font_scale = 0.5;
-                        int thickness = 1;
-                        int baseline = 0;
-
-                        cv::Size s1 = cv::getTextSize(txt_pitch, font_face, font_scale, thickness, &baseline);
-                        cv::Size s2 = cv::getTextSize(txt_yaw, font_face, font_scale, thickness, &baseline);
-                        cv::Size s3 = cv::getTextSize(txt_roll, font_face, font_scale, thickness, &baseline);
-                        int max_w = std::max({s1.width, s2.width, s3.width});
-
-                        int box_w = max_w + 20;
-                        int box_h = 65;
-                        int start_x = 10;
-                        int start_y = out_image.rows - box_h - 10;
-
-                        cv::Rect bg_box(start_x, start_y, box_w, box_h);
-                        cv::Mat overlay;
-                        out_image.copyTo(overlay);
-                        cv::rectangle(overlay, bg_box, cv::Scalar(0, 0, 0), cv::FILLED);
-                        cv::addWeighted(overlay, 0.5, out_image, 0.5, 0, out_image);
-                        cv::rectangle(out_image, bg_box, cv::Scalar(255, 255, 255), 1);
-
-                        cv::putText(out_image, txt_pitch, cv::Point(start_x + 10, start_y + 18), font_face, font_scale, cv::Scalar(0, 255, 255), thickness, cv::LINE_AA);
-                        cv::putText(out_image, txt_yaw,   cv::Point(start_x + 10, start_y + 38), font_face, font_scale, cv::Scalar(0, 255, 255), thickness, cv::LINE_AA);
-                        cv::putText(out_image, txt_roll,  cv::Point(start_x + 10, start_y + 58), font_face, font_scale, cv::Scalar(0, 255, 255), thickness, cv::LINE_AA);
+                    // Visualize Blink Detection Results
+                    if (_use_blink_detection && _vis_blink_detection && _blink_analyzer && !bboxes.empty()) {
+                        cv::Rect scaled_face(
+                            static_cast<int>(bboxes[0].x * scale_x),
+                            static_cast<int>(bboxes[0].y * scale_y),
+                            static_cast<int>(bboxes[0].width * scale_x),
+                            static_cast<int>(bboxes[0].height * scale_y)
+                        );
+                        _blink_analyzer->drawResult(out_image, scaled_face, blink_res);
                     }
 
                     /* 5. Run Driver Readiness Estimation (Torch-based, if enabled) */
@@ -601,8 +716,8 @@ void osm_monolithic_inference_v2::_inference_process() {
                         char fps_str[32];
                         snprintf(fps_str, sizeof(fps_str), "%.1f", fps);
 
-                        cv::putText(out_image, datetime_str, cv::Point(5, 20), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
-                        cv::putText(out_image, fps_str, cv::Point(out_image.cols - 60, 20), cv::FONT_HERSHEY_COMPLEX_SMALL, 1, cv::Scalar(0, 0, 255), 1, cv::LINE_AA);
+                        cv::putText(out_image, datetime_str, cv::Point(std::max(10, out_image.cols - 270), 20), cv::FONT_HERSHEY_COMPLEX_SMALL, 0.8, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+                        cv::putText(out_image, fps_str, cv::Point(out_image.cols - 60, 40), cv::FONT_HERSHEY_COMPLEX_SMALL, 0.8, cv::Scalar(0, 0, 255), 1, cv::LINE_AA);
                     }
 
                     /* 7. Encode as JPEG */
@@ -628,6 +743,12 @@ void osm_monolithic_inference_v2::_inference_process() {
                             tag["dms_logical_readiness"] = logical_res.readiness_score;
                             tag["dms_logical_category"] = logical_res.category;
                         }
+                        if (_use_blink_detection && _blink_analyzer) {
+                            tag["blink_prob"] = blink_res.blink_prob;
+                            tag["blink_is_blinking"] = blink_res.is_blinking;
+                            tag["blink_count"] = blink_res.blink_count;
+                            tag["blink_perclos"] = blink_res.perclos;
+                        }
 
                         /* 9. Send multipart message */
                         flame::component::ZData out_msg;
@@ -639,15 +760,41 @@ void osm_monolithic_inference_v2::_inference_process() {
                             logger::warn("[{}] Failed to dispatch processed image 1", getName());
                         }
                     }
+
+                    // Calculate total processing time for this frame
+                    double total_frame_ms = std::chrono::duration<double, std::milli>(
+                        std::chrono::high_resolution_clock::now() - t_frame_start).count();
+
+                    if (!bboxes.empty() && face_res.valid) {
+                        logger::info("[{}] [Frame #{}] Total: {:.1f}ms ({:.1f} FPS) | Det: {:.1f}ms ({} faces) | E2E: {:.1f}ms [P:{:.1f}, Y:{:.1f}, R:{:.1f}] | Blink: {:.1f}ms [prob:{:.2f}, blinks:{}, perclos:{:.2f}] | Pose: {:.1f}ms",
+                                     getName(), frame_count, total_frame_ms, fps,
+                                     det_ms, bboxes.size(),
+                                     fa_ms, last_pose.euler[0], last_pose.euler[1], last_pose.euler[2],
+                                     blink_ms, blink_res.blink_prob, blink_res.blink_count, blink_res.perclos,
+                                     pose_ms);
+                    } else if (!bboxes.empty()) {
+                        logger::info("[{}] [Frame #{}] Total: {:.1f}ms ({:.1f} FPS) | Det: {:.1f}ms ({} faces) | E2E: {:.1f}ms (invalid) | Blink: {:.1f}ms | Pose: {:.1f}ms",
+                                     getName(), frame_count, total_frame_ms, fps,
+                                     det_ms, bboxes.size(), fa_ms, blink_ms, pose_ms);
+                    } else {
+                        logger::info("[{}] [Frame #{}] Total: {:.1f}ms ({:.1f} FPS) | Det: {:.1f}ms (0 faces, skipped)",
+                                     getName(), frame_count, total_frame_ms, fps, det_ms);
+                    }
                 }
                 catch (const std::exception& e) {
                     logger::error("[{}] Error in inference worker loop: {}", getName(), e.what());
                 }
             } else {
+                auto now_idle = std::chrono::steady_clock::now();
+                if (std::chrono::duration_cast<std::chrono::milliseconds>(now_idle - last_idle_warning).count() >= 3000) {
+                    logger::info("[{}] Waiting for input frames on image_stream_1... (Processed {} frames so far)", getName(), frame_count);
+                    last_idle_warning = now_idle;
+                }
                 std::this_thread::sleep_for(std::chrono::milliseconds(2));
             }
         } else {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
+    _worker_finished.store(true);
 }
