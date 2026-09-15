@@ -55,8 +55,15 @@ bool blink_analysis_component::init(const json& params) {
             logger::info("[blink_analysis] Using CPU device");
         }
 
-        /* Load TorchScript model */
-        module_ = torch::jit::load(model_path_, device_);
+        /* Load TorchScript model
+         * NOTE: Load to CPU first, then move to target device.
+         * The model was traced on cuda:0 via torch.jit.trace, so some inline
+         * constant tensors (e.g. position embedding tables) are baked in with
+         * device=cuda:0. Loading directly to cuda:1 would cause a device mismatch
+         * because those constants remain on cuda:0. Loading to CPU first strips
+         * all device bindings, then .to(device_) moves everything uniformly. */
+        module_ = torch::jit::load(model_path_);
+        module_.to(device_);
         module_.eval();
 
         /* Warmup forward pass with dummy data */
@@ -70,6 +77,10 @@ bool blink_analysis_component::init(const json& params) {
 
         model_loaded_ = true;
         logger::info("[blink_analysis] Model loaded and warmed up: {}", model_path_);
+
+        /* Pre-allocate GPU input buffers */
+        allocateGpuBuffers();
+
         return true;
     }
     catch (const c10::Error& e) {
@@ -81,6 +92,26 @@ bool blink_analysis_component::init(const json& params) {
         logger::error("[blink_analysis] Init error: {}", e.what());
         model_loaded_ = false;
         return false;
+    }
+}
+
+/* ================================================================
+   GPU Buffer Pre-allocation
+   ================================================================ */
+
+void blink_analysis_component::allocateGpuBuffers() {
+    try {
+        torch::NoGradGuard no_grad;
+        gpu_low_buf_  = torch::zeros({1, seq_len_, 3, crop_h_, crop_w_}, device_);
+        gpu_high_buf_ = torch::zeros({1, seq_len_, 160}, device_);
+        gpu_buf_allocated_ = true;
+        ring_idx_ = 0;
+        logger::info("[blink_analysis] Pre-allocated GPU buffers on device (low: [{},{},{},{},{}], high: [{},{},{}])",
+                     1, seq_len_, 3, crop_h_, crop_w_, 1, seq_len_, 160);
+    }
+    catch (const std::exception& e) {
+        logger::error("[blink_analysis] Failed to allocate GPU buffers: {}", e.what());
+        gpu_buf_allocated_ = false;
     }
 }
 
@@ -188,7 +219,7 @@ blink_analysis_component::process(
     /* Build high-level feature tensor */
     torch::Tensor high_feat = buildHighFeature(head_pose_euler, ear);
 
-    /* 2. Push into sliding window buffers */
+    /* 2. Push into CPU sliding window buffers (for frame counting) */
     low_feat_buffer_.push_back(low_feat);
     high_feat_buffer_.push_back(high_feat);
     if (low_feat_buffer_.size() > static_cast<size_t>(seq_len_)) {
@@ -196,22 +227,59 @@ blink_analysis_component::process(
         high_feat_buffer_.pop_front();
     }
 
+    /* 2b. Copy this frame's features into the pre-allocated GPU ring buffer
+     *     (single-frame copy, no stack/reallocation needed) */
+    if (gpu_buf_allocated_) {
+        try {
+            torch::NoGradGuard no_grad;
+            // Copy to the current ring slot: gpu_low_buf_[0][ring_idx_] = low_feat
+            gpu_low_buf_[0][ring_idx_].copy_(low_feat);
+            gpu_high_buf_[0][ring_idx_].copy_(high_feat);
+            ring_idx_ = (ring_idx_ + 1) % seq_len_;
+        }
+        catch (const std::exception& e) {
+            logger::error("[blink_analysis] GPU buffer copy error: {}", e.what());
+        }
+    }
+
     /* 3. Run inference when sequence buffer is full */
     if (low_feat_buffer_.size() == static_cast<size_t>(seq_len_)) {
         result.buffer_full = true;
-
-        // Stack: input_low (1, seq_len, 3, 64, 64), input_high (1, seq_len, 160)
-        std::vector<torch::Tensor> low_list(low_feat_buffer_.begin(), low_feat_buffer_.end());
-        std::vector<torch::Tensor> high_list(high_feat_buffer_.begin(), high_feat_buffer_.end());
-
-        auto input_low  = torch::stack(low_list, 0).unsqueeze(0).to(device_);
-        auto input_high = torch::stack(high_list, 0).unsqueeze(0).to(device_);
 
         float cls_prob = 0.0f;
         float seq_prob = 0.0f;
 
         try {
             torch::NoGradGuard no_grad;
+
+            torch::Tensor input_low, input_high;
+
+            if (gpu_buf_allocated_) {
+                /* Use pre-allocated GPU buffers — reorder from ring buffer to temporal order.
+                 * ring_idx_ points to the OLDEST frame (just wrapped around).
+                 * We need temporal order: [oldest ... newest] */
+                if (ring_idx_ == 0) {
+                    /* Buffer is already in correct order (0..seq_len-1) */
+                    input_low  = gpu_low_buf_;
+                    input_high = gpu_high_buf_;
+                } else {
+                    /* Reorder: [ring_idx_..end, 0..ring_idx_-1] */
+                    auto low_old  = gpu_low_buf_.slice(1, ring_idx_, seq_len_);
+                    auto low_new  = gpu_low_buf_.slice(1, 0, ring_idx_);
+                    input_low = torch::cat({low_old, low_new}, 1);
+
+                    auto high_old = gpu_high_buf_.slice(1, ring_idx_, seq_len_);
+                    auto high_new = gpu_high_buf_.slice(1, 0, ring_idx_);
+                    input_high = torch::cat({high_old, high_new}, 1);
+                }
+            } else {
+                /* Fallback: CPU stack + GPU transfer (original approach) */
+                std::vector<torch::Tensor> low_list(low_feat_buffer_.begin(), low_feat_buffer_.end());
+                std::vector<torch::Tensor> high_list(high_feat_buffer_.begin(), high_feat_buffer_.end());
+                input_low  = torch::stack(low_list, 0).unsqueeze(0).to(device_);
+                input_high = torch::stack(high_list, 0).unsqueeze(0).to(device_);
+            }
+
             std::vector<torch::jit::IValue> model_inputs = {input_low, input_high};
             auto output = module_.forward(model_inputs);
 
@@ -233,9 +301,17 @@ blink_analysis_component::process(
             // Weighted combination (same as blink.detection.inference)
             current_blink_prob_ = 0.7f * cls_prob + 0.3f * seq_prob;
         }
+        catch (const c10::Error& e) {
+            logger::error("[blink_analysis] CUDA/LibTorch error: {}", e.what());
+            /* Force CUDA synchronization to recover from potential GPU memory issues */
+            if (device_.is_cuda()) {
+                try { torch::cuda::synchronize(); } catch (...) {}
+            }
+        }
         catch (const std::exception& e) {
             logger::error("[blink_analysis] Inference error: {}", e.what());
         }
+
         bool is_blinking = (current_blink_prob_ >= threshold_);
 
         // State transition & blink count

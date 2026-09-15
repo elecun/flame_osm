@@ -100,11 +100,17 @@ private:
     int crop_h_ = 64;
     float threshold_ = 0.5f;
 
-    /* ---- Sliding Window Buffers ---- */
+    /* ---- Sliding Window Buffers (CPU side, for feature accumulation) ---- */
     std::deque<torch::Tensor> low_feat_buffer_;   // each: (3, 64, 64)
     std::deque<torch::Tensor> high_feat_buffer_;  // each: (160,)
     std::deque<bool> blink_history_;               // for PERCLOS
     const size_t perclos_history_size_ = 90;
+
+    /* ---- Pre-allocated GPU Buffers ---- */
+    torch::Tensor gpu_low_buf_;    // (1, seq_len, 3, crop_h, crop_w) on device_
+    torch::Tensor gpu_high_buf_;   // (1, seq_len, 160) on device_
+    bool gpu_buf_allocated_ = false;
+    int ring_idx_ = 0;             // current write position in ring buffer
 
     /* ---- State Tracking ---- */
     bool prev_blinking_ = false;
@@ -113,6 +119,7 @@ private:
     float current_perclos_ = 0.0f;
 
     /* ---- Internal Helpers ---- */
+    void allocateGpuBuffers();
     std::pair<cv::Rect, cv::Rect> extractEyeROIs(const cv::Rect& face, const cv::Size& img_sz);
     torch::Tensor preprocessEyePatch(const cv::Mat& eye_img);
     torch::Tensor buildHighFeature(const std::array<float, 3>& euler, float ear);

@@ -62,7 +62,7 @@
             "use": false,
             "visualize": true,
             "model_path": "/home/iae-vc/dev/flame_osm/bin/x86_64/models/blinklinmult-union.torchscript",
-            "gpu_id": 0,
+            "gpu_id": 1,
             "seq_len": 15,
             "crop_width": 64,
             "crop_height": 64,
