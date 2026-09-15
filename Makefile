@@ -91,6 +91,7 @@ $(shell mkdir -p $(BUILDDIR))
 $(shell mkdir -p $(BUILDDIR)/osm_can)
 $(shell mkdir -p $(BUILDDIR)/osm_camera)
 $(shell mkdir -p $(BUILDDIR)/osm_process)
+$(shell mkdir -p $(BUILDDIR)/osm_process_v2)
 $(shell mkdir -p $(BUILDDIR)/osm_video)
 
 .PHONY: all clean debug deploy FORCE osm flame
@@ -262,7 +263,7 @@ deploy : FORCE
 	cp $(BUILDDIR)/*.comp $(BUILDDIR)/flame $(BINDIR)
 
 clean : FORCE 
-	$(RM) $(BUILDDIR)/*.o $(BUILDDIR)/*.comp $(BUILDDIR)/osm/*.comp $(BUILDDIR)/osm_can/*.comp $(BUILDDIR)/osm_camera/*.comp $(BUILDDIR)/osm_process/*.comp $(BUILDDIR)/osm_video/*.comp $(BUILDDIR)/flame
+	$(RM) $(BUILDDIR)/*.o $(BUILDDIR)/*.comp $(BUILDDIR)/osm/*.comp $(BUILDDIR)/osm_can/*.comp $(BUILDDIR)/osm_camera/*.comp $(BUILDDIR)/osm_process/*.comp $(BUILDDIR)/osm_process_v2/*.comp $(BUILDDIR)/osm_video/*.comp $(BUILDDIR)/flame
 
 debug:
 	@echo "Building for Architecture : $(ARCH)"

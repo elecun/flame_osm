@@ -31,8 +31,8 @@
             "vis_head_mesh": false
         },
         "body_pose_estimation": {
-            "use": false,
-            "visualize": false,
+            "use": true,
+            "visualize": true,
             "model_path": "/home/iae-vc/dev/flame_osm/bin/x86_64/models/yolo26m-pose.torchscript",
             "gpu_id": 0
         },
@@ -49,14 +49,15 @@
         "driver_readiness_estimation_logical": {
             "use": true,
             "visualize": true,
-            "ref_yaw": 41.0,
-            "ref_pitch": -130.0,
-            "sigma_yaw": 15.0,
-            "sigma_pitch": 20.0,
-            "t_window": 3.0,
-            "readiness_low": 0.2,
-            "readiness_moderate": 0.5,
-            "readiness_high": 1.0
+            "steer_ref": [640.0, 800.0],
+            "gaussian_yaw": [0.0, 225.0],
+            "gaussian_pitch": [0.0, 100.0],
+            "gaussian_steer_lw_dist": [150.0, 10000.0],
+            "gaussian_steer_rw_dist": [150.0, 10000.0],
+            "gaussian_lw_rw_dist": [300.0, 10000.0],
+            "window_size": 30,
+            "readiness_low": 1.0,
+            "readiness_high": 3.0
         }
     },
     "dataport": {

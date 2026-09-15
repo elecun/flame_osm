@@ -3,6 +3,7 @@
 #include <cmath>
 #include <iomanip>
 #include <sstream>
+#include <numeric>
 
 driver_readiness_estimation_logical::driver_readiness_estimation_logical() {
 }
@@ -11,104 +12,140 @@ driver_readiness_estimation_logical::~driver_readiness_estimation_logical() {
 }
 
 void driver_readiness_estimation_logical::setParameters(
-    double ref_yaw, double ref_pitch,
-    double sigma_yaw, double sigma_pitch, double t_window,
-    double readiness_low, double readiness_moderate, double readiness_high
+    const cv::Point2f& steer_ref,
+    const driver_readiness_logical::GaussianParam& g_yaw,
+    const driver_readiness_logical::GaussianParam& g_pitch,
+    const driver_readiness_logical::GaussianParam& g_steer_lw,
+    const driver_readiness_logical::GaussianParam& g_steer_rw,
+    const driver_readiness_logical::GaussianParam& g_lw_rw,
+    size_t window_size,
+    double readiness_low,
+    double readiness_high
 ) {
-    _ref_yaw = ref_yaw;
-    _ref_pitch = ref_pitch;
-    _sigma_yaw = (sigma_yaw > 0.0) ? sigma_yaw : 15.0;
-    _sigma_pitch = (sigma_pitch > 0.0) ? sigma_pitch : 10.0;
-    _t_window = (t_window > 0.0) ? t_window : 2.0;
+    _steer_ref = steer_ref;
+    _g_yaw = g_yaw;
+    _g_pitch = g_pitch;
+    _g_steer_lw = g_steer_lw;
+    _g_steer_rw = g_steer_rw;
+    _g_lw_rw = g_lw_rw;
+    _window_size = (window_size > 0) ? window_size : 30;
     _readiness_low = readiness_low;
-    _readiness_moderate = readiness_moderate;
     _readiness_high = readiness_high;
 
-    logger::info("[driver_readiness_logical] Parameters set: ref_yaw={:.1f}deg, ref_pitch={:.1f}deg, sigma_yaw={:.1f}deg, sigma_pitch={:.1f}deg, t_window={:.2f}s, thresholds=[low:{:.2f}, mod:{:.2f}, high:{:.2f}]",
-                 _ref_yaw, _ref_pitch, _sigma_yaw, _sigma_pitch, _t_window,
-                 _readiness_low, _readiness_moderate, _readiness_high);
+    _score_window.clear();
+
+    logger::info("[driver_readiness_logical] Parameters configured: steer_ref=({:.1f}, {:.1f}), "
+                 "yaw[mean={:.1f}, var={:.1f}], pitch[mean={:.1f}, var={:.1f}], "
+                 "steer_lw[mean={:.1f}, var={:.1f}], steer_rw[mean={:.1f}, var={:.1f}], lw_rw[mean={:.1f}, var={:.1f}], "
+                 "window_size={}, thresholds=[low:{:.2f}, high:{:.2f}]",
+                 _steer_ref.x, _steer_ref.y,
+                 _g_yaw.mean, _g_yaw.var, _g_pitch.mean, _g_pitch.var,
+                 _g_steer_lw.mean, _g_steer_lw.var, _g_steer_rw.mean, _g_steer_rw.var, _g_lw_rw.mean, _g_lw_rw.var,
+                 _window_size, _readiness_low, _readiness_high);
+}
+
+double driver_readiness_estimation_logical::computeGaussian(double x, double mean, double var) {
+    if (var <= 1e-6) return 0.0;
+    double diff = x - mean;
+    return std::exp(-(diff * diff) / (2.0 * var));
+}
+
+double driver_readiness_estimation_logical::computeAngleGaussian(double angle, double mean, double var) {
+    if (var <= 1e-6) return 0.0;
+    double diff = angle - mean;
+    // Wrap around [-180, 180] degrees
+    while (diff > 180.0) diff -= 360.0;
+    while (diff < -180.0) diff += 360.0;
+    return std::exp(-(diff * diff) / (2.0 * var));
 }
 
 driver_readiness_logical::LogicalReadinessResult driver_readiness_estimation_logical::process(
     const head_pose::PoseResult& pose_res,
     bool has_pose,
-    std::chrono::steady_clock::time_point now
+    const std::vector<body_pose::PoseResult>& body_poses
 ) {
     driver_readiness_logical::LogicalReadinessResult result;
-    result.t_window = _t_window;
 
-    double current_yaw = (has_pose && pose_res.success) ? pose_res.euler[1] : 0.0;
-    double current_pitch = (has_pose && pose_res.success) ? pose_res.euler[0] : 0.0;
-    double theta_yaw = current_yaw - _ref_yaw;
-    double theta_pitch = current_pitch - _ref_pitch;
+    // 1. Head Pose components (yaw & pitch)
+    if (has_pose && pose_res.success) {
+        double current_pitch = pose_res.euler[0];
+        double current_yaw = pose_res.euler[1];
 
-    // 1. Check if current head pose is within the allowable threshold range (+-sigma)
-    bool is_within_threshold = (has_pose && pose_res.success &&
-                                std::abs(theta_yaw) <= _sigma_yaw &&
-                                std::abs(theta_pitch) <= _sigma_pitch);
+        result.score_yaw = computeAngleGaussian(current_yaw, _g_yaw.mean, _g_yaw.var);
+        result.score_pitch = computeAngleGaussian(current_pitch, _g_pitch.mean, _g_pitch.var);
+    } else {
+        result.score_yaw = 0.0;
+        result.score_pitch = 0.0;
+    }
 
-    // 2. Only push sample into ring buffer if it is within allowable threshold range
-    if (is_within_threshold) {
-        driver_readiness_logical::HeadPoseData current_data;
-        current_data.timestamp = now;
-        current_data.has_pose = true;
-        current_data.pitch = pose_res.euler[0];
-        current_data.yaw = pose_res.euler[1];
-        current_data.roll = pose_res.euler[2];
+    // 2. Body Pose components (wrist distances)
+    // COCO Keypoints: index 9 = left_wrist (lw), index 10 = right_wrist (rw)
+    bool has_lw = false;
+    bool has_rw = false;
+    cv::Point2f pt_lw(0.0f, 0.0f);
+    cv::Point2f pt_rw(0.0f, 0.0f);
 
-        _ring_buffer.push_back(current_data);
-        if (_ring_buffer.size() > MAX_RING_BUFFER_CAPACITY) {
-            _ring_buffer.pop_front();
+    if (!body_poses.empty()) {
+        const auto& pose = body_poses[0];
+        if (pose.keypoints.size() > 9 && pose.keypoints[9].confidence > 0.2f) {
+            pt_lw = cv::Point2f(pose.keypoints[9].x, pose.keypoints[9].y);
+            has_lw = true;
+        }
+        if (pose.keypoints.size() > 10 && pose.keypoints[10].confidence > 0.2f) {
+            pt_rw = cv::Point2f(pose.keypoints[10].x, pose.keypoints[10].y);
+            has_rw = true;
         }
     }
 
-    // 3. Evict samples older than t_window (time diff between oldest sample in buffer and current time > t_window)
-    while (!_ring_buffer.empty()) {
-        double time_span = std::chrono::duration<double>(now - _ring_buffer.front().timestamp).count();
-        if (time_span > _t_window) {
-            _ring_buffer.pop_front();
-        } else {
-            break;
-        }
+    // Distance between left wrist and steer_ref
+    if (has_lw) {
+        double dist_steer_lw = cv::norm(pt_lw - _steer_ref);
+        result.score_steer_lw = computeGaussian(dist_steer_lw, _g_steer_lw.mean, _g_steer_lw.var);
+    } else {
+        result.score_steer_lw = 0.0;
     }
 
-    // 4. Calculate Readiness Score
-    // Exponential term based on current relative rotation angle
-    double yaw_term = theta_yaw / _sigma_yaw;
-    double pitch_term = theta_pitch / _sigma_pitch;
-    double exp_val = std::exp(-(yaw_term * yaw_term + pitch_term * pitch_term));
-    result.exp_component = exp_val;
+    // Distance between right wrist and steer_ref
+    if (has_rw) {
+        double dist_steer_rw = cv::norm(pt_rw - _steer_ref);
+        result.score_steer_rw = computeGaussian(dist_steer_rw, _g_steer_rw.mean, _g_steer_rw.var);
+    } else {
+        result.score_steer_rw = 0.0;
+    }
 
-    // Calculate t_dwell based on valid buffer count within t_window: count * 0.033s (33ms per frame)
-    constexpr double FRAME_INTERVAL_SEC = 0.033; // 33ms
-    double t_dwell = static_cast<double>(_ring_buffer.size()) * FRAME_INTERVAL_SEC;
+    // Distance between left wrist and right wrist
+    if (has_lw && has_rw) {
+        double dist_lw_rw = cv::norm(pt_lw - pt_rw);
+        result.score_lw_rw = computeGaussian(dist_lw_rw, _g_lw_rw.mean, _g_lw_rw.var);
+    } else {
+        result.score_lw_rw = 0.0;
+    }
 
-    result.t_dwell = t_dwell;
-    // Dwell ratio: t_dwell / t_window (bounded in [0.0, 1.0])
-    double ratio = (_t_window > 0.0) ? (t_dwell / _t_window) : 0.0;
-    if (ratio > 1.0) ratio = 1.0;
-    result.dwell_ratio = ratio;
+    // 3. Raw readiness score: average of 5 unnormalized Gaussian scores [0.0 ~ 1.0]
+    result.raw_score = (result.score_yaw + result.score_pitch +
+                        result.score_steer_lw + result.score_steer_rw + result.score_lw_rw) / 5.0;
 
-    // Final Readiness Score
-    result.readiness_score = exp_val * ratio;
+    // 4. Moving window average
+    _score_window.push_back(result.raw_score);
+    if (_score_window.size() > _window_size) {
+        _score_window.pop_front();
+    }
+
+    double sum = std::accumulate(_score_window.begin(), _score_window.end(), 0.0);
+    result.readiness_score = _score_window.empty() ? 0.0 : (sum / _score_window.size());
     result.valid = true;
 
-    // Categorization:
-    // 0.0 ~ readiness_low -> "low"
-    // readiness_low ~ readiness_moderate -> "moderate"
-    // readiness_moderate ~ readiness_high -> "high"
-    if (result.readiness_score > _readiness_moderate) {
+    // 5. Categorization based on window-averaged score
+    // < readiness_low -> "low"
+    // [readiness_low, readiness_high] -> "moderate"
+    // > readiness_high -> "high"
+    if (result.readiness_score > _readiness_high) {
         result.category = "high";
-    } else if (result.readiness_score > _readiness_low) {
+    } else if (result.readiness_score >= _readiness_low) {
         result.category = "moderate";
     } else {
         result.category = "low";
     }
-
-    // Log readiness score and category
-    logger::info("[driver_readiness_logical] Readiness Score: {:.4f} [{}] (exp={:.4f}, dwell_ratio={:.4f}, t_dwell={:.3f}s/{:.2f}s, buffer_cnt={}, theta_yaw={:.1f}, theta_pitch={:.1f})",
-                 result.readiness_score, result.category, result.exp_component, result.dwell_ratio,
-                 result.t_dwell, result.t_window, _ring_buffer.size(), theta_yaw, theta_pitch);
 
     return result;
 }
@@ -124,7 +161,7 @@ void driver_readiness_estimation_logical::drawResult(
     std::ostringstream ss;
     ss << std::fixed << std::setprecision(2);
     ss << "Readiness : " << result.category 
-       << " (Score: " << result.readiness_score << ", Dwell: " << result.t_dwell << "s/" << result.t_window << "s)";
+       << " (Score: " << result.readiness_score << " [raw: " << result.raw_score << "])";
 
     std::string text = ss.str();
     int font_face = cv::FONT_HERSHEY_SIMPLEX;
@@ -148,7 +185,6 @@ void driver_readiness_estimation_logical::drawResult(
         color = cv::Scalar(0, 255, 255); // Yellow for moderate
     }
 
-    // Semi-transparent background box for legibility at bottom-right
     cv::Rect box(pos_x - 5, pos_y - text_size.height - 5, text_size.width + 10, text_size.height + baseline + 10);
     cv::Mat overlay;
     image.copyTo(overlay);
@@ -157,3 +193,4 @@ void driver_readiness_estimation_logical::drawResult(
 
     cv::putText(image, text, cv::Point(pos_x, pos_y), font_face, font_scale, color, thickness, cv::LINE_AA);
 }
+

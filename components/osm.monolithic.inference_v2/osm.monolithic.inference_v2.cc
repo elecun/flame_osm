@@ -120,26 +120,52 @@ bool osm_monolithic_inference_v2::onInit(){
             dr_readiness_high = dr_params.value("readiness_high", dr_readiness_high);
         }
 
-        double ref_yaw = 0.0;
-        double ref_pitch = 0.0;
-        double sigma_yaw = 15.0;
-        double sigma_pitch = 10.0;
-        double t_window = 2.0;
-        double readiness_low = 0.2;
-        double readiness_moderate = 0.6;
-        double readiness_high = 1.0;
+        cv::Point2f steer_ref(640.0f, 800.0f);
+        driver_readiness_logical::GaussianParam g_yaw{0.0, 225.0};
+        driver_readiness_logical::GaussianParam g_pitch{0.0, 100.0};
+        driver_readiness_logical::GaussianParam g_steer_lw{200.0, 10000.0};
+        driver_readiness_logical::GaussianParam g_steer_rw{200.0, 10000.0};
+        driver_readiness_logical::GaussianParam g_lw_rw{300.0, 10000.0};
+        size_t drl_window_size = 30;
+        double drl_readiness_low = 1.0;
+        double drl_readiness_high = 3.0;
+
+        auto parse_vec2 = [](const json& j, const std::string& key, double d1, double d2) -> std::pair<double, double> {
+            if (j.contains(key) && j[key].is_array() && j[key].size() >= 2) {
+                return { j[key][0].get<double>(), j[key][1].get<double>() };
+            }
+            return { d1, d2 };
+        };
+
         if (parameters.contains("driver_readiness_estimation_logical")) {
             const auto& drl_params = parameters["driver_readiness_estimation_logical"];
             _use_driver_readiness_logical = drl_params.value("use", _use_driver_readiness_logical);
             _vis_driver_readiness_logical = drl_params.value("visualize", true);
-            ref_yaw = drl_params.value("ref_yaw", ref_yaw);
-            ref_pitch = drl_params.value("ref_pitch", ref_pitch);
-            sigma_yaw = drl_params.value("sigma_yaw", sigma_yaw);
-            sigma_pitch = drl_params.value("sigma_pitch", sigma_pitch);
-            t_window = drl_params.value("t_window", t_window);
-            readiness_low = drl_params.value("readiness_low", readiness_low);
-            readiness_moderate = drl_params.value("readiness_moderate", readiness_moderate);
-            readiness_high = drl_params.value("readiness_high", readiness_high);
+
+            auto p_steer = parse_vec2(drl_params, "steer_ref", 640.0, 800.0);
+            steer_ref = cv::Point2f(static_cast<float>(p_steer.first), static_cast<float>(p_steer.second));
+
+            auto p_yaw = parse_vec2(drl_params, "gaussian_yaw", 0.0, 225.0);
+            g_yaw = { p_yaw.first, p_yaw.second };
+
+            auto p_pitch = parse_vec2(drl_params, "gaussian_pitch", 0.0, 100.0);
+            g_pitch = { p_pitch.first, p_pitch.second };
+
+            auto p_steer_lw = parse_vec2(drl_params, "gaussian_steer_lw_dist", 200.0, 10000.0);
+            g_steer_lw = { p_steer_lw.first, p_steer_lw.second };
+
+            auto p_steer_rw = parse_vec2(drl_params, "gaussian_steer_rw_dist", 200.0, 10000.0);
+            g_steer_rw = { p_steer_rw.first, p_steer_rw.second };
+
+            auto p_lw_rw = parse_vec2(drl_params, "gaussian_lw_rw_dist", 300.0, 10000.0);
+            g_lw_rw = { p_lw_rw.first, p_lw_rw.second };
+
+            drl_window_size = drl_params.value("window_size", 30);
+            drl_readiness_low = drl_params.value("readiness_low", 0.2);
+            drl_readiness_high = drl_params.value("readiness_high", 0.6);
+
+            _logical_readiness_low = drl_readiness_low;
+            _logical_readiness_high = drl_readiness_high;
         }
 
         // Mutual exclusion of DMS estimators: deep learning has priority
@@ -217,8 +243,8 @@ bool osm_monolithic_inference_v2::onInit(){
         if (_use_driver_readiness_logical) {
             _driver_readiness_logical_estimator = std::make_unique<driver_readiness_estimation_logical>();
             _driver_readiness_logical_estimator->setParameters(
-                ref_yaw, ref_pitch, sigma_yaw, sigma_pitch, t_window,
-                readiness_low, readiness_moderate, readiness_high
+                steer_ref, g_yaw, g_pitch, g_steer_lw, g_steer_rw, g_lw_rw,
+                drl_window_size, drl_readiness_low, drl_readiness_high
             );
         }
 
@@ -401,7 +427,15 @@ void osm_monolithic_inference_v2::draw_readiness_graph(cv::Mat& image, int x, in
 
     cv::putText(image, "1.0", cv::Point(x + 2, plot_y0 + 5), cv::FONT_HERSHEY_SIMPLEX, 0.3, cv::Scalar(180, 180, 180), 1);
     cv::putText(image, "0.0", cv::Point(x + 2, plot_y0 + plot_h), cv::FONT_HERSHEY_SIMPLEX, 0.3, cv::Scalar(180, 180, 180), 1);
-    cv::putText(image, "Readiness (10s)", cv::Point(plot_x0 + 5, plot_y0 - 2), cv::FONT_HERSHEY_SIMPLEX, 0.35, cv::Scalar(0, 255, 255), 1);
+
+    char title_buf[64];
+    if (!time_score_pairs.empty()) {
+        double latest_s = time_score_pairs.back().second;
+        snprintf(title_buf, sizeof(title_buf), "Readiness Score: %.2f", latest_s);
+    } else {
+        snprintf(title_buf, sizeof(title_buf), "Readiness Score");
+    }
+    cv::putText(image, title_buf, cv::Point(plot_x0 + 5, plot_y0 - 2), cv::FONT_HERSHEY_SIMPLEX, 0.35, cv::Scalar(0, 255, 255), 1);
 
     if (time_score_pairs.size() < 2) {
         return;
@@ -410,10 +444,10 @@ void osm_monolithic_inference_v2::draw_readiness_graph(cv::Mat& image, int x, in
     std::vector<cv::Point> pts;
     for (const auto& pair : time_score_pairs) {
         double age = pair.first;
-        double score = std::clamp(pair.second, 0.0, 1.0);
+        double score_norm = std::clamp(pair.second, 0.0, 1.0);
 
         int px = plot_x0 + static_cast<int>((1.0 - (age / 10.0)) * plot_w);
-        int py = plot_y0 + plot_h - static_cast<int>(score * plot_h);
+        int py = plot_y0 + plot_h - static_cast<int>(score_norm * plot_h);
 
         px = std::clamp(px, plot_x0, plot_x0 + plot_w);
         py = std::clamp(py, plot_y0, plot_y0 + plot_h);
@@ -422,9 +456,9 @@ void osm_monolithic_inference_v2::draw_readiness_graph(cv::Mat& image, int x, in
 
     for (size_t i = 1; i < pts.size(); ++i) {
         double s = time_score_pairs[i].second;
-        cv::Scalar line_col = cv::Scalar(0, 0, 255);
-        if (s > 0.5) line_col = cv::Scalar(0, 255, 0);
-        else if (s > 0.2) line_col = cv::Scalar(0, 255, 255);
+        cv::Scalar line_col = cv::Scalar(0, 0, 255); // Red: low
+        if (s > _logical_readiness_high) line_col = cv::Scalar(0, 255, 0); // Green: high
+        else if (s >= _logical_readiness_low) line_col = cv::Scalar(0, 255, 255); // Yellow: moderate
 
         cv::line(image, pts[i - 1], pts[i], line_col, 2, cv::LINE_AA);
     }
@@ -599,6 +633,15 @@ void osm_monolithic_inference_v2::_inference_process() {
                         // cv::circle(out_image, cv::Point(spoi_x, spoi_y), 4, cv::Scalar(0, 165, 255), -1, cv::LINE_AA);
                     }
 
+                    // Visualize steer_ref (Steering Wheel Reference Point)
+                    if (_use_driver_readiness_logical && _vis_driver_readiness_logical && _driver_readiness_logical_estimator) {
+                        const cv::Point2f& sref = _driver_readiness_logical_estimator->getSteerRef();
+                        int sref_x = static_cast<int>(sref.x * scale_x);
+                        int sref_y = static_cast<int>(sref.y * scale_y);
+                        cv::drawMarker(out_image, cv::Point(sref_x, sref_y), cv::Scalar(255, 200, 0), cv::MARKER_CROSS, 16, 1, cv::LINE_AA);
+                        //cv::putText(out_image, "STEER", cv::Point(sref_x + 5, sref_y - 5), cv::FONT_HERSHEY_SIMPLEX, 0.35, cv::Scalar(255, 200, 0), 1, cv::LINE_AA);
+                    }
+
                     // Visualize DAD-3DHeads E2E Results (1:1 Box with Score, 191 Landmarks, 3D Pose Axis, Info Panel)
                     if (_use_face_analysis_e2e && _vis_face_analysis_e2e && _face_analyzer_e2e && !face_results.empty()) {
                         for (const auto& res : face_results) {
@@ -625,10 +668,7 @@ void osm_monolithic_inference_v2::_inference_process() {
                             }
                         }
 
-                        // Draw Info Panel at top-left matching demo_e2e_test.py
-                        if (_vis_head_pose) {
-                            face_analysis_e2e::drawInfoPanel(out_image, face_results[0].pose, static_cast<int>(face_results.size()));
-                        }
+                        // Head pose estimation numerical values are hidden as requested
                     } else if (_use_face_det && _vis_face_det && !bboxes.empty()) {
                         for (const auto& box : bboxes) {
                             cv::Rect scaled_box(
@@ -698,16 +738,49 @@ void osm_monolithic_inference_v2::_inference_process() {
                     /* 6. Run Driver Readiness Estimation (Rule-based Logical, if enabled) */
                     driver_readiness_logical::LogicalReadinessResult logical_res;
                     if (_use_driver_readiness_logical && _driver_readiness_logical_estimator) {
-                        logical_res = _driver_readiness_logical_estimator->process(last_pose, has_pose);
+                        logical_res = _driver_readiness_logical_estimator->process(last_pose, has_pose, poses);
                         if (logical_res.valid) {
                             std::lock_guard<std::mutex> lock(_history_mutex);
                             _readiness_history.push_back({std::chrono::steady_clock::now(), logical_res.readiness_score});
                         }
                     }
 
-                    // Render readiness score changes graph
+                    int hp_w = 120;
+                    int hp_h = 65;
+                    int hp_x = 10;
+                    int hp_y = out_image.rows - hp_h - 10;
+
+                    // Render Head Pose angles panel at bottom-left (Pitch, Roll, Yaw vertical)
+                    if (_use_face_analysis_e2e && _vis_head_pose) {
+                        if (hp_x >= 0 && hp_y >= 0 && hp_x + hp_w < out_image.cols && hp_y + hp_h <= out_image.rows) {
+                            cv::Rect hp_rect(hp_x, hp_y, hp_w, hp_h);
+                            cv::Mat overlay;
+                            out_image.copyTo(overlay);
+                            cv::rectangle(overlay, hp_rect, cv::Scalar(20, 20, 20), cv::FILLED);
+                            cv::addWeighted(overlay, 0.6, out_image, 0.4, 0, out_image);
+                            cv::rectangle(out_image, hp_rect, cv::Scalar(80, 80, 80), 1);
+
+                            if (has_pose) {
+                                char p_buf[32], r_buf[32], y_buf[32];
+                                snprintf(p_buf, sizeof(p_buf), "Pitch: %+5.1f", last_pose.euler[0]);
+                                snprintf(r_buf, sizeof(r_buf), "Roll:  %+5.1f", last_pose.euler[2]);
+                                snprintf(y_buf, sizeof(y_buf), "Yaw:   %+5.1f", last_pose.euler[1]);
+
+                                cv::putText(out_image, p_buf, cv::Point(hp_x + 8, hp_y + 19), cv::FONT_HERSHEY_SIMPLEX, 0.40, cv::Scalar(0, 0, 255), 1, cv::LINE_AA);
+                                cv::putText(out_image, r_buf, cv::Point(hp_x + 8, hp_y + 38), cv::FONT_HERSHEY_SIMPLEX, 0.40, cv::Scalar(255, 150, 50), 1, cv::LINE_AA);
+                                cv::putText(out_image, y_buf, cv::Point(hp_x + 8, hp_y + 57), cv::FONT_HERSHEY_SIMPLEX, 0.40, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+                            } else {
+                                cv::putText(out_image, "Pitch: N/A", cv::Point(hp_x + 8, hp_y + 19), cv::FONT_HERSHEY_SIMPLEX, 0.40, cv::Scalar(150, 150, 150), 1, cv::LINE_AA);
+                                cv::putText(out_image, "Roll:  N/A", cv::Point(hp_x + 8, hp_y + 38), cv::FONT_HERSHEY_SIMPLEX, 0.40, cv::Scalar(150, 150, 150), 1, cv::LINE_AA);
+                                cv::putText(out_image, "Yaw:   N/A", cv::Point(hp_x + 8, hp_y + 57), cv::FONT_HERSHEY_SIMPLEX, 0.40, cv::Scalar(150, 150, 150), 1, cv::LINE_AA);
+                            }
+                        }
+                    }
+
+                    // Render readiness score changes graph at bottom-right (prevent overlapping with left panel)
                     if ((_use_driver_readiness && _vis_driver_readiness) || (_use_driver_readiness_logical && _vis_driver_readiness_logical)) {
-                        int graph_w = 400;
+                        int max_graph_w = out_image.cols - (hp_x + hp_w + 20);
+                        int graph_w = std::min(400, std::max(150, max_graph_w));
                         int graph_h = 65;
                         int graph_x = out_image.cols - graph_w - 10;
                         int graph_y = out_image.rows - graph_h - 10;
@@ -735,8 +808,10 @@ void osm_monolithic_inference_v2::_inference_process() {
                         char fps_str[32];
                         snprintf(fps_str, sizeof(fps_str), "%.1f", fps);
 
-                        cv::putText(out_image, datetime_str, cv::Point(std::max(10, out_image.cols - 270), 20), cv::FONT_HERSHEY_COMPLEX_SMALL, 0.8, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
-                        cv::putText(out_image, fps_str, cv::Point(out_image.cols - 60, 40), cv::FONT_HERSHEY_COMPLEX_SMALL, 0.8, cv::Scalar(0, 0, 255), 1, cv::LINE_AA);
+                        // Top-left: Date and time
+                        cv::putText(out_image, datetime_str, cv::Point(15, 25), cv::FONT_HERSHEY_COMPLEX_SMALL, 0.8, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+                        // Top-right: FPS
+                        cv::putText(out_image, fps_str, cv::Point(out_image.cols - 60, 25), cv::FONT_HERSHEY_COMPLEX_SMALL, 0.8, cv::Scalar(0, 0, 255), 1, cv::LINE_AA);
                     }
 
                     /* 7. Encode as JPEG */

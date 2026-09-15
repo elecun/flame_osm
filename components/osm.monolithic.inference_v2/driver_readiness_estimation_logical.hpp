@@ -5,24 +5,27 @@
 #include <chrono>
 #include <vector>
 #include <deque>
+#include <string>
 #include "face_analysis_e2e.hpp"
+#include "body_pose_estimation.hpp"
 
 namespace driver_readiness_logical {
-    struct HeadPoseData {
-        double pitch{0.0};
-        double yaw{0.0};
-        double roll{0.0};
-        std::chrono::steady_clock::time_point timestamp;
-        bool has_pose{false};
+    struct GaussianParam {
+        double mean{0.0};
+        double var{1.0}; // variance (sigma^2)
     };
 
     struct LogicalReadinessResult {
-        double readiness_score{0.0}; // Gaussian decay-based readiness score [0.0 ~ 1.0]
-        double exp_component{0.0};   // exp(-((yaw/sigma_yaw)^2 + (pitch/sigma_pitch)^2))
-        double dwell_ratio{0.0};      // t_dwell / t_window
-        double t_dwell{0.0};          // Cumulative time maintaining inside threshold (seconds)
-        double t_window{2.0};         // Observed time window (seconds)
-        std::string category{"none"}; // "low", "moderate", "high", or "none"
+        // Individual unnormalized Gaussian component scores [0.0 ~ 1.0]
+        double score_yaw{0.0};
+        double score_pitch{0.0};
+        double score_steer_lw{0.0};
+        double score_steer_rw{0.0};
+        double score_lw_rw{0.0};
+
+        double raw_score{0.0};        // Instantaneous average of 5 scores [0.0 ~ 1.0]
+        double readiness_score{0.0};   // Moving-averaged readiness score [0.0 ~ 1.0]
+        std::string category{"low"};  // "low", "moderate", "high"
         bool valid{false};
     };
 }
@@ -33,33 +36,47 @@ public:
     ~driver_readiness_estimation_logical();
 
     void setParameters(
-        double ref_yaw, double ref_pitch,
-        double sigma_yaw, double sigma_pitch, double t_window,
-        double readiness_low = 0.2, double readiness_moderate = 0.6, double readiness_high = 1.0
+        const cv::Point2f& steer_ref,
+        const driver_readiness_logical::GaussianParam& g_yaw,
+        const driver_readiness_logical::GaussianParam& g_pitch,
+        const driver_readiness_logical::GaussianParam& g_steer_lw,
+        const driver_readiness_logical::GaussianParam& g_steer_rw,
+        const driver_readiness_logical::GaussianParam& g_lw_rw,
+        size_t window_size = 30,
+        double readiness_low = 0.2,
+        double readiness_high = 0.6
     );
 
-    // Process new head pose data with current timestamp
+    // Process head pose and body pose keypoints
     driver_readiness_logical::LogicalReadinessResult process(
         const head_pose::PoseResult& pose_res,
         bool has_pose,
-        std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now()
+        const std::vector<body_pose::PoseResult>& body_poses
     );
 
-    // Draw logical readiness score on image
+    // Draw logical readiness score panel on image
     void drawResult(cv::Mat& image, const driver_readiness_logical::LogicalReadinessResult& result);
 
+    const cv::Point2f& getSteerRef() const { return _steer_ref; }
+    double getReadinessLow() const { return _readiness_low; }
+    double getReadinessHigh() const { return _readiness_high; }
+
 private:
-    double _ref_yaw{0.0};            // Reference forward yaw angle in degrees
-    double _ref_pitch{0.0};          // Reference forward pitch angle in degrees
-    double _sigma_yaw{15.0};         // Allowable yaw threshold in degrees (+-15.0)
-    double _sigma_pitch{10.0};       // Allowable pitch threshold in degrees (+-10.0)
-    double _t_window{2.0};           // Time window in seconds (2.0s)
-    double _readiness_low{0.2};      // Threshold for low category (0.2)
-    double _readiness_moderate{0.6}; // Threshold for moderate category (0.6)
-    double _readiness_high{1.0};     // Threshold for high category (1.0)
-    
-    static constexpr size_t MAX_RING_BUFFER_CAPACITY = 50; // Buffer capacity for 30fps stream
-    std::deque<driver_readiness_logical::HeadPoseData> _ring_buffer;
+    static double computeGaussian(double x, double mean, double var);
+    static double computeAngleGaussian(double angle, double mean, double var);
+
+    cv::Point2f _steer_ref{640.0f, 800.0f};
+    driver_readiness_logical::GaussianParam _g_yaw{0.0, 225.0};
+    driver_readiness_logical::GaussianParam _g_pitch{0.0, 100.0};
+    driver_readiness_logical::GaussianParam _g_steer_lw{200.0, 10000.0};
+    driver_readiness_logical::GaussianParam _g_steer_rw{200.0, 10000.0};
+    driver_readiness_logical::GaussianParam _g_lw_rw{300.0, 10000.0};
+
+    size_t _window_size{30};
+    double _readiness_low{0.2};
+    double _readiness_high{0.6};
+
+    std::deque<double> _score_window;
 };
 
 #endif

@@ -121,6 +121,8 @@ class osm_monolithic_inference_v2 : public flame::component::Object {
         float _poi_dist{200.0f};
 
         /* DMS Score History for Visualization Graph */
+        double _logical_readiness_low{0.2};
+        double _logical_readiness_high{0.6};
         std::deque<std::pair<std::chrono::steady_clock::time_point, double>> _readiness_history;
         std::mutex _history_mutex;
         void draw_readiness_graph(cv::Mat& image, int x, int y, int width, int height);
