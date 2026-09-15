@@ -235,7 +235,7 @@ $(BUILDDIR)headpose.model.inference.o: $(CURRENT_DIR)/components/headpose.model.
 
 # Video File Grabber
 video_file_grabber.comp: $(BUILDDIR)video.file.grabber.o
-	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_video/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio
+	$(CC) $(LDFLAGS) -shared -o $(BUILDDIR)/osm_video/$@ $^ $(LDFLAGS) $(LDLIBS) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -lopencv_videoio -lopencv_calib3d
 
 $(BUILDDIR)video.file.grabber.o: $(CURRENT_DIR)/components/video.file.grabber/video.file.grabber.cc
 	$(CC) $(CXXFLAGS) $(INCLUDE_DIR) -c $< -o $@

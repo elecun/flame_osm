@@ -1,3 +1,14 @@
+/**
+ * @file face_detection.hpp
+ * @author Byunghun Hwang <bh.hwang@iae.re.kr>
+ * @brief 
+ * @version 0.1
+ * @date 2026-09-08
+ * 
+ * @copyright Copyright (c) 2026
+ * 
+ */
+
 #ifndef OSM_MONOLITHIC_INFERENCE_FACE_DETECTION_HPP_INCLUDED
 #define OSM_MONOLITHIC_INFERENCE_FACE_DETECTION_HPP_INCLUDED
 
@@ -20,9 +31,6 @@ public:
 
     // Load the model
     bool loadModel(const std::string& model_path, int gpu_id = 0);
-
-    // Process image and return bounding boxes (backward compatibility)
-    std::vector<cv::Rect> process(const cv::Mat& image, float nms_threshold = 0.45f, float padding_w = 0.0f, float padding_h = 0.0f);
 
     // Detect faces matching demo_e2e_test.py (letterbox, aspect-ratio preserved, 1:1 padding_scale square crop)
     std::vector<FaceBox> detect(const cv::Mat& image, float conf_thresh = 0.7f, float nms_thresh = 0.45f, float padding_scale = 1.25f);

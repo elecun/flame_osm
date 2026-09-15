@@ -589,7 +589,7 @@ void osm_monolithic_inference_v2::_inference_process() {
                     if (_use_poi && _poi_visualize) {
                         int spoi_x = static_cast<int>(_poi_x * scale_x);
                         int spoi_y = static_cast<int>(_poi_y * scale_y);
-                        int spoi_r = static_cast<int>(_poi_dist * ((scale_x + scale_y) * 0.5f));
+                        // int spoi_r = static_cast<int>(_poi_dist * ((scale_x + scale_y) * 0.5f));
 
                         // Draw POI distance threshold circle
                         //cv::circle(out_image, cv::Point(spoi_x, spoi_y), spoi_r, cv::Scalar(0, 165, 255), 1, cv::LINE_AA);

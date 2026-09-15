@@ -2,6 +2,7 @@
 #include <flame/log.hpp>
 #include <filesystem>
 #include <algorithm>
+
 namespace fs = std::filesystem;
 
 face_detection::face_detection() {}
@@ -199,14 +200,4 @@ std::vector<FaceBox> face_detection::detect(const cv::Mat& image, float conf_thr
     }
 
     return detected_faces;
-}
-
-std::vector<cv::Rect> face_detection::process(const cv::Mat& image, float nms_threshold, float padding_w, float padding_h) {
-    auto faces = detect(image, 0.7f, nms_threshold, 1.25f);
-    std::vector<cv::Rect> bboxes;
-    bboxes.reserve(faces.size());
-    for (const auto& f : faces) {
-        bboxes.push_back(f.bbox);
-    }
-    return bboxes;
 }
