@@ -62,7 +62,11 @@ else ifeq ($(ARCH), aarch64)
 
 else
 	# LibTorch Paths
-	TORCH_DIR = /home/iae-vc/dev/DAD-3DHeads/venv/lib/python3.10/site-packages/torch
+# 	TORCH_DIR = /home/iae-vc/dev/DAD-3DHeads/venv/lib/python3.10/site-packages/torch
+# 	TORCH_INC = -I$(TORCH_DIR)/include -I$(TORCH_DIR)/include/torch/csrc/api/include
+# 	TORCH_LIB = -L$(TORCH_DIR)/lib -Wl,--no-as-needed -ltorch -ltorch_cpu -ltorch_cuda -lc10 -lc10_cuda -Wl,--as-needed
+
+	TORCH_DIR = /home/osm/dev/flame_osm_0916/venv/lib/python3.10/site-packages/torch
 	TORCH_INC = -I$(TORCH_DIR)/include -I$(TORCH_DIR)/include/torch/csrc/api/include
 	TORCH_LIB = -L$(TORCH_DIR)/lib -Wl,--no-as-needed -ltorch -ltorch_cpu -ltorch_cuda -lc10 -lc10_cuda -Wl,--as-needed
 

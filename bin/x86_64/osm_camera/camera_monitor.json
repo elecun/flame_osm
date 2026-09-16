@@ -27,7 +27,7 @@
         },
         "image_stream_1_monitor":{
             "transport": "tcp",
-            "host": "192.168.100.91",
+            "host": "192.168.100.90",
             "port": 5201,
             "socket_type": "pub",
             "queue_size": 10,
@@ -38,7 +38,7 @@
         },
         "image_stream_2_monitor":{
             "transport": "tcp",
-            "host": "192.168.100.91",
+            "host": "192.168.100.90",
             "port": 5202,
             "socket_type": "pub",
             "queue_size": 10,

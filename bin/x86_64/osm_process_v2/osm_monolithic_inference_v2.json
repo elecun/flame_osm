@@ -13,7 +13,7 @@
             "poi": [640, 560],
             "poi_dist": 350.0,
             "poi_visualize": true,
-            "model_path": "/home/iae-vc/dev/flame_osm/bin/x86_64/models/yolo11n-face.torchscript",
+            "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/yolo11n-face.torchscript",
             "gpu_id": 0,
             "conf": 0.7,
             "nms": 0.45,
@@ -22,7 +22,7 @@
         "face_analysis_e2e": {
             "use": true,
             "visualize": true,
-            "model_path": "/home/iae-vc/dev/flame_osm/bin/x86_64/models/dad_3dheads_e2e.torchscript",
+            "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/dad_3dheads_e2e.torchscript",
             "gpu_id": 0,
             "vis_landmarks_68": false,
             "vis_landmarks_191": true,
@@ -33,13 +33,13 @@
         "body_pose_estimation": {
             "use": true,
             "visualize": true,
-            "model_path": "/home/iae-vc/dev/flame_osm/bin/x86_64/models/yolo26m-pose.torchscript",
+            "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/yolo26m-pose.torchscript",
             "gpu_id": 0
         },
         "driver_readiness_estimation": {
             "use": false,
             "visualize": true,
-            "model_path": "/home/iae-vc/dev/flame_osm/bin/x86_64/models/iae_dms_251212.torchscript",
+            "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/iae_dms_251212.torchscript",
             "gpu_id": 1,
             "threshold": 0.5,
             "readiness_low": 0.2,
@@ -49,11 +49,11 @@
         "driver_readiness_estimation_logical": {
             "use": true,
             "visualize": true,
-            "steer_ref": [440.0, 1400.0],
-            "gaussian_yaw": [0.0, 225.0],
-            "gaussian_pitch": [0.0, 100.0],
-            "gaussian_steer_lw_dist": [150.0, 10000.0],
-            "gaussian_steer_rw_dist": [150.0, 10000.0],
+            "steer_ref": [440.0, 1450.0],
+            "gaussian_yaw": [24.0, 400.0],
+            "gaussian_pitch": [-11.0, 400.0],
+            "gaussian_steer_lw_dist": [300.0, 10000.0],
+            "gaussian_steer_rw_dist": [300.0, 10000.0],
             "gaussian_lw_rw_dist": [300.0, 10000.0],
             "window_size": 30,
             "readiness_low": 0.2,
@@ -62,7 +62,7 @@
         "blink_detection": {
             "use": false,
             "visualize": true,
-            "model_path": "/home/iae-vc/dev/flame_osm/bin/x86_64/models/blinklinmult-union.torchscript",
+            "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/blinklinmult-union.torchscript",
             "gpu_id": 1,
             "seq_len": 15,
             "crop_width": 64,
@@ -85,7 +85,7 @@
         },
         "image_stream_1_processed_monitor": {
             "transport": "tcp",
-            "host": "100.120.210.70",
+            "host": "192.168.100.90",
             "port": 5203,
             "socket_type": "pub",
             "queue_size": 10,
