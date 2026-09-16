@@ -760,10 +760,14 @@ void osm_monolithic_inference::_inference_process() {
                             tag["dms_dl_confidence"] = readiness_res.confidence;
                             tag["dms_dl_attention_score"] = readiness_res.confidence;
                             tag["dms_dl_category"] = readiness_res.category;
+                            tag["driver_readiness_class"] = readiness_res.category;
+                            tag["driver_readiness_score"] = readiness_res.confidence;
                         }
                         if (_use_driver_readiness_logical && _driver_readiness_logical_estimator) {
                             tag["dms_logical_readiness"] = logical_res.readiness_score;
                             tag["dms_logical_category"] = logical_res.category;
+                            tag["driver_readiness_class"] = logical_res.category;
+                            tag["driver_readiness_score"] = logical_res.readiness_score;
                         }
 
                         /* 6. Send multipart message */

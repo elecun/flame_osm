@@ -45,19 +45,19 @@ LDFLAGS_COMMON =
 # Platform Specific Configuration
 ifeq ($(ARCH),arm64)
 	# ARM64
-	INCLUDE_DIR = $(INCLUDE_BASE) -I$(CURRENT_DIR)/include/ -I$(CURRENT_DIR)/include/dep
+	INCLUDE_DIR = $(INCLUDE_BASE) -I$(FLAME_PATH)/include/ -I$(FLAME_PATH)/include/dep
 	LIBDIR = -L/usr/local/lib -L./lib/arm64
 
 else ifeq ($(ARCH), armhf)
 	# ARMHF
 	CC := /usr/bin/arm-linux-gnueabihf-g++-9
 	GCC := /usr/bin/arm-linux-gnueabihf-gcc-9
-	INCLUDE_DIR = $(INCLUDE_BASE) -I$(CURRENT_DIR)/include/ -I$(CURRENT_DIR)/include/dep
+	INCLUDE_DIR = $(INCLUDE_BASE) -I$(FLAME_PATH)/include/ -I$(FLAME_PATH)/include/dep
 	LIBDIR = -L/usr/local/lib -L./lib/armhf
 
 else ifeq ($(ARCH), aarch64) 
 	# AARCH64
-	INCLUDE_DIR = $(INCLUDE_BASE) -I$(FLAME_PATH)/include -I$(CURRENT_DIR)/include/dep -I/usr/local/include -I/usr/include/opencv4
+	INCLUDE_DIR = $(INCLUDE_BASE) -I$(FLAME_PATH)/include -I$(FLAME_PATH)/include/dep -I/usr/local/include -I/usr/include/opencv4
 	LIBDIR = -L/usr/local/lib -L$(CURRENT_DIR)/lib/aarch64/ -L$(CURRENT_DIR)/lib/aarch64-linux-gnu/
 
 else

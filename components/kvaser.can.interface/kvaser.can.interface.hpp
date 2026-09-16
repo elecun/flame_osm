@@ -16,6 +16,7 @@
 #include <map>
 #include <unordered_map>
 #include <vector>
+#include <deque>
 #include <thread>
 #include <string>
 #include <atomic>
@@ -87,6 +88,8 @@ private:
     DMSEnable _dms_enable { DMSEnable::ENABLE }; // CMD_DMS_1000ms: Init value is 1 (Enable)
     DMSState _dms_state { DMSState::INIT };       // STS_DMS_1000ms: Init value is 0 (Init)
     DMSDriverReadiness _dms_readiness { DMSDriverReadiness::UNKNOWN }; // STS_DMS_1000ms: Init value is 0 (Unknown)
+    size_t _readiness_window_size { 30 };
+    std::deque<DMSDriverReadiness> _readiness_window;
 
 }; /* class */
 

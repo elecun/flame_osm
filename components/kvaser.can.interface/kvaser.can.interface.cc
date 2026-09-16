@@ -4,7 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <flame/def.hpp>
-#include <flame/json.hpp>
+#include <dep/json.hpp>
 #include <flame/log.hpp>
 #include <iomanip>
 #include <iostream>
@@ -145,6 +145,9 @@ bool kvaser_can_interface::onInit()
 
             /* start background workers */
             _worker_stop.store(false);
+            _readiness_window_size = parameters.value("readiness_window", 30);
+            logger::info("[{}] Readiness window size set to {}", getName(), _readiness_window_size);
+
             if (parameters.value("enable_ch0_in_monitor", false)) {
                 logger::info("[{}] Listen for CAN FD frames...", getName());
                 _can_ch0_rcv_worker = thread(&kvaser_can_interface::_can_ch0_rcv_task, this);
@@ -312,7 +315,7 @@ void kvaser_can_interface::onData(flame::component::ZData& data)
                 }
             }
         } else if (portname == "image_stream_1_processed_monitor") {
-            // Process logical readiness result from inference monitor
+            // Process readiness result from inference monitor
             if (data.size() > 0) {
                 // The first part of the multipart message is the JSON metadata
                 string payload;
@@ -329,27 +332,80 @@ void kvaser_can_interface::onData(flame::component::ZData& data)
 
                 if (!payload.empty() && (payload.front() == '{' || payload.front() == '[')) {
                     json j = json::parse(payload);
-                    DMSDriverReadiness mapped = DMSDriverReadiness::UNKNOWN;
-                    if (j.contains("dms_logical_category")) {
+                    DMSDriverReadiness current_class = DMSDriverReadiness::UNKNOWN;
+
+                    // 1. Check primary unified key: driver_readiness_class ("high", "moderate", "low")
+                    if (j.contains("driver_readiness_class")) {
+                        string cls = j["driver_readiness_class"].get<string>();
+                        std::transform(cls.begin(), cls.end(), cls.begin(), ::tolower);
+                        if (cls == "high") current_class = DMSDriverReadiness::HIGH;
+                        else if (cls == "moderate") current_class = DMSDriverReadiness::MODERATE;
+                        else if (cls == "low") current_class = DMSDriverReadiness::LOW;
+                    }
+                    // 2. Fallback: dms_logical_category
+                    else if (j.contains("dms_logical_category")) {
                         string cat = j["dms_logical_category"].get<string>();
                         std::transform(cat.begin(), cat.end(), cat.begin(), ::tolower);
-                        if (cat == "high") mapped = DMSDriverReadiness::HIGH;
-                        else if (cat == "moderate") mapped = DMSDriverReadiness::MODERATE;
-                        else if (cat == "low") mapped = DMSDriverReadiness::LOW;
-                    } else if (j.contains("dms_logical_readiness")) {
-                        double score = j["dms_logical_readiness"].get<double>();
-                        if (score >= 0.7) mapped = DMSDriverReadiness::HIGH;
-                        else if (score >= 0.4) mapped = DMSDriverReadiness::MODERATE;
-                        else if (score > 0.0) mapped = DMSDriverReadiness::LOW;
+                        if (cat == "high") current_class = DMSDriverReadiness::HIGH;
+                        else if (cat == "moderate") current_class = DMSDriverReadiness::MODERATE;
+                        else if (cat == "low") current_class = DMSDriverReadiness::LOW;
                     }
-                    if (mapped != DMSDriverReadiness::UNKNOWN) {
-                        set_dms_readiness(mapped);
-                        logger::info("[{}] Updated readiness from logical monitor: {}", getName(), static_cast<int>(mapped));
+                    // 3. Fallback: driver_readiness_score (0.0 ~ 1.0)
+                    else if (j.contains("driver_readiness_score")) {
+                        double score = j["driver_readiness_score"].get<double>();
+                        if (score > 0.6) current_class = DMSDriverReadiness::HIGH;
+                        else if (score >= 0.2) current_class = DMSDriverReadiness::MODERATE;
+                        else if (score >= 0.0) current_class = DMSDriverReadiness::LOW;
+                    }
+                    // 4. Fallback: dms_logical_readiness
+                    else if (j.contains("dms_logical_readiness")) {
+                        double score = j["dms_logical_readiness"].get<double>();
+                        if (score > 0.6) current_class = DMSDriverReadiness::HIGH;
+                        else if (score >= 0.2) current_class = DMSDriverReadiness::MODERATE;
+                        else if (score >= 0.0) current_class = DMSDriverReadiness::LOW;
+                    }
+
+                    if (current_class != DMSDriverReadiness::UNKNOWN) {
+                        std::lock_guard<std::mutex> lock(_vars_mutex);
+                        _readiness_window.push_back(current_class);
+                        if (_readiness_window.size() > _readiness_window_size) {
+                            _readiness_window.pop_front();
+                        }
+
+                        // Majority voting in window
+                        int cnt_high = 0, cnt_moderate = 0, cnt_low = 0;
+                        for (const auto& r : _readiness_window) {
+                            if (r == DMSDriverReadiness::HIGH) cnt_high++;
+                            else if (r == DMSDriverReadiness::MODERATE) cnt_moderate++;
+                            else if (r == DMSDriverReadiness::LOW) cnt_low++;
+                        }
+
+                        // Determine the most frequent class (if tie, maintain current_class)
+                        int max_cnt = 0;
+                        DMSDriverReadiness final_readiness = current_class;
+                        if (cnt_high > max_cnt) {
+                            max_cnt = cnt_high;
+                            final_readiness = DMSDriverReadiness::HIGH;
+                        }
+                        if (cnt_moderate > max_cnt) {
+                            max_cnt = cnt_moderate;
+                            final_readiness = DMSDriverReadiness::MODERATE;
+                        }
+                        if (cnt_low > max_cnt) {
+                            max_cnt = cnt_low;
+                            final_readiness = DMSDriverReadiness::LOW;
+                        }
+
+                        _dms_readiness = final_readiness;
+                        logger::debug("[{}] Readiness majority vote in window ({}/{}): final={} (High:{}, Mod:{}, Low:{})",
+                                     getName(), _readiness_window.size(), _readiness_window_size,
+                                     static_cast<int>(final_readiness), cnt_high, cnt_moderate, cnt_low);
                     } else {
-                        logger::debug("[{}] No valid logical readiness field in monitor payload", getName());
+                        logger::debug("[{}] No valid driver readiness field in monitor payload", getName());
                     }
                 }
             }
+        } else if (portname == "can_ch0_control") {
 
             if (data.size() > 0) {
                 string payload;

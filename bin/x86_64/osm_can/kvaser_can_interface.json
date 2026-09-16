@@ -8,6 +8,7 @@
         "can_fd_data_bitrate": 1000000,
         "can_fd_data_bitrate_sample_point": 75,
         "enable_ch0_in_monitor": false,
+        "readiness_window": 30,
         "dms_state_enums": [
             "INIT",
             "INACTIVE",
