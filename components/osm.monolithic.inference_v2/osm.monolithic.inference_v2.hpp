@@ -101,6 +101,13 @@ class osm_monolithic_inference_v2 : public flame::component::Object {
         bool _show_info = true;
         bool _vertical_flip = false;
 
+        /* Offline Processing */
+        bool _use_offline_process{false};
+        std::string _offline_input_video{""};
+        std::string _offline_save_as{""};
+        cv::VideoCapture _offline_cap;
+        cv::VideoWriter _offline_writer;
+
         /* Visualization Flags */
         bool _vis_face_det{true};
         bool _vis_face_analysis_e2e{true};

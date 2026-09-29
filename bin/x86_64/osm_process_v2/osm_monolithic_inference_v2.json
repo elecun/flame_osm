@@ -3,6 +3,12 @@
     "verbose": 1,
     "info": {},
     "parameters": {
+        "offline_process":
+        {
+            "use":true,
+            "input_video":"/home/osm/dev/flame_osm/bin/video/sample_demo_0916.avi",
+            "save_as":"/home/osm/dev/flame_osm/bin/video/sample_demo_0916_processed.avi"
+        },
         "show_info": true,
         "vertical_flip": false,
         "use_image_stream": [1],
