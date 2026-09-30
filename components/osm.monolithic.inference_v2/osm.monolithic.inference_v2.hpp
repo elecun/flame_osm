@@ -132,7 +132,7 @@ class osm_monolithic_inference_v2 : public flame::component::Object {
         double _logical_readiness_high{0.6};
         std::deque<std::pair<std::chrono::steady_clock::time_point, double>> _readiness_history;
         std::mutex _history_mutex;
-        void draw_readiness_graph(cv::Mat& image, int x, int y, int width, int height);
+        void draw_readiness_graph(cv::Mat& image, int x, int y, int width, int height, float ui_scale = 1.0f);
 };
 
 EXPORT_COMPONENT_API

@@ -151,10 +151,10 @@ std::vector<body_pose::PoseResult> body_pose_estimation::process(const cv::Mat& 
             float scale_y = (float)image.rows / _input_height;
 
             for (int k = 0; k < _num_keypoints; k++) {
-                int kpt_offset = 5 + k * 3;
-                float kpt_conf = box_data[kpt_offset + 0];
-                float kpt_x = box_data[kpt_offset + 1] * scale_x;
-                float kpt_y = box_data[kpt_offset + 2] * scale_y;
+                int kpt_offset = 6 + k * 3;
+                float kpt_x = box_data[kpt_offset + 0] * scale_x;
+                float kpt_y = box_data[kpt_offset + 1] * scale_y;
+                float kpt_conf = box_data[kpt_offset + 2];
 
                 body_pose::KeyPoint kpt;
                 kpt.x = kpt_x;

@@ -3,6 +3,7 @@
 #include <dep/json.hpp>
 #include <chrono>
 #include <filesystem>
+#include <csignal>
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
@@ -448,7 +449,11 @@ cv::Mat osm_monolithic_inference_v2::getLatestImage2() {
     return _latest_image_2.clone();
 }
 
-void osm_monolithic_inference_v2::draw_readiness_graph(cv::Mat& image, int x, int y, int width, int height) {
+void osm_monolithic_inference_v2::draw_readiness_graph(cv::Mat& image, int x, int y, int width, int height, float ui_scale) {
+    if (ui_scale <= 0.0f) {
+        ui_scale = std::min(static_cast<float>(width) / 300.0f, static_cast<float>(height) / 65.0f);
+    }
+
     std::vector<std::pair<double, double>> time_score_pairs;
     auto now = std::chrono::steady_clock::now();
 
@@ -478,24 +483,35 @@ void osm_monolithic_inference_v2::draw_readiness_graph(cv::Mat& image, int x, in
     image.copyTo(overlay);
     cv::rectangle(overlay, bg_rect, cv::Scalar(20, 20, 20), cv::FILLED);
     cv::addWeighted(overlay, 0.6, image, 0.4, 0, image);
-    cv::rectangle(image, bg_rect, cv::Scalar(80, 80, 80), 1);
+    int border_thick = std::max(1, static_cast<int>(std::round(1.0f * ui_scale)));
+    cv::rectangle(image, bg_rect, cv::Scalar(80, 80, 80), border_thick);
 
-    int margin_l = 30;
-    int margin_r = 10;
-    int margin_t = 10;
-    int margin_b = 15;
+    int margin_l = static_cast<int>(std::round(32.0f * ui_scale));
+    int margin_r = static_cast<int>(std::round(10.0f * ui_scale));
+    int margin_t = static_cast<int>(std::round(16.0f * ui_scale));
+    int margin_b = static_cast<int>(std::round(12.0f * ui_scale));
 
     int plot_w = width - margin_l - margin_r;
     int plot_h = height - margin_t - margin_b;
 
+    if (plot_w <= 0 || plot_h <= 0) {
+        return;
+    }
+
     int plot_x0 = x + margin_l;
     int plot_y0 = y + margin_t;
 
-    cv::line(image, cv::Point(plot_x0, plot_y0 + plot_h), cv::Point(plot_x0 + plot_w, plot_y0 + plot_h), cv::Scalar(150, 150, 150), 1);
-    cv::line(image, cv::Point(plot_x0, plot_y0), cv::Point(plot_x0, plot_y0 + plot_h), cv::Scalar(150, 150, 150), 1);
+    int axis_thick = std::max(1, static_cast<int>(std::round(1.0f * ui_scale)));
+    cv::line(image, cv::Point(plot_x0, plot_y0 + plot_h), cv::Point(plot_x0 + plot_w, plot_y0 + plot_h), cv::Scalar(150, 150, 150), axis_thick);
+    cv::line(image, cv::Point(plot_x0, plot_y0), cv::Point(plot_x0, plot_y0 + plot_h), cv::Scalar(150, 150, 150), axis_thick);
 
-    cv::putText(image, "1.0", cv::Point(x + 2, plot_y0 + 5), cv::FONT_HERSHEY_SIMPLEX, 0.3, cv::Scalar(180, 180, 180), 1);
-    cv::putText(image, "0.0", cv::Point(x + 2, plot_y0 + plot_h), cv::FONT_HERSHEY_SIMPLEX, 0.3, cv::Scalar(180, 180, 180), 1);
+    float label_font_scale = 0.28f * ui_scale;
+    int label_thick = std::max(1, static_cast<int>(std::round(1.0f * ui_scale)));
+    int label_ox = std::max(2, static_cast<int>(std::round(4.0f * ui_scale)));
+    int label_oy = static_cast<int>(std::round(4.0f * ui_scale));
+
+    cv::putText(image, "1.0", cv::Point(x + label_ox, plot_y0 + label_oy), cv::FONT_HERSHEY_SIMPLEX, label_font_scale, cv::Scalar(180, 180, 180), label_thick, cv::LINE_AA);
+    cv::putText(image, "0.0", cv::Point(x + label_ox, plot_y0 + plot_h), cv::FONT_HERSHEY_SIMPLEX, label_font_scale, cv::Scalar(180, 180, 180), label_thick, cv::LINE_AA);
 
     char title_buf[64];
     if (!time_score_pairs.empty()) {
@@ -504,7 +520,10 @@ void osm_monolithic_inference_v2::draw_readiness_graph(cv::Mat& image, int x, in
     } else {
         snprintf(title_buf, sizeof(title_buf), "Readiness Score");
     }
-    cv::putText(image, title_buf, cv::Point(plot_x0 + 5, plot_y0 - 2), cv::FONT_HERSHEY_SIMPLEX, 0.35, cv::Scalar(0, 255, 255), 1);
+    float title_font_scale = 0.32f * ui_scale;
+    int title_ox = static_cast<int>(std::round(5.0f * ui_scale));
+    int title_oy = static_cast<int>(std::round(4.0f * ui_scale));
+    cv::putText(image, title_buf, cv::Point(plot_x0 + title_ox, plot_y0 - title_oy), cv::FONT_HERSHEY_SIMPLEX, title_font_scale, cv::Scalar(0, 255, 255), label_thick, cv::LINE_AA);
 
     if (time_score_pairs.size() < 2) {
         return;
@@ -523,13 +542,14 @@ void osm_monolithic_inference_v2::draw_readiness_graph(cv::Mat& image, int x, in
         pts.push_back(cv::Point(px, py));
     }
 
+    int plot_line_thick = std::max(1, static_cast<int>(std::round(2.0f * ui_scale)));
     for (size_t i = 1; i < pts.size(); ++i) {
         double s = time_score_pairs[i].second;
         cv::Scalar line_col = cv::Scalar(0, 0, 255); // Red: low
         if (s > _logical_readiness_high) line_col = cv::Scalar(0, 255, 0); // Green: high
         else if (s >= _logical_readiness_low) line_col = cv::Scalar(0, 255, 255); // Yellow: moderate
 
-        cv::line(image, pts[i - 1], pts[i], line_col, 2, cv::LINE_AA);
+        cv::line(image, pts[i - 1], pts[i], line_col, plot_line_thick, cv::LINE_AA);
     }
 }
 
@@ -885,10 +905,21 @@ void osm_monolithic_inference_v2::_inference_process() {
                 }
             }
 
-            int hp_w = 120;
-            int hp_h = 65;
-            int hp_x = 10;
-            int hp_y = out_image.rows - hp_h - 10;
+            // Resolution scaling for bottom UI overlays (Baseline reference resolution: 450x800)
+            const float base_w = 450.0f;
+            const float base_h = 800.0f;
+            float scale_w = static_cast<float>(out_image.cols) / base_w;
+            float scale_h = static_cast<float>(out_image.rows) / base_h;
+            float ui_scale = std::min(scale_w, scale_h);
+
+            int margin_x = std::max(1, static_cast<int>(std::round(10.0f * ui_scale)));
+            int margin_y = std::max(1, static_cast<int>(std::round(10.0f * ui_scale)));
+            int spacing  = std::max(1, static_cast<int>(std::round(10.0f * ui_scale)));
+
+            int hp_w = static_cast<int>(std::round(120.0f * ui_scale));
+            int hp_h = static_cast<int>(std::round(65.0f * ui_scale));
+            int hp_x = margin_x;
+            int hp_y = out_image.rows - hp_h - margin_y;
 
             // Render Head Pose angles panel at bottom-left (Pitch, Roll, Yaw vertical)
             if (_use_face_analysis_e2e && _vis_head_pose) {
@@ -898,7 +929,15 @@ void osm_monolithic_inference_v2::_inference_process() {
                     out_image.copyTo(overlay);
                     cv::rectangle(overlay, hp_rect, cv::Scalar(20, 20, 20), cv::FILLED);
                     cv::addWeighted(overlay, 0.6, out_image, 0.4, 0, out_image);
-                    cv::rectangle(out_image, hp_rect, cv::Scalar(80, 80, 80), 1);
+                    int border_thick = std::max(1, static_cast<int>(std::round(1.0f * ui_scale)));
+                    cv::rectangle(out_image, hp_rect, cv::Scalar(80, 80, 80), border_thick);
+
+                    float font_scale = 0.40f * ui_scale;
+                    int font_thick = std::max(1, static_cast<int>(std::round(1.0f * ui_scale)));
+                    int text_x = hp_x + static_cast<int>(std::round(8.0f * ui_scale));
+                    int text_y1 = hp_y + static_cast<int>(std::round(19.0f * ui_scale));
+                    int text_y2 = hp_y + static_cast<int>(std::round(38.0f * ui_scale));
+                    int text_y3 = hp_y + static_cast<int>(std::round(57.0f * ui_scale));
 
                     if (has_pose) {
                         char p_buf[32], r_buf[32], y_buf[32];
@@ -906,25 +945,27 @@ void osm_monolithic_inference_v2::_inference_process() {
                         snprintf(r_buf, sizeof(r_buf), "Roll:  %+5.1f", last_pose.euler[2]);
                         snprintf(y_buf, sizeof(y_buf), "Yaw:   %+5.1f", last_pose.euler[1]);
 
-                        cv::putText(out_image, p_buf, cv::Point(hp_x + 8, hp_y + 19), cv::FONT_HERSHEY_SIMPLEX, 0.40, cv::Scalar(0, 0, 255), 1, cv::LINE_AA);
-                        cv::putText(out_image, r_buf, cv::Point(hp_x + 8, hp_y + 38), cv::FONT_HERSHEY_SIMPLEX, 0.40, cv::Scalar(255, 150, 50), 1, cv::LINE_AA);
-                        cv::putText(out_image, y_buf, cv::Point(hp_x + 8, hp_y + 57), cv::FONT_HERSHEY_SIMPLEX, 0.40, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
+                        cv::putText(out_image, p_buf, cv::Point(text_x, text_y1), cv::FONT_HERSHEY_SIMPLEX, font_scale, cv::Scalar(0, 0, 255), font_thick, cv::LINE_AA);
+                        cv::putText(out_image, r_buf, cv::Point(text_x, text_y2), cv::FONT_HERSHEY_SIMPLEX, font_scale, cv::Scalar(255, 150, 50), font_thick, cv::LINE_AA);
+                        cv::putText(out_image, y_buf, cv::Point(text_x, text_y3), cv::FONT_HERSHEY_SIMPLEX, font_scale, cv::Scalar(0, 255, 0), font_thick, cv::LINE_AA);
                     } else {
-                        cv::putText(out_image, "Pitch: N/A", cv::Point(hp_x + 8, hp_y + 19), cv::FONT_HERSHEY_SIMPLEX, 0.40, cv::Scalar(150, 150, 150), 1, cv::LINE_AA);
-                        cv::putText(out_image, "Roll:  N/A", cv::Point(hp_x + 8, hp_y + 38), cv::FONT_HERSHEY_SIMPLEX, 0.40, cv::Scalar(150, 150, 150), 1, cv::LINE_AA);
-                        cv::putText(out_image, "Yaw:   N/A", cv::Point(hp_x + 8, hp_y + 57), cv::FONT_HERSHEY_SIMPLEX, 0.40, cv::Scalar(150, 150, 150), 1, cv::LINE_AA);
+                        cv::putText(out_image, "Pitch: N/A", cv::Point(text_x, text_y1), cv::FONT_HERSHEY_SIMPLEX, font_scale, cv::Scalar(150, 150, 150), font_thick, cv::LINE_AA);
+                        cv::putText(out_image, "Roll:  N/A", cv::Point(text_x, text_y2), cv::FONT_HERSHEY_SIMPLEX, font_scale, cv::Scalar(150, 150, 150), font_thick, cv::LINE_AA);
+                        cv::putText(out_image, "Yaw:   N/A", cv::Point(text_x, text_y3), cv::FONT_HERSHEY_SIMPLEX, font_scale, cv::Scalar(150, 150, 150), font_thick, cv::LINE_AA);
                     }
                 }
             }
 
             // Render readiness score changes graph at bottom-right (prevent overlapping with left panel)
             if ((_use_driver_readiness && _vis_driver_readiness) || (_use_driver_readiness_logical && _vis_driver_readiness_logical)) {
-                int max_graph_w = out_image.cols - (hp_x + hp_w + 20);
-                int graph_w = std::min(400, std::max(150, max_graph_w));
-                int graph_h = 65;
-                int graph_x = out_image.cols - graph_w - 10;
-                int graph_y = out_image.rows - graph_h - 10;
-                draw_readiness_graph(out_image, graph_x, graph_y, graph_w, graph_h);
+                int graph_h = hp_h;
+                int graph_y = out_image.rows - graph_h - margin_y;
+                int min_graph_w = static_cast<int>(std::round(150.0f * ui_scale));
+                int desired_graph_w = static_cast<int>(std::round(300.0f * ui_scale));
+                int max_graph_w = out_image.cols - (hp_x + hp_w + spacing + margin_x);
+                int graph_w = std::max(min_graph_w, std::min(desired_graph_w, max_graph_w));
+                int graph_x = out_image.cols - graph_w - margin_x;
+                draw_readiness_graph(out_image, graph_x, graph_y, graph_w, graph_h, ui_scale);
             }
 
             // Calculate FPS
@@ -1041,4 +1082,10 @@ void osm_monolithic_inference_v2::_inference_process() {
     }
 
     _worker_finished.store(true);
+    if (_use_offline_process) {
+        std::thread([]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            kill(getpid(), SIGINT);
+        }).detach();
+    }
 }
