@@ -22,8 +22,9 @@ namespace driver_readiness_logical {
         double score_steer_lw{0.0};
         double score_steer_rw{0.0};
         double score_lw_rw{0.0};
+        double score_gaze_out{0.0};
 
-        double raw_score{0.0};        // Instantaneous average of 5 scores [0.0 ~ 1.0]
+        double raw_score{0.0};        // Instantaneous average of 6 scores [0.0 ~ 1.0]
         double readiness_score{0.0};   // Moving-averaged readiness score [0.0 ~ 1.0]
         std::string category{"low"};  // "low", "moderate", "high"
         bool valid{false};
@@ -42,6 +43,7 @@ public:
         const driver_readiness_logical::GaussianParam& g_steer_lw,
         const driver_readiness_logical::GaussianParam& g_steer_rw,
         const driver_readiness_logical::GaussianParam& g_lw_rw,
+        const driver_readiness_logical::GaussianParam& g_gaze_out,
         size_t window_size = 30,
         double readiness_low = 0.2,
         double readiness_high = 0.6
@@ -51,7 +53,8 @@ public:
     driver_readiness_logical::LogicalReadinessResult process(
         const head_pose::PoseResult& pose_res,
         bool has_pose,
-        const std::vector<body_pose::PoseResult>& body_poses
+        const std::vector<body_pose::PoseResult>& body_poses,
+        float gaze_inout_score = 1.0f
     );
 
     // Draw logical readiness score panel on image
@@ -71,6 +74,7 @@ private:
     driver_readiness_logical::GaussianParam _g_steer_lw{200.0, 10000.0};
     driver_readiness_logical::GaussianParam _g_steer_rw{200.0, 10000.0};
     driver_readiness_logical::GaussianParam _g_lw_rw{300.0, 10000.0};
+    driver_readiness_logical::GaussianParam _g_gaze_out{1.0, 0.04};
 
     size_t _window_size{30};
     double _readiness_low{0.2};

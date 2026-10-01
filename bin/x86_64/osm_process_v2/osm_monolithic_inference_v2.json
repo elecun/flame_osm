@@ -6,8 +6,8 @@
         "offline_process":
         {
             "use":true,
-            "input_video":"/home/osm/dev/flame_osm/bin/video/sample_demo_0916.avi",
-            "save_as":"/home/osm/dev/flame_osm/bin/video/sample_demo_0916_processed.avi"
+            "input_video":"/home/osm/dev/flame_osm/bin/video/generated_scenario_sample_4_scaled.mp4",
+            "save_as":"/home/osm/dev/flame_osm/bin/video/generated_scenario_sample_4_scaled_processed.mp4"
         },
         "show_info": true,
         "vertical_flip": false,
@@ -36,6 +36,13 @@
             "vis_square_box": true,
             "vis_head_mesh": false
         },
+        "gaze_following":{
+            "use":true,
+            "visualize":true,
+            "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/gazelle_dinov2_vitb14_inout.torchscript",
+            "gpu_id": 0,
+            "inout_threshold":0.5
+        },
         "body_pose_estimation": {
             "use": true,
             "visualize": true,
@@ -61,9 +68,10 @@
             "gaussian_steer_lw_dist": [300.0, 10000.0],
             "gaussian_steer_rw_dist": [300.0, 10000.0],
             "gaussian_lw_rw_dist": [300.0, 10000.0],
+            "gaussian_gaze_out": [1.0, 0.04],
             "window_size": 30,
             "readiness_low": 0.2,
-            "readiness_high": 0.6
+            "readiness_high": 0.7
         },
         "blink_detection": {
             "use": false,

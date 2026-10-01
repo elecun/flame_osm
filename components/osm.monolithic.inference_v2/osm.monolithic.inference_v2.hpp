@@ -20,6 +20,7 @@
 #include <deque>
 #include <opencv2/opencv.hpp>
 #include "face_detection.hpp"
+#include "gaze_following.hpp"
 #include "blink_analysis.hpp"
 #include "face_analysis_e2e.hpp"
 #include "body_pose_estimation.hpp"
@@ -59,6 +60,7 @@ class osm_monolithic_inference_v2 : public flame::component::Object {
 
         /* Face Detector Instance (YOLO) */
         std::unique_ptr<face_detection> _face_detector;
+        std::unique_ptr<gaze_following_model> _gaze_follower;
 
         /* DAD-3DHeads E2E Face Analysis Instance */
         std::unique_ptr<face_analysis_e2e> _face_analyzer_e2e;
@@ -73,6 +75,7 @@ class osm_monolithic_inference_v2 : public flame::component::Object {
         /* Model Execution Flags */
         bool _use_face_det{true};
         bool _use_face_analysis_e2e{true};
+        bool _use_gaze_following{false};
         bool _use_body_pose{true};
         bool _use_driver_readiness{false};
         bool _use_driver_readiness_logical{true};
@@ -111,6 +114,8 @@ class osm_monolithic_inference_v2 : public flame::component::Object {
         /* Visualization Flags */
         bool _vis_face_det{true};
         bool _vis_face_analysis_e2e{true};
+        bool _vis_gaze_following{true};
+        float _gaze_inout_threshold{0.5f};
         bool _vis_landmarks_68{false};
         bool _vis_landmarks_191{true};
         bool _vis_head_pose{true};

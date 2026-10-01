@@ -155,6 +155,19 @@ bool osm_monolithic_inference_v2::onInit(){
             _vis_body_pose = bp_params.value("visualize", true);
         }
 
+        std::string gaze_model_path = "/home/iae-vc/dev/flame_osm/bin/x86_64/models/gazelle_dinov2_vitb14_inout.torchscript";
+        int gaze_gpu_id = 0;
+        if (parameters.contains("gaze_following")) {
+            const auto& gaze_params = parameters["gaze_following"];
+            _use_gaze_following = gaze_params.value("use", _use_gaze_following);
+            _vis_gaze_following = gaze_params.value("visualize", _vis_gaze_following);
+            gaze_model_path = resolve_path(gaze_params.value("model_path", gaze_model_path));
+            gaze_gpu_id = gaze_params.value("gpu_id", gaze_gpu_id);
+            _gaze_inout_threshold = gaze_params.value("inout_threshold", _gaze_inout_threshold);
+            logger::info("[{}] Gaze following configured: model={}, gpu={}, inout_threshold={:.2f}",
+                         getName(), gaze_model_path, gaze_gpu_id, _gaze_inout_threshold);
+        }
+
         std::string readiness_model_path = "/home/iae-vc/dev/flame_osm/bin/x86_64/models/iae_dms_251212.torchscript";
         int readiness_gpu_id = 1;
         float dr_threshold = 0.5f;
@@ -179,6 +192,7 @@ bool osm_monolithic_inference_v2::onInit(){
         driver_readiness_logical::GaussianParam g_steer_lw{200.0, 10000.0};
         driver_readiness_logical::GaussianParam g_steer_rw{200.0, 10000.0};
         driver_readiness_logical::GaussianParam g_lw_rw{300.0, 10000.0};
+        driver_readiness_logical::GaussianParam g_gaze_out{1.0, 0.04};
         size_t drl_window_size = 30;
         double drl_readiness_low = 1.0;
         double drl_readiness_high = 3.0;
@@ -212,6 +226,9 @@ bool osm_monolithic_inference_v2::onInit(){
 
             auto p_lw_rw = parse_vec2(drl_params, "gaussian_lw_rw_dist", 300.0, 10000.0);
             g_lw_rw = { p_lw_rw.first, p_lw_rw.second };
+
+            auto p_gaze_out = parse_vec2(drl_params, "gaussian_gaze_out", 1.0, 0.04);
+            g_gaze_out = { p_gaze_out.first, p_gaze_out.second };
 
             drl_window_size = drl_params.value("window_size", 30);
             drl_readiness_low = drl_params.value("readiness_low", 0.2);
@@ -274,6 +291,14 @@ bool osm_monolithic_inference_v2::onInit(){
             }
         }
 
+        if (_use_gaze_following) {
+            _gaze_follower = std::make_unique<gaze_following_model>();
+            if (!_gaze_follower->loadModel(gaze_model_path, gaze_gpu_id)) {
+                logger::error("[{}] Failed to load Gazelle gaze following model: {}", getName(), gaze_model_path);
+                return false;
+            }
+        }
+
         /* Initialize Body Pose Estimator */
         if (_use_body_pose) {
             _body_pose_estimator = std::make_unique<body_pose_estimation>();
@@ -296,7 +321,7 @@ bool osm_monolithic_inference_v2::onInit(){
         if (_use_driver_readiness_logical) {
             _driver_readiness_logical_estimator = std::make_unique<driver_readiness_estimation_logical>();
             _driver_readiness_logical_estimator->setParameters(
-                steer_ref, g_yaw, g_pitch, g_steer_lw, g_steer_rw, g_lw_rw,
+                steer_ref, g_yaw, g_pitch, g_steer_lw, g_steer_rw, g_lw_rw, g_gaze_out,
                 drl_window_size, drl_readiness_low, drl_readiness_high
             );
         }
@@ -364,6 +389,10 @@ void osm_monolithic_inference_v2::onClose(){
     if (_face_analyzer_e2e) {
         _face_analyzer_e2e.reset();
         logger::info("[{}] Face analyzer E2E instance successfully released", getName());
+    }
+    if (_gaze_follower) {
+        _gaze_follower.reset();
+        logger::info("[{}] Gaze follower instance successfully released", getName());
     }
 
     if (_body_pose_estimator) {
@@ -697,6 +726,15 @@ void osm_monolithic_inference_v2::_inference_process() {
                 bboxes.push_back(f.bbox);
             }
 
+            /* 1.5 Run Gazelle gaze following using YOLO padded square face boxes. */
+            double gaze_ms = 0.0;
+            gaze_following::Result gaze_res;
+            if (_use_gaze_following && _gaze_follower && !bboxes.empty()) {
+                auto t_gaze_start = std::chrono::high_resolution_clock::now();
+                gaze_res = _gaze_follower->process(image, bboxes, _gaze_inout_threshold);
+                gaze_ms = std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - t_gaze_start).count();
+            }
+
             /* 2. Run DAD-3DHeads E2E Face Analysis (End-to-End FLAME 3DMM + 68/191 Landmarks + 3D Pose) */
             double fa_ms = 0.0;
             std::vector<face_analysis::FaceAnalysisResult> face_results;
@@ -841,6 +879,18 @@ void osm_monolithic_inference_v2::_inference_process() {
                 }
             }
 
+            // Gazelle targets are normalized, so draw after output resolution has been selected.
+            if (_use_gaze_following && _vis_gaze_following && gaze_res.valid) {
+                gaze_following::Result scaled_gaze = gaze_res;
+                for (auto& person : scaled_gaze.people) {
+                    person.face_bbox.x = static_cast<int>(person.face_bbox.x * scale_x);
+                    person.face_bbox.y = static_cast<int>(person.face_bbox.y * scale_y);
+                    person.face_bbox.width = static_cast<int>(person.face_bbox.width * scale_x);
+                    person.face_bbox.height = static_cast<int>(person.face_bbox.height * scale_y);
+                }
+                gaze_following_model::drawResult(out_image, scaled_gaze);
+            }
+
             // Visualize Body Pose
             if (_use_body_pose && _vis_body_pose && !poses.empty()) {
                 static const std::vector<std::pair<int, int>> skeleton_pairs = {
@@ -898,7 +948,9 @@ void osm_monolithic_inference_v2::_inference_process() {
             /* 6. Run Driver Readiness Estimation (Rule-based Logical, if enabled) */
             driver_readiness_logical::LogicalReadinessResult logical_res;
             if (_use_driver_readiness_logical && _driver_readiness_logical_estimator) {
-                logical_res = _driver_readiness_logical_estimator->process(last_pose, has_pose, poses);
+                const float gaze_inout_score = (gaze_res.valid && !gaze_res.people.empty())
+                    ? gaze_res.people.front().inout_score : 1.0f;
+                logical_res = _driver_readiness_logical_estimator->process(last_pose, has_pose, poses, gaze_inout_score);
                 if (logical_res.valid) {
                     std::lock_guard<std::mutex> lock(_history_mutex);
                     _readiness_history.push_back({std::chrono::steady_clock::now(), logical_res.readiness_score});
@@ -956,6 +1008,26 @@ void osm_monolithic_inference_v2::_inference_process() {
                 }
             }
 
+            // Render in/out status directly above the head-pose panel with the same width.
+            if (_use_gaze_following && _vis_gaze_following) {
+                const int gaze_h = std::max(1, static_cast<int>(std::round(24.0f * ui_scale)));
+                const int gaze_y = hp_y - spacing - gaze_h;
+                if (gaze_y >= 0 && hp_x + hp_w <= out_image.cols) {
+                    cv::Rect gaze_rect(hp_x, gaze_y, hp_w, gaze_h);
+                    cv::Mat overlay = out_image.clone();
+                    cv::rectangle(overlay, gaze_rect, cv::Scalar(20, 20, 20), cv::FILLED);
+                    cv::addWeighted(overlay, 0.6, out_image, 0.4, 0, out_image);
+                    const bool has_gaze = gaze_res.valid && !gaze_res.people.empty();
+                    const bool gaze_in = has_gaze && gaze_res.people.front().is_in_frame;
+                    const float gaze_score = has_gaze ? gaze_res.people.front().inout_score : 0.0f;
+                    const cv::Scalar color = !has_gaze ? cv::Scalar(150, 150, 150) : (gaze_in ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 0, 255));
+                    cv::rectangle(out_image, gaze_rect, color, std::max(1, static_cast<int>(std::round(ui_scale))));
+                    const std::string text = has_gaze ? cv::format("Gaze: %s (%.2f)", gaze_in ? "IN" : "OUT", gaze_score) : "Gaze: N/A";
+                    cv::putText(out_image, text, cv::Point(hp_x + static_cast<int>(8 * ui_scale), gaze_y + static_cast<int>(17 * ui_scale)),
+                                cv::FONT_HERSHEY_SIMPLEX, 0.40 * ui_scale, color, std::max(1, static_cast<int>(std::round(ui_scale))), cv::LINE_AA);
+                }
+            }
+
             // Render readiness score changes graph at bottom-right (prevent overlapping with left panel)
             if ((_use_driver_readiness && _vis_driver_readiness) || (_use_driver_readiness_logical && _vis_driver_readiness_logical)) {
                 int graph_h = hp_h;
@@ -966,6 +1038,42 @@ void osm_monolithic_inference_v2::_inference_process() {
                 int graph_w = std::max(min_graph_w, std::min(desired_graph_w, max_graph_w));
                 int graph_x = out_image.cols - graph_w - margin_x;
                 draw_readiness_graph(out_image, graph_x, graph_y, graph_w, graph_h, ui_scale);
+
+                // The larger eye region provides the most stable EAR measurement.
+                if (face_res.valid && face_res.landmarks_68.size() >= 48) {
+                    auto eye_rect = [](const std::vector<cv::Point2f>& landmarks, int first) {
+                        std::vector<cv::Point2f> pts(landmarks.begin() + first, landmarks.begin() + first + 6);
+                        return cv::boundingRect(pts);
+                    };
+                    auto ear = [](const std::vector<cv::Point2f>& lm, int first) {
+                        const auto dist = [](const cv::Point2f& a, const cv::Point2f& b) { return cv::norm(a - b); };
+                        const float horizontal = dist(lm[first], lm[first + 3]);
+                        return horizontal > 1e-4f ? (dist(lm[first + 1], lm[first + 5]) + dist(lm[first + 2], lm[first + 4])) / (2.0f * horizontal) : 0.0f;
+                    };
+                    cv::Rect right_eye = eye_rect(face_res.landmarks_68, 36);
+                    cv::Rect left_eye = eye_rect(face_res.landmarks_68, 42);
+                    const bool use_first_eye = right_eye.area() >= left_eye.area();
+                    const cv::Rect selected = use_first_eye ? right_eye : left_eye;
+                    const int landmark_first = use_first_eye ? 36 : 42;
+                    // Image-left eye belongs to the person's right eye when facing the camera.
+                    const float selected_center_x = selected.x + selected.width * 0.5f;
+                    const float other_center_x = (use_first_eye ? left_eye : right_eye).x + (use_first_eye ? left_eye : right_eye).width * 0.5f;
+                    const char* person_eye = selected_center_x < other_center_x ? "R" : "L";
+                    const int ear_panel_h = std::max(1, static_cast<int>(std::round(24.0f * ui_scale)));
+                    const int gaze_panel_h = std::max(1, static_cast<int>(std::round(24.0f * ui_scale)));
+                    const int ear_panel_y = hp_y - spacing - gaze_panel_h - spacing - ear_panel_h;
+                    if (ear_panel_y >= 0 && hp_x + hp_w <= out_image.cols) {
+                        cv::Rect panel(hp_x, ear_panel_y, hp_w, ear_panel_h);
+                        cv::Mat overlay = out_image.clone();
+                        cv::rectangle(overlay, panel, cv::Scalar(20, 20, 20), cv::FILLED);
+                        cv::addWeighted(overlay, 0.6, out_image, 0.4, 0, out_image);
+                        cv::rectangle(out_image, panel, cv::Scalar(0, 255, 255), std::max(1, static_cast<int>(std::round(ui_scale))));
+                        const float selected_ear = ear(face_res.landmarks_68, landmark_first);
+                        cv::putText(out_image, cv::format("(%s)  EAR: %.3f", person_eye, selected_ear),
+                                    cv::Point(panel.x + static_cast<int>(8 * ui_scale), ear_panel_y + static_cast<int>(17 * ui_scale)),
+                                    cv::FONT_HERSHEY_SIMPLEX, 0.40 * ui_scale, cv::Scalar(0, 255, 255), std::max(1, static_cast<int>(std::round(ui_scale))), cv::LINE_AA);
+                    }
+                }
             }
 
             // Calculate FPS
@@ -1053,9 +1161,9 @@ void osm_monolithic_inference_v2::_inference_process() {
                 std::chrono::high_resolution_clock::now() - t_frame_start).count();
 
             if (!bboxes.empty() && face_res.valid) {
-                logger::info("[{}] [Frame #{}] Total: {:.1f}ms ({:.1f} FPS) | Det: {:.1f}ms ({} faces) | E2E: {:.1f}ms [P:{:.1f}, Y:{:.1f}, R:{:.1f}] | Blink: {:.1f}ms [prob:{:.2f}, blinks:{}, perclos:{:.2f}] | Pose: {:.1f}ms",
+                logger::info("[{}] [Frame #{}] Total: {:.1f}ms ({:.1f} FPS) | Det: {:.1f}ms ({} faces) | Gaze: {:.1f}ms | E2E: {:.1f}ms [P:{:.1f}, Y:{:.1f}, R:{:.1f}] | Blink: {:.1f}ms [prob:{:.2f}, blinks:{}, perclos:{:.2f}] | Pose: {:.1f}ms",
                              getName(), frame_count, total_frame_ms, fps,
-                             det_ms, bboxes.size(),
+                             det_ms, bboxes.size(), gaze_ms,
                              fa_ms, last_pose.euler[0], last_pose.euler[1], last_pose.euler[2],
                              blink_ms, blink_res.blink_prob, blink_res.blink_count, blink_res.perclos,
                              pose_ms);

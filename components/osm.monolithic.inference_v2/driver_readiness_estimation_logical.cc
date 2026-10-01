@@ -18,6 +18,7 @@ void driver_readiness_estimation_logical::setParameters(
     const driver_readiness_logical::GaussianParam& g_steer_lw,
     const driver_readiness_logical::GaussianParam& g_steer_rw,
     const driver_readiness_logical::GaussianParam& g_lw_rw,
+    const driver_readiness_logical::GaussianParam& g_gaze_out,
     size_t window_size,
     double readiness_low,
     double readiness_high
@@ -28,6 +29,7 @@ void driver_readiness_estimation_logical::setParameters(
     _g_steer_lw = g_steer_lw;
     _g_steer_rw = g_steer_rw;
     _g_lw_rw = g_lw_rw;
+    _g_gaze_out = g_gaze_out;
     _window_size = (window_size > 0) ? window_size : 30;
     _readiness_low = readiness_low;
     _readiness_high = readiness_high;
@@ -36,11 +38,11 @@ void driver_readiness_estimation_logical::setParameters(
 
     logger::info("[driver_readiness_logical] Parameters configured: steer_ref=({:.1f}, {:.1f}), "
                  "yaw[mean={:.1f}, var={:.1f}], pitch[mean={:.1f}, var={:.1f}], "
-                 "steer_lw[mean={:.1f}, var={:.1f}], steer_rw[mean={:.1f}, var={:.1f}], lw_rw[mean={:.1f}, var={:.1f}], "
+                 "steer_lw[mean={:.1f}, var={:.1f}], steer_rw[mean={:.1f}, var={:.1f}], lw_rw[mean={:.1f}, var={:.1f}], gaze_out[mean={:.2f}, var={:.3f}], "
                  "window_size={}, thresholds=[low:{:.2f}, high:{:.2f}]",
                  _steer_ref.x, _steer_ref.y,
                  _g_yaw.mean, _g_yaw.var, _g_pitch.mean, _g_pitch.var,
-                 _g_steer_lw.mean, _g_steer_lw.var, _g_steer_rw.mean, _g_steer_rw.var, _g_lw_rw.mean, _g_lw_rw.var,
+                 _g_steer_lw.mean, _g_steer_lw.var, _g_steer_rw.mean, _g_steer_rw.var, _g_lw_rw.mean, _g_lw_rw.var, _g_gaze_out.mean, _g_gaze_out.var,
                  _window_size, _readiness_low, _readiness_high);
 }
 
@@ -62,7 +64,8 @@ double driver_readiness_estimation_logical::computeAngleGaussian(double angle, d
 driver_readiness_logical::LogicalReadinessResult driver_readiness_estimation_logical::process(
     const head_pose::PoseResult& pose_res,
     bool has_pose,
-    const std::vector<body_pose::PoseResult>& body_poses
+    const std::vector<body_pose::PoseResult>& body_poses,
+    float gaze_inout_score
 ) {
     driver_readiness_logical::LogicalReadinessResult result;
 
@@ -121,11 +124,17 @@ driver_readiness_logical::LogicalReadinessResult driver_readiness_estimation_log
         result.score_lw_rw = 0.0;
     }
 
-    // 3. Raw readiness score: average of 5 unnormalized Gaussian scores [0.0 ~ 1.0]
-    result.raw_score = (result.score_yaw + result.score_pitch +
-                        result.score_steer_lw + result.score_steer_rw + result.score_lw_rw) / 5.0;
+    // 3. Gaze OUT score. A Gazelle failure is represented by inout_score=1.0,
+    // which intentionally produces no positive readiness contribution.
+    const double gaze_out = 1.0 - std::clamp(static_cast<double>(gaze_inout_score), 0.0, 1.0);
+    result.score_gaze_out = computeGaussian(gaze_out, _g_gaze_out.mean, _g_gaze_out.var);
 
-    // 4. Moving window average
+    // 4. Raw readiness score: equal-weight average of six Gaussian scores.
+    result.raw_score = (result.score_yaw + result.score_pitch +
+                        result.score_steer_lw + result.score_steer_rw + result.score_lw_rw +
+                        result.score_gaze_out) / 6.0;
+
+    // 5. Moving window average
     _score_window.push_back(result.raw_score);
     if (_score_window.size() > _window_size) {
         _score_window.pop_front();
@@ -135,7 +144,7 @@ driver_readiness_logical::LogicalReadinessResult driver_readiness_estimation_log
     result.readiness_score = _score_window.empty() ? 0.0 : (sum / _score_window.size());
     result.valid = true;
 
-    // 5. Categorization based on window-averaged score
+    // 6. Categorization based on window-averaged score
     // < readiness_low -> "low"
     // [readiness_low, readiness_high] -> "moderate"
     // > readiness_high -> "high"
@@ -193,4 +202,3 @@ void driver_readiness_estimation_logical::drawResult(
 
     cv::putText(image, text, cv::Point(pos_x, pos_y), font_face, font_scale, color, thickness, cv::LINE_AA);
 }
-
