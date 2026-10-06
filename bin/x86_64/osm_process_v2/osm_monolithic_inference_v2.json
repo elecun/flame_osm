@@ -6,8 +6,8 @@
         "offline_process":
         {
             "use":true,
-            "input_video":"/home/osm/dev/flame_osm/bin/video/generated_scenario_sample_4_scaled.mp4",
-            "save_as":"/home/osm/dev/flame_osm/bin/video/generated_scenario_sample_4_scaled_processed.mp4"
+            "input_video":"/home/iae-vc/dev/flame_osm/bin/video/generated_scenario_sample_1_scaled.mp4",
+            "save_as":"/home/iae-vc/dev/flame_osm/bin/video/generated_scenario_sample_1_scaled_processed.mp4"
         },
         "show_info": true,
         "vertical_flip": false,
@@ -19,7 +19,7 @@
             "poi": [640, 560],
             "poi_dist": 350.0,
             "poi_visualize": true,
-            "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/yolo11n-face.torchscript",
+            "model_path": "/home/iae-vc/dev/flame_osm/bin/x86_64/models/yolo11n-face.torchscript",
             "gpu_id": 0,
             "conf": 0.7,
             "nms": 0.45,
@@ -28,7 +28,7 @@
         "face_analysis_e2e": {
             "use": true,
             "visualize": true,
-            "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/dad_3dheads_e2e.torchscript",
+            "model_path": "/home/iae-vc/dev/flame_osm/bin/x86_64/models/dad_3dheads_e2e.torchscript",
             "gpu_id": 0,
             "vis_landmarks_68": false,
             "vis_landmarks_191": true,
@@ -39,20 +39,20 @@
         "gaze_following":{
             "use":true,
             "visualize":true,
-            "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/gazelle_dinov2_vitb14_inout.torchscript",
+            "model_path": "/home/iae-vc/dev/flame_osm/bin/x86_64/models/gazelle_dinov2_vitb14_inout.torchscript",
             "gpu_id": 0,
             "inout_threshold":0.5
         },
         "body_pose_estimation": {
             "use": true,
             "visualize": true,
-            "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/yolo26m-pose.torchscript",
+            "model_path": "/home/iae-vc/dev/flame_osm/bin/x86_64/models/yolo26m-pose.torchscript",
             "gpu_id": 0
         },
         "driver_readiness_estimation": {
             "use": false,
             "visualize": true,
-            "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/iae_dms_251212.torchscript",
+            "model_path": "/home/iae-vc/dev/flame_osm/bin/x86_64/models/iae_dms_251212.torchscript",
             "gpu_id": 1,
             "threshold": 0.5,
             "readiness_low": 0.2,
@@ -74,14 +74,15 @@
             "readiness_high": 0.7
         },
         "blink_detection": {
-            "use": false,
+            "use": true,
             "visualize": true,
-            "model_path": "/home/osm/dev/flame_osm/bin/x86_64/models/blinklinmult-union.torchscript",
-            "gpu_id": 1,
-            "seq_len": 15,
-            "crop_width": 64,
-            "crop_height": 64,
-            "threshold": 0.5
+            "model_type": "ocec",
+            "model_path": "/home/iae-vc/dev/flame_osm/bin/x86_64/models/ocec_l.torchscript",
+            "gpu_id": 0,
+            "target_eye": "left",
+            "bbox_scale": 1.10,
+            "threshold_open": 0.3,
+            "threshold_close": 0.1
         }
     },
     "dataport": {

@@ -769,7 +769,7 @@ void osm_monolithic_inference_v2::_inference_process() {
                 }
                 int64_t ts = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::system_clock::now().time_since_epoch()).count();
-                blink_res = _blink_analyzer->process(image, bboxes[0], euler, ear, ts);
+                blink_res = _blink_analyzer->process(image, bboxes[0], euler, ear, ts, face_res.landmarks_68);
                 blink_ms = std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - t_blink_start).count();
             }
 
@@ -924,16 +924,6 @@ void osm_monolithic_inference_v2::_inference_process() {
                 }
             }
 
-            // Visualize Blink Detection Results
-            if (_use_blink_detection && _vis_blink_detection && _blink_analyzer && !bboxes.empty()) {
-                cv::Rect scaled_face(
-                    static_cast<int>(bboxes[0].x * scale_x),
-                    static_cast<int>(bboxes[0].y * scale_y),
-                    static_cast<int>(bboxes[0].width * scale_x),
-                    static_cast<int>(bboxes[0].height * scale_y)
-                );
-                _blink_analyzer->drawResult(out_image, scaled_face, blink_res);
-            }
 
             /* 5. Run Driver Readiness Estimation (Torch-based, if enabled) */
             driver_readiness::ReadinessResult readiness_res;
@@ -1029,14 +1019,15 @@ void osm_monolithic_inference_v2::_inference_process() {
             }
 
             // Render readiness score changes graph at bottom-right (prevent overlapping with left panel)
+            int graph_h = hp_h;
+            int graph_y = out_image.rows - graph_h - margin_y;
+            int min_graph_w = static_cast<int>(std::round(150.0f * ui_scale));
+            int desired_graph_w = static_cast<int>(std::round(300.0f * ui_scale));
+            int max_graph_w = out_image.cols - (hp_x + hp_w + spacing + margin_x);
+            int graph_w = std::max(min_graph_w, std::min(desired_graph_w, max_graph_w));
+            int graph_x = out_image.cols - graph_w - margin_x;
+
             if ((_use_driver_readiness && _vis_driver_readiness) || (_use_driver_readiness_logical && _vis_driver_readiness_logical)) {
-                int graph_h = hp_h;
-                int graph_y = out_image.rows - graph_h - margin_y;
-                int min_graph_w = static_cast<int>(std::round(150.0f * ui_scale));
-                int desired_graph_w = static_cast<int>(std::round(300.0f * ui_scale));
-                int max_graph_w = out_image.cols - (hp_x + hp_w + spacing + margin_x);
-                int graph_w = std::max(min_graph_w, std::min(desired_graph_w, max_graph_w));
-                int graph_x = out_image.cols - graph_w - margin_x;
                 draw_readiness_graph(out_image, graph_x, graph_y, graph_w, graph_h, ui_scale);
 
                 // The larger eye region provides the most stable EAR measurement.
@@ -1074,6 +1065,18 @@ void osm_monolithic_inference_v2::_inference_process() {
                                     cv::FONT_HERSHEY_SIMPLEX, 0.40 * ui_scale, cv::Scalar(0, 255, 255), std::max(1, static_cast<int>(std::round(ui_scale))), cv::LINE_AA);
                     }
                 }
+            }
+
+            // Visualize Blink Detection (Eye white bounding box + OCEC panel above readiness box)
+            if (_use_blink_detection && _vis_blink_detection && _blink_analyzer && !bboxes.empty()) {
+                cv::Rect scaled_face(
+                    static_cast<int>(bboxes[0].x * scale_x),
+                    static_cast<int>(bboxes[0].y * scale_y),
+                    static_cast<int>(bboxes[0].width * scale_x),
+                    static_cast<int>(bboxes[0].height * scale_y)
+                );
+                _blink_analyzer->drawResult(out_image, scaled_face, blink_res, scale_x, scale_y,
+                                            graph_x, graph_y, graph_w, graph_h, ui_scale, spacing, margin_x);
             }
 
             // Calculate FPS
@@ -1141,6 +1144,7 @@ void osm_monolithic_inference_v2::_inference_process() {
                     tag["blink_is_blinking"] = blink_res.is_blinking;
                     tag["blink_count"] = blink_res.blink_count;
                     tag["blink_perclos"] = blink_res.perclos;
+                    tag["blink_prob_open"] = blink_res.prob_open;
                 }
 
                 /* 9. Send multipart message */
