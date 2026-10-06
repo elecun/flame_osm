@@ -1,0 +1,445 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>OperatorWindow</class>
+ <widget class="QMainWindow" name="OperatorWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1160</width>
+    <height>860</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Simulator Monitor - Operator Control</string>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">
+    QMainWindow { background-color: #1a1a20; color: #f0f0f0; }
+    QLabel { color: #dcdce6; font-size: 13px; }
+    QGroupBox { font-weight: bold; border: 1px solid #3c3c46; border-radius: 6px; margin-top: 10px; padding: 12px; background-color: #24242e; color: #f0f0f0; }
+    QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
+    QLineEdit { background-color: #16161c; border: 1px solid #4a4a58; border-radius: 4px; padding: 6px 10px; color: #ffffff; font-size: 13px; }
+    QLineEdit:focus { border: 1px solid #007acc; }
+    QComboBox { background-color: #16161c; border: 1px solid #4a4a58; border-radius: 4px; padding: 6px 10px; color: #ffffff; font-size: 13px; }
+    QComboBox:focus { border: 1px solid #007acc; }
+    QComboBox QAbstractItemView { background-color: #24242e; color: #ffffff; selection-background-color: #007acc; }
+    QCheckBox { color: #dcdce6; font-size: 13px; font-weight: bold; spacing: 6px; }
+    QPushButton { background-color: #383844; color: #ffffff; border: 1px solid #545464; border-radius: 4px; padding: 8px 16px; font-weight: bold; font-size: 13px; }
+    QPushButton:hover { background-color: #4a4a58; }
+    QPushButton:pressed { background-color: #2a2a34; }
+    QPushButton:disabled { background-color: #262630; color: #666674; border-color: #363644; }
+   </string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="mainVerticalLayout">
+    <property name="spacing">
+     <number>10</number>
+    </property>
+    <property name="leftMargin">
+     <number>14</number>
+    </property>
+    <property name="topMargin">
+     <number>14</number>
+    </property>
+    <property name="rightMargin">
+     <number>14</number>
+    </property>
+    <property name="bottomMargin">
+     <number>14</number>
+    </property>
+    <item>
+     <widget class="QGroupBox" name="grpCameraViews">
+      <property name="title">
+       <string>Camera Real-Time Monitor (Up to 4 Streams)</string>
+      </property>
+      <layout class="QGridLayout" name="gridCamerasLayout">
+       <property name="spacing">
+        <number>8</number>
+       </property>
+       <item row="0" column="0">
+        <widget class="QLabel" name="label_cam_0">
+         <property name="minimumSize">
+          <size>
+           <width>400</width>
+           <height>250</height>
+          </size>
+         </property>
+         <property name="styleSheet">
+          <string notr="true">background-color: #0c0c10; border: 2px solid #2e2e38; border-radius: 6px;</string>
+         </property>
+         <property name="text">
+          <string>no camera</string>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
+        </widget>
+       </item>
+       <item row="0" column="1">
+        <widget class="QLabel" name="label_cam_1">
+         <property name="minimumSize">
+          <size>
+           <width>400</width>
+           <height>250</height>
+          </size>
+         </property>
+         <property name="styleSheet">
+          <string notr="true">background-color: #0c0c10; border: 2px solid #2e2e38; border-radius: 6px;</string>
+         </property>
+         <property name="text">
+          <string>no camera</string>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
+        </widget>
+       </item>
+       <item row="1" column="0">
+        <widget class="QLabel" name="label_cam_2">
+         <property name="minimumSize">
+          <size>
+           <width>400</width>
+           <height>250</height>
+          </size>
+         </property>
+         <property name="styleSheet">
+          <string notr="true">background-color: #0c0c10; border: 2px solid #2e2e38; border-radius: 6px;</string>
+         </property>
+         <property name="text">
+          <string>no camera</string>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
+        </widget>
+       </item>
+       <item row="1" column="1">
+        <widget class="QLabel" name="label_cam_3">
+         <property name="minimumSize">
+          <size>
+           <width>400</width>
+           <height>250</height>
+          </size>
+         </property>
+         <property name="styleSheet">
+          <string notr="true">background-color: #0c0c10; border: 2px solid #2e2e38; border-radius: 6px;</string>
+         </property>
+         <property name="text">
+          <string>no camera</string>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignCenter</set>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item>
+     <widget class="QGroupBox" name="grpControls">
+      <property name="title">
+       <string>Experimental Controls &amp; Status</string>
+      </property>
+      <layout class="QVBoxLayout" name="controlsMainLayout">
+       <property name="spacing">
+        <number>10</number>
+       </property>
+       <item>
+        <layout class="QHBoxLayout" name="topControlsLayout">
+         <property name="spacing">
+          <number>16</number>
+         </property>
+         <item>
+          <layout class="QVBoxLayout" name="vboxSubject">
+           <item>
+            <widget class="QLabel" name="lblSubject">
+             <property name="text">
+              <string>Subject Name:</string>
+             </property>
+             <property name="font">
+              <font>
+               <bold>true</bold>
+              </font>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLineEdit" name="edit_subject_name">
+             <property name="minimumSize">
+              <size>
+               <width>160</width>
+               <height>34</height>
+              </size>
+             </property>
+             <property name="placeholderText">
+              <string>e.g. subject_01</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+         <item>
+          <layout class="QVBoxLayout" name="vboxScenario">
+           <item>
+            <widget class="QLabel" name="lblScenario">
+             <property name="text">
+              <string>Scenario Selection:</string>
+             </property>
+             <property name="font">
+              <font>
+               <bold>true</bold>
+              </font>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QComboBox" name="combo_scenario">
+             <property name="minimumSize">
+              <size>
+               <width>190</width>
+               <height>34</height>
+              </size>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+         <item>
+          <layout class="QVBoxLayout" name="vboxSwitch">
+           <item>
+            <widget class="QLabel" name="lblSwitchTitle">
+             <property name="text">
+              <string>Handle Switch (CH 0):</string>
+             </property>
+             <property name="font">
+              <font>
+               <bold>true</bold>
+              </font>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLabel" name="label_switch_status">
+             <property name="minimumSize">
+              <size>
+               <width>130</width>
+               <height>34</height>
+              </size>
+             </property>
+             <property name="styleSheet">
+              <string notr="true">background-color: #2b2b35; color: #a4a4b4; border: 2px solid #444455; border-radius: 5px; font-size: 13px; font-weight: bold; padding: 2px;</string>
+             </property>
+             <property name="text">
+              <string>idle</string>
+             </property>
+             <property name="alignment">
+              <set>Qt::AlignCenter</set>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+         <item>
+          <layout class="QVBoxLayout" name="vboxEyeTracker">
+           <item>
+            <widget class="QLabel" name="lblEyeTrackerTitle">
+             <property name="text">
+              <string>Pupil Labs Neon Tracker:</string>
+             </property>
+             <property name="font">
+              <font>
+               <bold>true</bold>
+              </font>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLabel" name="label_eyetracker_status">
+             <property name="minimumSize">
+              <size>
+               <width>180</width>
+               <height>34</height>
+              </size>
+             </property>
+             <property name="styleSheet">
+              <string notr="true">background-color: #2b2b35; color: #f0ad4e; border: 1px solid #555566; border-radius: 5px; font-size: 12px; font-weight: bold; padding: 2px 6px;</string>
+             </property>
+             <property name="text">
+              <string>Neon: Searching...</string>
+             </property>
+             <property name="alignment">
+              <set>Qt::AlignCenter</set>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+         <item>
+          <layout class="QVBoxLayout" name="vboxExpState">
+           <item>
+            <widget class="QLabel" name="lblExpState">
+             <property name="text">
+              <string>Experiment State:</string>
+             </property>
+             <property name="font">
+              <font>
+               <bold>true</bold>
+              </font>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLabel" name="label_rec_state">
+             <property name="minimumSize">
+              <size>
+               <width>110</width>
+               <height>34</height>
+              </size>
+             </property>
+             <property name="styleSheet">
+              <string notr="true">background-color: #282832; color: #9090a0; border: 1px solid #444452; border-radius: 5px; font-size: 13px; font-weight: bold;</string>
+             </property>
+             <property name="text">
+              <string>IDLE</string>
+             </property>
+             <property name="alignment">
+              <set>Qt::AlignCenter</set>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+         <item>
+          <spacer name="horizontalSpacerTop">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>20</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="bottomControlsLayout">
+         <property name="spacing">
+          <number>14</number>
+         </property>
+         <item>
+          <widget class="QCheckBox" name="check_sound_feedback">
+           <property name="text">
+            <string>Sound Feedback on Switch</string>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btn_toggle_subject_fullscreen">
+           <property name="minimumSize">
+            <size>
+             <width>180</width>
+             <height>34</height>
+            </size>
+           </property>
+           <property name="text">
+            <string>Subject Fullscreen (F11)</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btn_mock_switch">
+           <property name="minimumSize">
+            <size>
+             <width>130</width>
+             <height>34</height>
+            </size>
+           </property>
+           <property name="text">
+            <string>Test Switch</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="horizontalSpacerBottom">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+         <item>
+          <layout class="QHBoxLayout" name="hboxStartStop">
+           <property name="spacing">
+            <number>10</number>
+           </property>
+           <item>
+            <widget class="QPushButton" name="btn_start">
+             <property name="minimumSize">
+              <size>
+               <width>120</width>
+               <height>44</height>
+              </size>
+             </property>
+             <property name="styleSheet">
+              <string notr="true">background-color: #1e7e34; color: #ffffff; border: 1px solid #28a745; border-radius: 5px; font-size: 15px; font-weight: bold;</string>
+             </property>
+             <property name="text">
+              <string>START</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="btn_stop">
+             <property name="enabled">
+              <bool>false</bool>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>120</width>
+               <height>44</height>
+              </size>
+             </property>
+             <property name="styleSheet">
+              <string notr="true">background-color: #bd2130; color: #ffffff; border: 1px solid #dc3545; border-radius: 5px; font-size: 15px; font-weight: bold;</string>
+             </property>
+             <property name="text">
+              <string>STOP</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item>
+     <widget class="QLabel" name="label_session_info">
+      <property name="styleSheet">
+       <string notr="true">color: #9292a4; font-size: 12px; padding: 2px;</string>
+      </property>
+      <property name="text">
+       <string>Status: Standby | Ready for experiment</string>
+      </property>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

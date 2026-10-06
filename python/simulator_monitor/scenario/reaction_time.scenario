@@ -1,0 +1,10 @@
+# Reaction Time Test Scenario
+# Displays fixation cross followed by visual cue to press the switch
+
+2.0, blank
+3.0, cross, size=60, thickness=3, color=255,255,255
+4.0, circle, radius=80, thickness=-1, color=0,255,0
+2.0, blank
+3.0, cross, size=60, thickness=3, color=255,255,255
+4.0, circle, radius=80, thickness=-1, color=0,0,255
+2.0, blank

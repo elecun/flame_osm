@@ -1,0 +1,13 @@
+# Simulator Stimulus Scenario File (.scenario)
+# Format: duration_sec, type, key=value, ...
+# Types: blank, cross, text, circle, rectangle, image
+# Colors are specified in B,G,R (0-255)
+
+3.0, blank
+3.0, cross, size=60, thickness=4, color=0,255,0
+4.0, text, message=Preparing Test - Keep Eyes on Center, scale=1.6, thickness=2, color=255,255,255
+3.0, circle, radius=70, thickness=-1, color=0,0,255
+2.0, blank
+4.0, cross, size=50, thickness=3, color=255,255,255
+5.0, text, message=Stimulus Active - Press Handle Switch, scale=1.5, thickness=2, color=0,255,255
+3.0, blank
