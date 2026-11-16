@@ -1,0 +1,2 @@
+# No PyPI packages are required.
+# USB-4750 support is supplied by the system-wide Advantech DAQNavi Linux driver.
