@@ -261,29 +261,31 @@ def generate_take_2(
 def generate_take_3(
     section: configparser.SectionProxy, spec: VideoSpec, output_path: Path
 ) -> int:
-    """Take 3: Green or yellow circle (uniform random) flashes at uniform random in-bounds positions."""
+    """Take 3: Green (6) and yellow (4) circles in shuffled order at random in-bounds positions."""
     radius = max(1, section.getint("radius", fallback=60))
     max_r = min(spec.width, spec.height) // 2
     radius = min(radius, max_r)
     green_bgr = _parse_bgr(section.get("green_bgr", fallback="0, 255, 0"), (0, 255, 0))
     yellow_bgr = _parse_bgr(section.get("yellow_bgr", fallback="0, 255, 255"), (0, 255, 255))
-    colors = (green_bgr, yellow_bgr)
 
     interval_sec = max(0.0, section.getfloat("interval_sec", fallback=2.0))
     display_sec = max(0.0, section.getfloat("display_sec", fallback=0.5))
-    repeat_count = max(1, section.getint("repeat_count", fallback=10))
+    green_count = max(0, section.getint("green_count", fallback=6))
+    yellow_count = max(0, section.getint("yellow_count", fallback=4))
 
     seed_raw = section.get("random_seed", fallback="").strip()
     rng = random.Random(int(seed_raw)) if seed_raw else random.Random()
 
+    color_sequence = [green_bgr] * green_count + [yellow_bgr] * yellow_count
+    rng.shuffle(color_sequence)
+
     writer = _open_writer(output_path, spec)
     total_frames = 0
     try:
-        for _ in range(repeat_count):
+        for color_bgr in color_sequence:
             total_frames += _write_blank(writer, spec, interval_sec)
             x = rng.uniform(radius, spec.width - radius)
             y = rng.uniform(radius, spec.height - radius)
-            color_bgr = rng.choice(colors)
             total_frames += _write_hold(
                 writer, spec, (x, y), radius, color_bgr, display_sec
             )
