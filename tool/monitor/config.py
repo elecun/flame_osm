@@ -47,6 +47,7 @@ class EyeTrackerConfig:
 class ScenarioConfig:
     directory: Path = Path("scenario")
     video_file: str = "sample-10s.mp4"
+    audio_device: str = "JBL Bar 2.1"
 
     @property
     def video_path(self) -> Path:
@@ -131,6 +132,7 @@ def load_config(config_path: Path) -> AppConfig:
     scenario = ScenarioConfig(
         directory=scenario_dir,
         video_file=parser.get("scenario", "video_file", fallback="sample-10s.mp4").strip(),
+        audio_device=parser.get("scenario", "audio_device", fallback="JBL Bar 2.1").strip(),
     )
 
     # [recording]

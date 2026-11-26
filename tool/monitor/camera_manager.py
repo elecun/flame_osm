@@ -68,8 +68,8 @@ class CameraWorker(threading.Thread):
             return False
 
         self.actual_height, self.actual_width = frame.shape[:2]
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        self.actual_fps = fps if fps and fps > 1.0 else float(self.config.fps)
+        # Use configured FPS (e.g. 30) because V4L2 CAP_PROP_FPS may report max 60fps
+        self.actual_fps = float(self.config.fps)
         self._cap = cap
         self.connected = True
         return True

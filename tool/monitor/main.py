@@ -3,9 +3,13 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Optional
+
+# Suppress libva VA-API probe messages on NVIDIA systems
+os.environ.setdefault("LIBVA_MESSAGING_LEVEL", "0")
 
 from PyQt6.QtGui import QGuiApplication, QScreen
 from PyQt6.QtWidgets import QApplication

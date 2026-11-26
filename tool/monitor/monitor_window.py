@@ -23,8 +23,22 @@ from switch_manager import SwitchManager
 
 
 def _sanitize_subject_name(raw: str) -> str:
-    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", raw.strip())
+    # Allow Unicode letters/digits (including Korean), replace path-unsafe chars and whitespace with '_'
+    cleaned = re.sub(r'[\\/:*?"<>|\s]+', "_", raw.strip())
     return cleaned.strip("._")
+
+
+def _resolve_subject_dir(output_dir: Path, subject_name: str) -> Path:
+    """Return output_dir/subject_name, or append _1, _2, ... if it already exists."""
+    candidate = output_dir / subject_name
+    if not candidate.exists():
+        return candidate
+    attempt = 1
+    while True:
+        candidate = output_dir / f"{subject_name}_{attempt}"
+        if not candidate.exists():
+            return candidate
+        attempt += 1
 
 
 class MonitorWindow(QMainWindow):
@@ -78,6 +92,7 @@ class MonitorWindow(QMainWindow):
         self.eyetracker_manager.status_changed.connect(self._on_eyetracker_status)
         self.subject_window.status_changed.connect(self._on_scenario_status)
         self.subject_window.playback_state_changed.connect(self._on_scenario_playback_state)
+        self.subject_window.video_ended.connect(self._on_record_stop)
 
         self.recordStartButton.clicked.connect(self._on_record_start)
         self.recordStopButton.clicked.connect(self._on_record_stop)
@@ -203,7 +218,8 @@ class MonitorWindow(QMainWindow):
             return
 
         timestamp_folder = datetime.now().strftime("%Y%m%d_%H%M%S")
-        session_dir = self.config.recording.output_dir / subject_name / timestamp_folder
+        subject_dir = _resolve_subject_dir(self.config.recording.output_dir, subject_name)
+        session_dir = subject_dir / timestamp_folder
         session_dir.mkdir(parents=True, exist_ok=True)
         self._current_session_dir = session_dir
 
